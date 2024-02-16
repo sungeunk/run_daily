@@ -4,6 +4,9 @@
 call user_definitions_%COMPUTERNAME%.bat
 
 :: set environments
+if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
+    virtualenv venv
+)
 call %DAILY_ROOT%\venv\Scripts\activate.bat
 call %OV_SETUP_SCRIPT%
 
