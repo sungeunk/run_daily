@@ -1,0 +1,7 @@
+py-cpuinfo
+psutil
+pyopencl
+tabulate
+ninja
+tqdm
+python-dateutil
