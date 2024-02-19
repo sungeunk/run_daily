@@ -10,7 +10,17 @@ if "%VisualStudioVersion%"=="" (
     exit /b 0
 )
 
+if not exist %OV_SETUP_SCRIPT% (
+    echo "could not find %OV_SETUP_SCRIPT%"
+    exit /b 0
+)
 call %OV_SETUP_SCRIPT%
+
+if not exist %OCL_ROOT% (
+    echo "could not find %OCL_ROOT%"
+    exit /b 0
+)
+SET Path=%OCL_ROOT%\lib;%OCL_ROOT%\bin;%Path%
 
 :: build benchmark_app
 pushd %INTEL_OPENVINO_DIR%\samples\cpp
@@ -20,6 +30,7 @@ if exist build\ (
 cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
 ninja -j %NPROC% -C build benchmark_app
 popd
+
 
 :: build chatglm
 pushd openvino.genai.chatglm3
