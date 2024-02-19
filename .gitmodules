@@ -1,6 +1,6 @@
 [submodule "openvino.genai.qwen"]
 	path = openvino.genai.qwen
-	url = git@github.com:sungeunk/openvino.genai.git
+	url = https://github.com/sungeunk/openvino.genai.git
 [submodule "openvino.genai.chatglm3"]
 	path = openvino.genai.chatglm3
-	url = git@github.com:sungeunk/openvino.genai.git
+	url = https://github.com/sungeunk/openvino.genai.git
