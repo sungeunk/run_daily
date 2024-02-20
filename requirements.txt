@@ -6,3 +6,6 @@ ninja
 tqdm
 python-dateutil
 requests
+pandas
+scipy
+pyarrow
