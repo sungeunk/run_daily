@@ -4,3 +4,6 @@
 [submodule "openvino.genai.chatglm3"]
 	path = openvino.genai.chatglm3
 	url = https://github.com/sungeunk/openvino.genai.git
+[submodule "gpu-tools"]
+	path = gpu-tools
+	url = https://github.com/intel-innersource/libraries.ai.videoanalyticssuite.gpu-tools.git
