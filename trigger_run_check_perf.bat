@@ -22,13 +22,12 @@ python -c "import importlib;test = importlib.import_module('gpu-tools.run_daily'
 SET /p DATE= < temp.txt
 del temp.txt
 SET MAIL_FILE=%DW_ROOT%\check_perf.%DATE%.mail
+SET RAW_FILE=%DW_ROOT%\check_perf.%DATE%.raw
 SET APP=%INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
 
 :: Begin tag for mail
 echo. ^<pre^> >> %MAIL_FILE%
-
-:: Info
-SET DEVICE=GPU.1
+echo. Device: %DEVICE%
 
 :: write header for check_perf v1
 (
@@ -39,10 +38,10 @@ echo. ===============
 ) >> %MAIL_FILE%
 
 :: run check_perf v1
-python gpu-tools/check_performance.py -d %DEVICE% -a %APP% ^
+python gpu-tools/check_performance.py -d %DEVICE% -a %APP% -c 30 ^
     -m Z:\models ^
     -r result.txt --report_load_time load_time.txt ^
-    --cldnn gpu-tools/ref/cldnn.report --ref gpu-tools/ref/onednn.report
+    --cldnn gpu-tools/ref/cldnn.report --ref gpu-tools/ref/onednn.report >> %RAW_FILE%
 
 :: write results for check_perf v1
 (
@@ -61,10 +60,10 @@ echo. ===============
 ) >> %MAIL_FILE%
 
 :: run check_perf v2
-python gpu-tools/check_performance.py -d %DEVICE% -a %APP% --version 2 --nstreams 4 --use_device_mem ^
+python gpu-tools/check_performance.py -d %DEVICE% -a %APP% --version 2 --nstreams 4 --use_device_mem -c 30 ^
     -m Z:\models ^
     -r result.txt --report_load_time load_time.txt ^
-    --cldnn gpu-tools/ref/cldnn.v2report --ref gpu-tools/ref/onednn.v2report
+    --cldnn gpu-tools/ref/cldnn.v2report --ref gpu-tools/ref/onednn.v2report >> %RAW_FILE%
 
 :: write results for check_perf v2
 (
