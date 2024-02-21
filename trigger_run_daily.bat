@@ -21,6 +21,6 @@ python %GPU_TOOLS%\run_daily.py ^
     -w %DAILY_ROOT% ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
-    --ref_pickle %DW_ROOT%\20240206_1435.pickle ^
+    --ref_pickle %REF_PICKLE% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe ^
     --gpu_tools_dir %GPU_TOOLS%

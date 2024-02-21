@@ -1,3 +1,4 @@
 openvino_nightly/
 model_cache/
 directory_browsing/
+benchmark_report.csv
