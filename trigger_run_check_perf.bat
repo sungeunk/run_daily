@@ -27,7 +27,7 @@ SET APP=%INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
 
 :: Begin tag for mail
 echo. ^<pre^> >> %MAIL_FILE%
-echo. Device: %DEVICE%
+echo. Device: %DEVICE% >> %MAIL_FILE%
 
 :: write header for check_perf v1
 (
