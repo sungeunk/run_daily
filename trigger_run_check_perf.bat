@@ -27,6 +27,9 @@ SET APP=%INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
 :: Begin tag for mail
 echo. ^<pre^> >> %MAIL_FILE%
 
+:: Info
+SET DEVICE=GPU.1
+
 :: write header for check_perf v1
 (
 echo. ^<pre^>
@@ -36,7 +39,7 @@ echo. ===============
 ) >> %MAIL_FILE%
 
 :: run check_perf v1
-python gpu-tools/check_performance.py -d GPU.1 -a %APP% ^
+python gpu-tools/check_performance.py -d %DEVICE% -a %APP% ^
     -m Z:\models ^
     -r result.txt --report_load_time load_time.txt ^
     --cldnn gpu-tools/ref/cldnn.report --ref gpu-tools/ref/onednn.report
@@ -51,14 +54,14 @@ type load_time.txt
 
 :: write header for check_perf v2
 (
-echo. ^<pre^>
+echo.
 echo. ===============
 echo. MODEL V2 result
 echo. ===============
 ) >> %MAIL_FILE%
 
 :: run check_perf v2
-python gpu-tools/check_performance.py -d GPU.1 -a %APP% --version 2 --nstreams 4 --use_device_mem ^
+python gpu-tools/check_performance.py -d %DEVICE% -a %APP% --version 2 --nstreams 4 --use_device_mem ^
     -m Z:\models ^
     -r result.txt --report_load_time load_time.txt ^
     --cldnn gpu-tools/ref/cldnn.v2report --ref gpu-tools/ref/onednn.v2report

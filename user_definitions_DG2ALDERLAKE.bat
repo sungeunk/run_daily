@@ -6,6 +6,9 @@ SET GPU_TOOLS=%DAILY_ROOT%\gpu-tools
 SET MODEL_ROOT=C:\dev\models
 SET OCL_ROOT=%DAILY_ROOT%\thirdparty\OpenCL-SDK-v2023.12.14-Win-x64
 SET VC_ENV_FILE="C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
+
+SET MAIL_TO=nex.nswe.odt.runtime.kor@intel.com
+SET MAIL_RELAY_SERVER=sungeunk@dg2gal.ikor.intel.com
 :: End (User definitions)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
