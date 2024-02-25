@@ -23,4 +23,4 @@ python %GPU_TOOLS%\run_daily.py ^
     -o %DW_ROOT% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe ^
     --gpu_tools_dir %GPU_TOOLS% ^
-    --log_to_stdio --no_mail
+    --no_mail
