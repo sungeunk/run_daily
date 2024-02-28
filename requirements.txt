@@ -10,3 +10,4 @@ pandas
 scipy
 pyarrow
 matplotlib
+netifaces

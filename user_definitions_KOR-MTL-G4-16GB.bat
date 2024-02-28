@@ -11,7 +11,7 @@ SET REF_PICKLE=%DW_ROOT%\none
 
 SET DEVICE=GPU
 SET MAIL_TO=nex.nswe.odt.runtime.kor@intel.com
-SET MAIL_RELAY_SERVER=sungeunk@dg2gal.ikor.intel.com
+SET MAIL_RELAY_SERVER=sungeunk@dg2raptorlake.ikor.intel.com
 :: End (User definitions)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
