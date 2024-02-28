@@ -31,17 +31,18 @@ echo. Device: %DEVICE% >> %MAIL_FILE%
 
 :: write header for check_perf v1
 (
-echo. ^<pre^>
+echo.
 echo. ===============
 echo. MODEL V1 result
 echo. ===============
 ) >> %MAIL_FILE%
 
 :: run check_perf v1
-python gpu-tools/check_performance.py -d %DEVICE% -a %APP% -c 30 ^
+python gpu-tools/check_performance.py -d %DEVICE% -a %APP% ^
     -m Z:\models ^
     -r result.txt --report_load_time load_time.txt ^
-    --cldnn gpu-tools/ref/cldnn.report --ref gpu-tools/ref/onednn.report >> %RAW_FILE%
+    --cldnn gpu-tools/ref/cldnn.report --ref gpu-tools/ref/onednn.report ^
+    --pickle version1.pickle
 
 :: write results for check_perf v1
 (
@@ -60,10 +61,11 @@ echo. ===============
 ) >> %MAIL_FILE%
 
 :: run check_perf v2
-python gpu-tools/check_performance.py -d %DEVICE% -a %APP% --version 2 --nstreams 4 --use_device_mem -c 30 ^
+python gpu-tools/check_performance.py -d %DEVICE% -a %APP% --version 2 --nstreams 4 --use_device_mem ^
     -m Z:\models ^
     -r result.txt --report_load_time load_time.txt ^
-    --cldnn gpu-tools/ref/cldnn.v2report --ref gpu-tools/ref/onednn.v2report >> %RAW_FILE%
+    --cldnn gpu-tools/ref/cldnn.v2report --ref gpu-tools/ref/onednn.v2report ^
+    --pickle version2.pickle
 
 :: write results for check_perf v2
 (
@@ -81,5 +83,5 @@ del result.txt
 del load_time.txt
 
 :: send mail
-set MAIL_FILE=%MAIL_FILE:\=/% 
-python -c "import importlib;test = importlib.import_module('gpu-tools.run_daily');test.send_mail('%MAIL_FILE%', 'check_perf');"
+@REM set MAIL_FILE=%MAIL_FILE:\=/%
+@REM python -c "import importlib;test = importlib.import_module('gpu-tools.run_daily');test.send_mail('%MAIL_FILE%', 'check_perf');"
