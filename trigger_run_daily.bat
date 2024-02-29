@@ -10,6 +10,23 @@ if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
 )
 call %DAILY_ROOT%\venv\Scripts\activate.bat
 
+set NO_MAIL=
+
+:: parsing arguments
+goto GETOPTS
+
+:Help
+echo -h this help messages
+echo -ov {ov setup file path}
+exit /b 0
+
+:GETOPTS
+if /I "%1" == "-h" call :Help
+if /I "%1" == "-ov" set OV_SETUP_SCRIPT=%2 & shift
+if /I "%1" == "-test" set NO_MAIL=--no_mail
+shift
+if not "%1" == "" goto GETOPTS
+
 if not exist %OV_SETUP_SCRIPT% (
     echo "could not find %OV_SETUP_SCRIPT%"
     exit /b 0
@@ -21,6 +38,7 @@ python %GPU_TOOLS%\run_daily.py ^
     -w %DAILY_ROOT% ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
+    -d %DEVICE% ^
     --ref_pickle %REF_PICKLE% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe ^
-    --gpu_tools_dir %GPU_TOOLS%
+    --gpu_tools_dir %GPU_TOOLS%  %NO_MAIL%
