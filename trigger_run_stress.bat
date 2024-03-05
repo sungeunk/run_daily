@@ -10,8 +10,6 @@ if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
 )
 call %DAILY_ROOT%\venv\Scripts\activate.bat
 
-set NO_MAIL=
-
 :: parsing arguments
 goto GETOPTS
 
@@ -40,6 +38,5 @@ python %GPU_TOOLS%\run_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
-    --ref_pickle %REF_PICKLE% ^
-    --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe ^
-    --gpu_tools_dir %GPU_TOOLS%  %NO_MAIL%
+    --gpu_tools_dir %GPU_TOOLS% ^
+    --mode stress  %NO_MAIL%
