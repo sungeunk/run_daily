@@ -1,7 +1,11 @@
 @echo off && setlocal
 
 :: include user definitions
-call user_definitions_%COMPUTERNAME%.bat
+if exist user_definitions_%COMPUTERNAME%.bat (
+    call user_definitions_%COMPUTERNAME%.bat
+) else (
+    call user_definitions_default.bat
+)
 
 SET BUILD_BENCHMARK=1
 SET BUILD_CHATGLM=1

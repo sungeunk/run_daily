@@ -1,7 +1,11 @@
 @echo off && setlocal
 
 :: include user definitions
-call user_definitions_%COMPUTERNAME%.bat
+if exist user_definitions_%COMPUTERNAME%.bat (
+    call user_definitions_%COMPUTERNAME%.bat
+) else (
+    call user_definitions_default.bat
+)
 
 :: set environments
 if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
