@@ -7,3 +7,9 @@
 [submodule "gpu-tools"]
 	path = gpu-tools
 	url = https://github.com/intel-innersource/libraries.ai.videoanalyticssuite.gpu-tools.git
+[submodule "openvino.genai"]
+	path = openvino.genai
+	url = https://github.com/openvinotoolkit/openvino.genai.git
+[submodule "prompts"]
+	path = prompts
+	url = https://github.com/intel-innersource/frameworks.ai.openvino.llm.prompts.git
