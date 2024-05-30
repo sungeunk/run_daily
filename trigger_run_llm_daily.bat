@@ -44,3 +44,4 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
+    --ref_report %REF_REPORT%
