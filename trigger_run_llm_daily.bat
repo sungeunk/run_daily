@@ -44,4 +44,6 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
+    --ov_dev_data ^
+    --ref_report %REF_REPORT% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe

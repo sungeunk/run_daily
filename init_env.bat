@@ -8,6 +8,14 @@ if exist user_definitions_%COMPUTERNAME%.bat (
 )
 
 :: update submodules
+cd openvino.genai
+git submodule update --init --recursive
+cd ..
+
+cd openvino.genai.token
+git submodule update --init --recursive
+cd ..
+
 cd openvino.genai.chatglm3
 git submodule update --init --recursive
 cd ..

@@ -13,3 +13,6 @@
 [submodule "prompts"]
 	path = prompts
 	url = https://github.com/intel-innersource/frameworks.ai.openvino.llm.prompts.git
+[submodule "openvino.genai.token"]
+	path = openvino.genai.token
+	url = https://github.com/openvinotoolkit/openvino.genai.git
