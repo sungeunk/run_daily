@@ -18,6 +18,9 @@ SET MAIL_RELAY_SERVER=sungeunk@dg2raptorlake.ikor.intel.com
 :: set environments
 if exist %DAILY_ROOT%\openvino_nightly\latest_ov_setup_file.txt (
     SET /p OV_SETUP_SCRIPT= < %DAILY_ROOT%\openvino_nightly\latest_ov_setup_file.txt
+) else (
+    echo "Could not find %DAILY_ROOT%\openvino_nightly\latest_ov_setup_file.txt"
+    exit /b 0
 )
 
 :: don't set proxy for TOE
