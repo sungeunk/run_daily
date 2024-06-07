@@ -7,7 +7,7 @@ SET MODEL_ROOT=C:\dev\models
 SET OCL_ROOT=%DAILY_ROOT%\thirdparty\OpenCL-SDK-v2023.12.14-Win-x64
 SET VC_ENV_FILE="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 
-SET REF_REPORT=%DW_ROOT%\daily.20240604_1641.report
+SET REF_REPORT=%DW_ROOT%\daily.20240607_1523.report
 
 SET DEVICE=GPU.1
 SET MAIL_TO=nex.nswe.odt.runtime.kor@intel.com
