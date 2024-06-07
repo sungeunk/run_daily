@@ -37,9 +37,12 @@ if not exist %OV_SETUP_SCRIPT% (
 )
 call %OV_SETUP_SCRIPT%
 
-if exist %REF_REPORT% (
-    set SET_REF_REPORT=--ref_report %REF_REPORT%
+if defined REF_REPORT (
+    if exist "%REF_REPORT%" (
+        set SET_REF_REPORT="--ref_report %REF_REPORT%"
+    )
 )
+
 
 :: run daily
 @echo on
