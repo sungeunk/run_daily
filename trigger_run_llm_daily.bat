@@ -37,6 +37,10 @@ if not exist %OV_SETUP_SCRIPT% (
 )
 call %OV_SETUP_SCRIPT%
 
+if exist %REF_REPORT% (
+    set SET_REF_REPORT=--ref_report %REF_REPORT%
+)
+
 :: run daily
 @echo on
 python %GPU_TOOLS%\run_llm_daily.py ^
@@ -44,5 +48,5 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
-    --ov_dev_data %SEND_MAIL% ^
+    --ov_dev_data %SEND_MAIL% %SET_REF_REPORT% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
