@@ -39,7 +39,7 @@ call %OV_SETUP_SCRIPT%
 
 if defined REF_REPORT (
     if exist "%REF_REPORT%" (
-        set SET_REF_REPORT="--ref_report %REF_REPORT%"
+        set SET_REF_REPORT=--ref_report %REF_REPORT%
     )
 )
 
