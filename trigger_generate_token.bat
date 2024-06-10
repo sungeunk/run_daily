@@ -39,7 +39,7 @@ if exist %DAILY_ROOT%\venv_token\Scripts\activate.bat (
 )
 
 pip install -r requirements.txt
-python gpu-tools\download_ov_nightly.py -df https://storage.openvinotoolkit.org/repositories/openvino/packages/2024.0/windows/w_openvino_toolkit_windows_2024.0.0.14509.34caeefd078_x86_64.zip
+python gpu-tools\download_ov_nightly.py --download_url https://storage.openvinotoolkit.org/repositories/openvino/packages/2024.0/windows/w_openvino_toolkit_windows_2024.0.0.14509.34caeefd078_x86_64.zip
 
 set OV_SETUP_SCRIPT=%DAILY_ROOT%\openvino_nightly\w_openvino_toolkit_windows_2024.0.0.14509.34caeefd078_x86_64\setupvars.bat
 if not exist %OV_SETUP_SCRIPT% (
