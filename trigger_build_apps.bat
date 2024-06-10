@@ -11,6 +11,7 @@ SET BUILD_BENCHMARK=1
 SET BUILD_CHATGLM=1
 SET BUILD_QWEN=1
 SET BUILD_SD=1
+SET BUILD_LCM=1
 
 :: parsing arguments
 goto GETOPTS
@@ -27,6 +28,7 @@ if /I "%1" == "-bb" set BUILD_BENCHMARK=%2 & shift
 if /I "%1" == "-bc" set BUILD_CHATGLM=%2 & shift
 if /I "%1" == "-bq" set BUILD_QWEN=%2 & shift
 if /I "%1" == "-sd" set BUILD_SD=%2 & shift
+if /I "%1" == "-lcm" set BUILD_LCM=%2 & shift
 shift
 if not "%1" == "" goto GETOPTS
 
@@ -96,5 +98,16 @@ if %BUILD_SD% == 1 (
     )
 
     cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build stable_diffusion
+    popd
+)
+
+:: build lcm_dreamshaper_v7
+if %BUILD_SD% == 1 (
+    pushd openvino.genai.token\image_generation\lcm_dreamshaper_v7\cpp
+    if exist build\ (
+        rmdir /S /Q build
+    )
+
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build lcm_dreamshaper
     popd
 )
