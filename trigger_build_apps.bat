@@ -102,7 +102,7 @@ if %BUILD_SD% == 1 (
 )
 
 :: build lcm_dreamshaper_v7
-if %BUILD_SD% == 1 (
+if %BUILD_LCM% == 1 (
     pushd openvino.genai.token\image_generation\lcm_dreamshaper_v7\cpp
     if exist build\ (
         rmdir /S /Q build
