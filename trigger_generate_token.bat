@@ -87,4 +87,4 @@ set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2
 convert_tokenizer %MODEL_PATH%\tokenizer\ --tokenizer-output-type i32 -o %MODEL_PATH%\tokenizer\
 
 set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\lcm-dreamshaper-v7\pytorch\dldt\FP16"
-convert_tokenizer %MODEL_PATH%\tokenizer\ --tokenizer-output-type i32 -o %MODEL_PATH%\tokenizer\
+convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
