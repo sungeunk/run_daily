@@ -15,6 +15,6 @@ if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
 call %DAILY_ROOT%\venv\Scripts\activate.bat
 
 :: call download
-python download_models.py --output %MODEL_ROOT%
+python %DAILY_ROOT%\download_models.py --output %MODEL_ROOT%
 
 python %GPU_TOOLS%\whisper\get_model.py --model_dir %MODEL_ROOT%\daily\FP16

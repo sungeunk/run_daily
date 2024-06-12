@@ -15,4 +15,4 @@ if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
 call %DAILY_ROOT%\venv\Scripts\activate.bat
 
 :: call download
-python %GPU_TOOLS%\download_ov_nightly.py --delete_zip
+python %GPU_TOOLS%\download_ov_nightly.py --clean_up

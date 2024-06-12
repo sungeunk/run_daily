@@ -18,6 +18,7 @@ DOWNLOAD_URL_LIST = [
     'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/llama-3-8b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
     'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/mistral-7b-v0.1/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
     'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/phi-2/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/phi-3-mini-4k-instruct/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
     'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/gemma-7b-it/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
 ]
 
