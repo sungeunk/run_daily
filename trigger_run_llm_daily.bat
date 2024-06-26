@@ -15,6 +15,7 @@ if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
 call %DAILY_ROOT%\venv\Scripts\activate.bat
 
 set SEND_MAIL=
+set TEST=
 
 :: parsing arguments
 goto GETOPTS
@@ -28,6 +29,7 @@ exit /b 0
 if /I "%1" == "-h" call :Help
 if /I "%1" == "-ov" set OV_SETUP_SCRIPT=%2 & shift
 if /I "%1" == "-mail" set SEND_MAIL=--mail
+if /I "%1" == "-test" set TEST=--test
 shift
 if not "%1" == "" goto GETOPTS
 
@@ -51,5 +53,5 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
-    --ov_dev_data %SEND_MAIL% %SET_REF_REPORT% ^
+    --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
