@@ -1,22 +1,23 @@
 @echo off && setlocal
 
 :: include user definitions
-call user_definitions_%COMPUTERNAME%.bat
-
-:: set environments
-:: virtualenv
-if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
-    echo "Please call init_env.bat to set dev environments."
-    exit /b 0
+if exist user_definitions_%COMPUTERNAME%.bat (
+    call user_definitions_%COMPUTERNAME%.bat
+) else (
+    call user_definitions_default.bat
 )
-call %DAILY_ROOT%\venv\Scripts\activate.bat
 
-:: openvino
-if not exist %OV_SETUP_SCRIPT% (
-    echo "could not find %OV_SETUP_SCRIPT%"
-    exit /b 0
+call conda activate daily
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call the miniconda. Please install or check it.
+    goto end_script
 )
+
 call %OV_SETUP_SCRIPT%
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call: %OV_SETUP_SCRIPT%
+    goto end_script
+)
 
 python -c "import importlib;test = importlib.import_module('gpu-tools.run_daily');test.get_now();" > temp.txt
 SET /p DATE= < temp.txt
@@ -85,3 +86,7 @@ del load_time.txt
 :: send mail
 @REM set MAIL_FILE=%MAIL_FILE:\=/%
 @REM python -c "import importlib;test = importlib.import_module('gpu-tools.run_daily');test.send_mail('%MAIL_FILE%', 'check_perf');"
+
+
+:end_script
+call conda deactivate

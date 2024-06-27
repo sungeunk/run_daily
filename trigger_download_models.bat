@@ -7,12 +7,15 @@ if exist user_definitions_%COMPUTERNAME%.bat (
     call user_definitions_default.bat
 )
 
-:: set environments
-if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
-    echo "Please call init_env.bat to set dev environments."
-    exit /b 0
+call conda activate daily
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call: conda activate daily_token
+    echo Please try: conda create -n daily_token python=3.11 -y
+    goto end_script
 )
-call %DAILY_ROOT%\venv\Scripts\activate.bat
 
-:: call download
+:: download models
 python %DAILY_ROOT%\download_models.py --output %MODEL_ROOT%
+
+:end_script
+call conda deactivate

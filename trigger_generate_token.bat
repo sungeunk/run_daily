@@ -15,15 +15,10 @@ if "%VisualStudioVersion%"=="" (
     exit /b 0
 )
 
-:: for python packages
-if not exist %DAILY_ROOT%\venv_token\Scripts\activate.bat (
-    pip install -q virtualenv
-    virtualenv venv_token
-)
-
-if exist %DAILY_ROOT%\venv_token\Scripts\activate.bat (
-    call %DAILY_ROOT%\venv_token\Scripts\activate.bat
-) else (
+call conda activate daily_token
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call: conda activate daily_token
+    echo Please try: conda create -n daily_token python=3.11 -y
     goto end_script
 )
 
@@ -58,3 +53,6 @@ convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
 
 set MODEL_PATH="%MODEL_ROOT%\%MODEL_DATE%\lcm-dreamshaper-v7\pytorch\dldt\FP16"
 convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
+
+:end_script
+call conda deactivate

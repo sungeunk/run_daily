@@ -7,12 +7,14 @@ if exist user_definitions_%COMPUTERNAME%.bat (
     call user_definitions_default.bat
 )
 
-:: set environments
-if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
-    echo "Please call init_env.bat to set dev environments."
-    exit /b 0
+call conda activate daily
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call the miniconda. Please install or check it.
+    goto end_script
 )
-call %DAILY_ROOT%\venv\Scripts\activate.bat
 
 :: call download
 python %GPU_TOOLS%\download_ov_nightly.py --clean_up
+
+:end_script
+call conda deactivate

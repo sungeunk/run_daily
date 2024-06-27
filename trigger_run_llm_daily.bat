@@ -7,12 +7,12 @@ if exist user_definitions_%COMPUTERNAME%.bat (
     call user_definitions_default.bat
 )
 
-:: set environments
-if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
-    echo "Please call init_env.bat to set dev environments."
-    exit /b 0
+
+call conda activate daily
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call the miniconda. Please install or check it.
+    goto end_script
 )
-call %DAILY_ROOT%\venv\Scripts\activate.bat
 
 set SEND_MAIL=
 set TEST=
@@ -33,11 +33,13 @@ if /I "%1" == "-test" set TEST=--test
 shift
 if not "%1" == "" goto GETOPTS
 
-if not exist %OV_SETUP_SCRIPT% (
-    echo "could not find %OV_SETUP_SCRIPT%"
-    exit /b 0
-)
+
 call %OV_SETUP_SCRIPT%
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call: %OV_SETUP_SCRIPT%
+    goto end_script
+)
+
 
 if defined REF_REPORT (
     if exist "%REF_REPORT%" (
@@ -55,3 +57,6 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -d %DEVICE% ^
     --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
+
+:end_script
+call conda deactivate
