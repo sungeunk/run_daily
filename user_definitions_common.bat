@@ -20,7 +20,7 @@ if exist %DAILY_ROOT%\openvino_nightly\latest_ov_setup_file.txt (
 )
 
 :: don't set proxy for TOE
-SET http_proxy=
-SET https_proxy=proxy-dmz.intel.com:912
+SET http_proxy=http://proxy-dmz.intel.com:912
+SET https_proxy=http://proxy-dmz.intel.com:912
 
 SET /a "NPROC=%NUMBER_OF_PROCESSORS%*3/4"

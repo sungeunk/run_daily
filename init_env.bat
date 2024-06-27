@@ -21,5 +21,6 @@ if exist %DAILY_ROOT%\venv\Scripts\activate.bat (
 
 pip install -r requirements.txt
 pip install -r openvino.genai\llm_bench\python\requirements.txt
+pip install -r %GPU_TOOLS%\whisper\optimum_notebook\non_stateful\requirements.txt
 
 :end_script
