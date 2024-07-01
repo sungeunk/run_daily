@@ -13,14 +13,41 @@ if not exist %DAILY_ROOT%\venv\Scripts\activate.bat (
     virtualenv venv
 )
 
-if exist %DAILY_ROOT%\venv\Scripts\activate.bat (
-    call %DAILY_ROOT%\venv\Scripts\activate.bat
-) else (
+call %DAILY_ROOT%\venv\Scripts\activate.bat
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call: %DAILY_ROOT%\venv\Scripts\activate.bat
     goto end_script
 )
 
-pip install -r requirements.txt
+pip install -r %DAILY_ROOT%\requirements.txt
 pip install -r openvino.genai\llm_bench\python\requirements.txt
 pip install -r %GPU_TOOLS%\whisper\optimum_notebook\non_stateful\requirements.txt
+
+deactivate
+
+
+:: python environment for generate token
+call %DAILY_ROOT%\venv_token\Scripts\activate.bat
+IF %ERRORLEVEL% NEQ 0 (
+    echo could not call: %DAILY_ROOT%\venv_token\Scripts\activate.bat
+    goto end_script
+)
+
+pip install openvino-dev
+pip install -r %DAILY_ROOT%\requirements.txt
+
+cd %DAILY_ROOT%\openvino.genai.token
+pip install -r image_generation\stable_diffusion_1_5\cpp\requirements.txt
+pip install thirdparty\openvino_tokenizers\[transformers]
+cd ..
+
+deactivate
+
+
+:: vcpkg for opencl
+cd vcpkg
+bootstrap-vcpkg.bat
+vcpkg.exe install opencl
+cd ..
 
 :end_script

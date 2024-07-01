@@ -4,8 +4,8 @@ SET DAILY_ROOT=%~dp0
 SET DW_ROOT=%DAILY_ROOT%\directory_browsing\run_daily
 SET GPU_TOOLS=%DAILY_ROOT%\gpu-tools
 SET MODEL_ROOT=C:\dev\models
-SET OCL_ROOT=%DAILY_ROOT%\thirdparty\OpenCL-SDK-v2023.12.14-Win-x64
 SET VC_ENV_FILE="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+SET VCPKG_ROOT=%DAILY_ROOT%\vcpkg
 
 SET PYTHONIOENCODING=utf-8
 SET DEVICE=GPU

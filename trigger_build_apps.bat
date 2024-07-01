@@ -58,7 +58,7 @@ if %BUILD_BENCHMARK% == 1 (
     if exist build\ (
         rmdir /S /Q build
     )
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
     ninja -j %NPROC% -C build benchmark_app
     popd
 )

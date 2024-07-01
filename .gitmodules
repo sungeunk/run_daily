@@ -16,3 +16,6 @@
 [submodule "openvino.genai.token"]
 	path = openvino.genai.token
 	url = https://github.com/openvinotoolkit/openvino.genai.git
+[submodule "vcpkg"]
+	path = vcpkg
+	url = https://github.com/microsoft/vcpkg
