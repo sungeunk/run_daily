@@ -28,6 +28,11 @@ DOWNLOAD_URL_MAXIMUM_LIST = [
     f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/llama-2-7b-chat/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
     f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/chatglm3-6b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
     f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/mistral-7b-v0.1/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/qwen-7b-chat/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/llama-3-8b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/phi-2/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/phi-3-mini-4k-instruct/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/gemma-7b-it/pytorch/dldt/compressed_weights/OV_FP16-4BIT_MAXIMUM/',
 ]
 
 # c:\dev\models\WW26_llm_2024.3.0-15805-6138d624dc1\stable-diffusion-v1-5\pytorch\dldt\FP16\
