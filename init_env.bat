@@ -42,7 +42,7 @@ pip install -r %DAILY_ROOT%\requirements.txt
 
 cd %DAILY_ROOT%\openvino.genai.token
 pip install -r image_generation\stable_diffusion_1_5\cpp\requirements.txt
-pip install openvino openvino-dev
+pip install openvino-nightly openvino-dev
 pip install thirdparty\openvino_tokenizers\[transformers]
 cd ..
 
