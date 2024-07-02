@@ -28,33 +28,33 @@ if exist %DAILY_ROOT%\venv_token\Scripts\activate.bat (
 )
 
 
-set LINK_DST="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v1-5\pytorch\dldt\compressed_weights\INT8"
-set LINK_SRC="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v1-5\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
+set LINK_DST="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v1-5\pytorch\dldt\compressed_weights\INT8"
+set LINK_SRC="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v1-5\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
 if exist %LINK_SRC% (
     if not exist %LINK_DST% (
         mklink /d %LINK_DST% %LINK_SRC%
     )
 )
 
-set LINK_DST="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v2-1\pytorch\dldt\compressed_weights\INT8"
-set LINK_SRC="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v2-1\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
+set LINK_DST="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v2-1\pytorch\dldt\compressed_weights\INT8"
+set LINK_SRC="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v2-1\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
 if exist %LINK_SRC% (
     if not exist %LINK_DST% (
         mklink /d %LINK_DST% %LINK_SRC%
     )
 )
 
-set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v1-5\pytorch\dldt\FP16"
+set MODEL_PATH="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v1-5\pytorch\dldt\FP16"
 convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
 
-set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v1-5\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
+set MODEL_PATH="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v1-5\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
 convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
 
-set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v2-1\pytorch\dldt\FP16"
+set MODEL_PATH="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v2-1\pytorch\dldt\FP16"
 convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
 
-set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v2-1\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
+set MODEL_PATH="%MODEL_ROOT%\%MODEL_DATE%\stable-diffusion-v2-1\pytorch\dldt\compressed_weights\OV_FP16-INT8_ASYM"
 convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\
 
-set MODEL_PATH="%MODEL_ROOT%\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\lcm-dreamshaper-v7\pytorch\dldt\FP16"
+set MODEL_PATH="%MODEL_ROOT%\%MODEL_DATE%\lcm-dreamshaper-v7\pytorch\dldt\FP16"
 convert_tokenizer %MODEL_PATH%\tokenizer\ -o %MODEL_PATH%\tokenizer\

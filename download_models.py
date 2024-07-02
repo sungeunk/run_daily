@@ -1,28 +1,30 @@
 import argparse
+import os
 import platform
 import subprocess
 
 from pathlib import Path
 
 IS_WINDOWS = platform.system() == 'Windows'
+MODEL_DATE = os.environ["MODEL_DATE"]
 
 DOWNLOAD_URL_LIST = [
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/stable-diffusion-v1-5/pytorch/dldt/FP16/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/stable-diffusion-v1-5/pytorch/dldt/compressed_weights/OV_FP16-INT8_ASYM/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/stable-diffusion-v2-1/pytorch/dldt/FP16/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/stable-diffusion-v2-1/pytorch/dldt/compressed_weights/OV_FP16-INT8_ASYM/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/lcm-dreamshaper-v7/pytorch/dldt/FP16/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/llama-2-7b-chat/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/chatglm3-6b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/qwen-7b-chat/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/llama-3-8b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/mistral-7b-v0.1/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/phi-2/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/phi-3-mini-4k-instruct/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
-    'http://ov-share-05.sclab.intel.com/cv_bench_cache/WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2/gemma-7b-it/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/stable-diffusion-v1-5/pytorch/dldt/FP16/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/stable-diffusion-v1-5/pytorch/dldt/compressed_weights/OV_FP16-INT8_ASYM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/stable-diffusion-v2-1/pytorch/dldt/FP16/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/stable-diffusion-v2-1/pytorch/dldt/compressed_weights/OV_FP16-INT8_ASYM/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/lcm-dreamshaper-v7/pytorch/dldt/FP16/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/llama-2-7b-chat/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/chatglm3-6b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/qwen-7b-chat/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/llama-3-8b/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/mistral-7b-v0.1/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/phi-2/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/phi-3-mini-4k-instruct/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
+    f'http://ov-share-05.sclab.intel.com/cv_bench_cache/{MODEL_DATE}/gemma-7b-it/pytorch/dldt/compressed_weights/OV_FP16-4BIT_DEFAULT/',
 ]
 
-# c:\dev\models\WW22_llm_2024.2.0-15519-5c0f38f83f6-releases_2024_2\stable-diffusion-v1-5\pytorch\dldt\FP16\
+# c:\dev\models\WW26_llm_2024.3.0-15805-6138d624dc1\stable-diffusion-v1-5\pytorch\dldt\FP16\
 
 def main():
     parser = argparse.ArgumentParser(description="download models" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)

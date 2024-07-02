@@ -46,11 +46,6 @@ if not exist %OV_SETUP_SCRIPT% (
 echo call %OV_SETUP_SCRIPT%
 call %OV_SETUP_SCRIPT%
 
-if not exist %OCL_ROOT% (
-    echo "could not find %OCL_ROOT%"
-    exit /b 0
-)
-SET Path=%OCL_ROOT%\lib;%OCL_ROOT%\bin;%Path%
 
 :: build benchmark_app
 if %BUILD_BENCHMARK% == 1 (
@@ -58,7 +53,7 @@ if %BUILD_BENCHMARK% == 1 (
     if exist build\ (
         rmdir /S /Q build
     )
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_PRIVATE_ROOT%\scripts\buildsystems\vcpkg.cmake
     ninja -j %NPROC% -C build benchmark_app
     popd
 )
