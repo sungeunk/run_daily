@@ -19,3 +19,6 @@
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg
+[submodule "openvino.genai.lcm"]
+	path = openvino.genai.lcm
+	url = https://github.com/openvinotoolkit/openvino.genai.git
