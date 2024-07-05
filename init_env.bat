@@ -19,8 +19,6 @@ IF %ERRORLEVEL% NEQ 0 (
 pip install -r requirements.txt
 pip install -r openvino.genai\llm_bench\python\requirements.txt
 pip install -r %GPU_TOOLS%\whisper\optimum_notebook\non_stateful\requirements.txt
-pip install -r %GPU_TOOLS%\sdxl\requirements.txt
-pip install --upgrade --upgrade-strategy eager "optimum[openvino]"
 
 call conda deactivate
 
