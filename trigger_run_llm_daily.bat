@@ -16,6 +16,7 @@ IF %ERRORLEVEL% NEQ 0 (
 
 set SEND_MAIL=
 set TEST=
+set REPORT_DESCRIPTION=
 
 :: parsing arguments
 goto GETOPTS
@@ -28,6 +29,7 @@ exit /b 0
 :GETOPTS
 if /I "%1" == "-h" call :Help
 if /I "%1" == "-ov" set OV_SETUP_SCRIPT=%2 & shift
+if /I "%1" == "-desc" set REPORT_DESCRIPTION=--description %2 & shift
 if /I "%1" == "-mail" set SEND_MAIL=--mail
 if /I "%1" == "-test" set TEST=--test
 shift
@@ -55,7 +57,7 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
-    --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% ^
+    --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% %REPORT_DESCRIPTION% ^
     --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
 
 :end_script
