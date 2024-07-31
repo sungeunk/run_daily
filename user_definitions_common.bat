@@ -2,6 +2,7 @@
 :: set path (User definitions)
 SET DAILY_ROOT=%~dp0
 SET DW_ROOT=%DAILY_ROOT%\directory_browsing\run_daily
+SET BIN_DIR=%DAILY_ROOT%\bin
 SET GPU_TOOLS=%DAILY_ROOT%\gpu-tools
 SET MODEL_ROOT=C:\dev\models
 SET VC_ENV_FILE="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
@@ -11,7 +12,6 @@ SET PYTHONIOENCODING=utf-8
 SET DEVICE=GPU
 SET MAIL_TO=nex.nswe.odt.runtime.kor@intel.com
 SET MAIL_RELAY_SERVER=sungeunk@dg2raptorlake.ikor.intel.com
-SET MODEL_DATE=WW26_llm_2024.3.0-15805-6138d624dc1
 :: End (User definitions)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
