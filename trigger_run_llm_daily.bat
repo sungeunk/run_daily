@@ -58,7 +58,7 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
     --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% %REPORT_DESCRIPTION% ^
-    --benchmark_app %INTEL_OPENVINO_DIR%\samples\cpp\build\intel64\benchmark_app.exe
+    --benchmark_app %BIN_DIR%\benchmark_app\benchmark_app.exe
 
 :end_script
 call conda deactivate
