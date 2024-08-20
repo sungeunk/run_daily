@@ -32,6 +32,7 @@ if /I "%1" == "-ov" set OV_SETUP_SCRIPT=%2 & shift
 if /I "%1" == "-desc" set REPORT_DESCRIPTION=--description %2 & shift
 if /I "%1" == "-mail" set SEND_MAIL=--mail
 if /I "%1" == "-test" set TEST=--test
+if /I "%1" == "-d" set DEVICE=%2
 shift
 if not "%1" == "" goto GETOPTS
 
