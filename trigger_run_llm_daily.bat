@@ -58,6 +58,7 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
+    --repeat 1 ^
     --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% %REPORT_DESCRIPTION% ^
     --benchmark_app %BIN_DIR%\benchmark_app\benchmark_app.exe
 
