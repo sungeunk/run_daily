@@ -58,7 +58,7 @@ if %BUILD_BENCHMARK% == 1 (
     ninja -j %NPROC% -C build benchmark_app
 
     mkdir %BIN_DIR%\benchmark_app
-    copy build\intel64\benchmark_app.exe %BIN_DIR%\benchmark_app\
+    copy /Y build\intel64\benchmark_app.exe %BIN_DIR%\benchmark_app\
     popd
 )
 
@@ -73,11 +73,11 @@ if %BUILD_CHATGLM% == 1 (
     ninja -j %NPROC% -C build chatglm
 
     mkdir %BIN_DIR%\chatglm
-    copy build\llm\chatglm_cpp\chatglm.exe %BIN_DIR%\chatglm\
-    copy build\thirdparty\openvino_contrib\modules\custom_operations\user_ie_extensions\user_ov_extensions.dll %BIN_DIR%\chatglm\
-    copy build\_deps\fast_tokenizer-src\third_party\lib\icudt70.dll %BIN_DIR%\chatglm\
-    copy build\_deps\fast_tokenizer-src\third_party\lib\icuuc70.dll %BIN_DIR%\chatglm\
-    copy build\_deps\fast_tokenizer-src\lib\core_tokenizers.dll %BIN_DIR%\chatglm\
+    copy /Y build\llm\chatglm_cpp\chatglm.exe %BIN_DIR%\chatglm\
+    copy /Y build\thirdparty\openvino_contrib\modules\custom_operations\user_ie_extensions\user_ov_extensions.dll %BIN_DIR%\chatglm\
+    copy /Y build\_deps\fast_tokenizer-src\third_party\lib\icudt70.dll %BIN_DIR%\chatglm\
+    copy /Y build\_deps\fast_tokenizer-src\third_party\lib\icuuc70.dll %BIN_DIR%\chatglm\
+    copy /Y build\_deps\fast_tokenizer-src\lib\core_tokenizers.dll %BIN_DIR%\chatglm\
     popd
 )
 
@@ -91,7 +91,7 @@ if %BUILD_QWEN% == 1 (
     ninja -j %NPROC% -C build main
 
     mkdir %BIN_DIR%\qwen
-    copy build\bin\main.exe %BIN_DIR%\qwen\
+    copy /Y build\bin\main.exe %BIN_DIR%\qwen\
     popd
 )
 
@@ -102,10 +102,11 @@ if %BUILD_SD% == 1 (
         rmdir /S /Q build
     )
 
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build stable_diffusion
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+    ninja -j %NPROC% -C build stable_diffusion
 
     mkdir %BIN_DIR%\sd
-    copy build\stable_diffusion.exe %BIN_DIR%\sd\
+    copy /Y build\stable_diffusion.exe %BIN_DIR%\sd\
     popd
 )
 
@@ -116,10 +117,11 @@ if %BUILD_LCM% == 1 (
         rmdir /S /Q build
     )
 
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build lcm_dreamshaper
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+    ninja -j %NPROC% -C build lcm_dreamshaper
 
     mkdir %BIN_DIR%\lcm
-    copy build\lcm_dreamshaper.exe %BIN_DIR%\lcm\
+    copy /Y build\lcm_dreamshaper.exe %BIN_DIR%\lcm\
     popd
 )
 
@@ -130,11 +132,11 @@ if %BUILD_CHAT_SAMPLE% == 1 (
         rmdir /S /Q build
     )
 
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build chat_sample
-    ninja -j %NPROC% -C build all
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+    ninja -j %NPROC% -C build chat_sample
 
     mkdir %BIN_DIR%\chat_sample
-    copy build\samples\cpp\chat_sample\chat_sample.exe %BIN_DIR%\chat_sample\
-    copy build\openvino_genai\*dll %BIN_DIR%\chat_sample\
+    copy /Y build\samples\cpp\chat_sample\chat_sample.exe %BIN_DIR%\chat_sample\
+    copy /Y build\openvino_genai\*dll %BIN_DIR%\chat_sample\
     popd
 )
