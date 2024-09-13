@@ -132,11 +132,12 @@ if %BUILD_CHAT_SAMPLE% == 1 (
         rmdir /S /Q build
     )
 
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
-    ninja -j %NPROC% -C build chat_sample
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build chat_sample openvino_tokenizers
 
     mkdir %BIN_DIR%\chat_sample
-    copy /Y build\samples\cpp\chat_sample\chat_sample.exe %BIN_DIR%\chat_sample\
-    copy /Y build\openvino_genai\*dll %BIN_DIR%\chat_sample\
+    copy build\samples\cpp\chat_sample\chat_sample.exe %BIN_DIR%\chat_sample\
+    copy build\openvino_genai\*dll %BIN_DIR%\chat_sample\
+    copy /Y build\_deps\fast_tokenizer-src\lib\*dll %BIN_DIR%\chat_sample\
+    copy /Y build\_deps\fast_tokenizer-src\third_party\lib\*dll %BIN_DIR%\chat_sample\
     popd
 )
