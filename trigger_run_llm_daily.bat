@@ -30,7 +30,7 @@ exit /b 0
 if /I "%1" == "-h" call :Help
 if /I "%1" == "-ov" set OV_SETUP_SCRIPT=%2 & shift
 if /I "%1" == "-desc" set REPORT_DESCRIPTION=--description %2 & shift
-if /I "%1" == "-mail" set SEND_MAIL=--mail
+if /I "%1" == "-mail" set SEND_MAIL=--mail %MAIL_TO% & shift
 if /I "%1" == "-test" set TEST=--test
 if /I "%1" == "-d" set DEVICE=%2
 shift
@@ -58,7 +58,6 @@ python %GPU_TOOLS%\run_llm_daily.py ^
     -m %MODEL_ROOT% ^
     -o %DW_ROOT% ^
     -d %DEVICE% ^
-    --repeat 1 ^
     --ov_dev_data %SEND_MAIL% %TEST% %SET_REF_REPORT% %REPORT_DESCRIPTION% ^
     --benchmark_app %BIN_DIR%\benchmark_app\benchmark_app.exe
 
