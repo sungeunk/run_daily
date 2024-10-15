@@ -31,6 +31,7 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
 pip install -r requirements.txt
 pip install -r openvino.genai\llm_bench\python\requirements.txt
 pip install -r gpu-tools\whisper\optimum_notebook\non_stateful\requirements.txt
+pip install siphash24
 pip uninstall openvino
 
 call conda deactivate
