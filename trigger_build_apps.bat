@@ -34,7 +34,14 @@ shift
 if not "%1" == "" goto GETOPTS
 
 :: set environments
-call %VC_ENV_FILE%
+if exist %VC_ENV_FILE_BUILDTOOLS% (
+    call %VC_ENV_FILE_BUILDTOOLS%
+) else (
+    if exist %VC_ENV_FILE_COMMUNITY% (
+        call %VC_ENV_FILE_COMMUNITY%
+    )
+)
+
 if "%VisualStudioVersion%"=="" (
     echo "could not find VC tools"
     exit /b 0
