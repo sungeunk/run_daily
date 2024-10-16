@@ -39,6 +39,13 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
 ) else (
     if exist %VC_ENV_FILE_COMMUNITY% (
         call %VC_ENV_FILE_COMMUNITY%
+    ) else (
+        if exist %VC_ENV_FILE_PRO% (
+            call %VC_ENV_FILE_PRO%
+        ) else (
+            echo No Visual Studio compiler.
+            exit /b 0
+        )
     )
 )
 

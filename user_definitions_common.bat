@@ -7,6 +7,7 @@ SET GPU_TOOLS=%DAILY_ROOT%\gpu-tools
 SET MODEL_ROOT=C:\dev\models
 SET VC_ENV_FILE_BUILDTOOLS="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 SET VC_ENV_FILE_COMMUNITY="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+SET VC_ENV_FILE_PRO="C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
 SET VCPKG_PRIVATE_ROOT=%DAILY_ROOT%\vcpkg
 
 SET PYTHONIOENCODING=utf-8
