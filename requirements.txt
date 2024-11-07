@@ -30,7 +30,7 @@ tiktoken
 timm
 torch
 tqdm
-transformers
+transformers==4.46.2
 transformers_stream_generator
 
 --extra-index-url https://download.pytorch.org/whl/cpu

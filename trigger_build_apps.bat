@@ -12,7 +12,6 @@ SET BUILD_CHATGLM=1
 SET BUILD_QWEN=1
 SET BUILD_SD=1
 SET BUILD_LCM=1
-SET BUILD_CHAT_SAMPLE=1
 
 :: parsing arguments
 goto GETOPTS
@@ -136,22 +135,5 @@ if %BUILD_LCM% == 1 (
 
     mkdir %BIN_DIR%\lcm
     copy /Y build\lcm_dreamshaper.exe %BIN_DIR%\lcm\
-    popd
-)
-
-:: build chat_sample
-if %BUILD_CHAT_SAMPLE% == 1 (
-    pushd openvino.genai
-    if exist build\ (
-        rmdir /S /Q build
-    )
-
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release && ninja -j %NPROC% -C build chat_sample openvino_tokenizers
-
-    mkdir %BIN_DIR%\chat_sample
-    copy build\samples\cpp\chat_sample\chat_sample.exe %BIN_DIR%\chat_sample\
-    copy build\openvino_genai\*dll %BIN_DIR%\chat_sample\
-    copy /Y build\_deps\fast_tokenizer-src\lib\*dll %BIN_DIR%\chat_sample\
-    copy /Y build\_deps\fast_tokenizer-src\third_party\lib\*dll %BIN_DIR%\chat_sample\
     popd
 )
