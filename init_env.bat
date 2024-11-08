@@ -9,12 +9,8 @@ if exist user_definitions_%COMPUTERNAME%.bat (
 
 
 :: python environment for daily
+call conda create -n daily python=3.11 -y
 call conda activate daily
-IF %ERRORLEVEL% NEQ 0 (
-    echo could not call: conda activate daily
-    echo Please try: conda create -n daily python=3.11 -y
-    goto end_script
-)
 
 :: set environments
 if exist %VC_ENV_FILE_BUILDTOOLS% (
