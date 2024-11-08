@@ -32,7 +32,7 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
     )
 )
 
-pip install -r requirements.txt
+pip install -U --pre -r requirements.txt
 pip install siphash24
 pip uninstall -y openvino
 
