@@ -1,4 +1,5 @@
 auto-gptq
+beautifulsoup4
 bitsandbytes
 blobfile
 diffusers
@@ -24,6 +25,7 @@ python-dateutil
 python-ffmpeg
 requests
 scipy
+siphash24
 soundfile
 tabulate
 tiktoken
@@ -35,12 +37,6 @@ transformers_stream_generator
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 numpy
-
-#wheel packages for openvino
---extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly
-openvino
-openvino-tokenizers
-openvino_genai
 
 #optimum is in dependency list of optimum-intel
 git+https://github.com/huggingface/optimum-intel.git@main#egg=optimum-intel

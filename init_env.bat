@@ -29,8 +29,7 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
 )
 
 pip install -U --pre -r requirements.txt
-pip install siphash24
-pip uninstall -y openvino
+pip install -U --pre --no-deps --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly openvino-tokenizers
 
 call conda deactivate
 
