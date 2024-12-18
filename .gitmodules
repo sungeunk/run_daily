@@ -1,24 +1,9 @@
 [submodule "openvino.genai.qwen"]
 	path = openvino.genai.qwen
 	url = https://github.com/sammysun0711/openvino.genai.git
-[submodule "openvino.genai.chatglm3"]
-	path = openvino.genai.chatglm3
-	url = https://github.com/wenyi5608/openvino.genai.git
-[submodule "gpu-tools"]
-	path = gpu-tools
-	url = https://github.com/intel-innersource/libraries.ai.videoanalyticssuite.gpu-tools.git
 [submodule "openvino.genai"]
 	path = openvino.genai
 	url = https://github.com/sungeunk/openvino.genai.git
-[submodule "prompts"]
-	path = prompts
-	url = https://github.com/sungeunk/frameworks.ai.openvino.llm.prompts.git
-[submodule "openvino.genai.token"]
-	path = openvino.genai.token
-	url = https://github.com/openvinotoolkit/openvino.genai.git
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg
-[submodule "openvino.genai.lcm"]
-	path = openvino.genai.lcm
-	url = https://github.com/openvinotoolkit/openvino.genai.git
