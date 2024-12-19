@@ -17,8 +17,8 @@ endif ()
 # third-party libraries
 set(ABSL_ENABLE_INSTALL ON)
 set(ABSL_PROPAGATE_CXX_STD ON)
-add_subdirectory(third_party/abseil-cpp)
 
+add_subdirectory(third_party/abseil-cpp)
 add_subdirectory(third_party/re2)
 
 file(GLOB CPP_SOURCES

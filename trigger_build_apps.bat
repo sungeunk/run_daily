@@ -7,10 +7,10 @@ if exist user_definitions_%COMPUTERNAME%.bat (
     call user_definitions_default.bat
 )
 
-SET BUILD_BENCHMARK=1
+SET BUILD_BENCHMARK=0
 SET BUILD_QWEN=1
-SET BUILD_SD=1
-SET BUILD_LCM=1
+SET BUILD_SD=0
+SET BUILD_LCM=0
 
 :: parsing arguments
 goto GETOPTS
