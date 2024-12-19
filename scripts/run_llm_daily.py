@@ -1515,6 +1515,7 @@ def print_compared_text(fos, key:str, this_item:dict, ref_item:dict):
     if ref_item == None:
         fos.write(f'[TEXT][{key}][{in_token}]\n')
         fos.write(f'\t[this] {this_text}\n')
+        return
 
     ref_text = ref_item.get(ResultKey.generated_text, '')
     iou = calculate_score(this_text, ref_text)
