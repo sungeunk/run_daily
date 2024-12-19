@@ -1511,7 +1511,12 @@ def print_compared_text(fos, key:str, this_item:dict, ref_item:dict):
         log.warning(f'{key} has no generated text.')
         return
 
-    ref_text = ref_item.get(ResultKey.generated_text, '') if ref_item != None else ''
+    in_token = this_item.get(ResultKey.in_token, 0)
+    if ref_item == None:
+        fos.write(f'[TEXT][{key}][{in_token}]\n')
+        fos.write(f'\t[this] {this_text}\n')
+
+    ref_text = ref_item.get(ResultKey.generated_text, '')
     iou = calculate_score(this_text, ref_text)
 
     this_text = this_text if len(this_text) < LIMIT_TEXT_LENGTH else this_text[0:LIMIT_TEXT_LENGTH]
@@ -1519,7 +1524,6 @@ def print_compared_text(fos, key:str, this_item:dict, ref_item:dict):
     ref_text = ref_text if len(ref_text) < LIMIT_TEXT_LENGTH else ref_text[0:LIMIT_TEXT_LENGTH]
     ref_text = ref_text.replace("<s>", "_s_")
 
-    in_token = this_item.get(ResultKey.in_token, 0)
     sts_str = ('OK' if iou > 0.5 else 'DIFF') if iou > 0 else 'ERR'
 
     fos.write(f'[TEXT][{key}][{in_token}][{sts_str}][iou:{iou:0.2f}]\n')
@@ -1547,7 +1551,7 @@ def generate_report(args, result_map:dict, PROCESS_TIME) -> tuple[Path, str]:
     #
     # System info
     #
-    APP = os.path.join('gpu-tools', 'device_info.py')
+    APP = os.path.join('scripts', 'device_info.py')
     system_info, returncode = call_cmd(args, f'python {APP}', shell=True, verbose=False)
 
     #
