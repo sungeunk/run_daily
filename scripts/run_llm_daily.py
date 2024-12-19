@@ -830,7 +830,7 @@ class AppClassWhisper():
 
     @staticmethod
     def get_executor_path(args):
-        return os.path.join(*[args.working_dir, 'gpu-tools', 'whisper', 'optimum_notebook', 'non_stateful', 'run_model.py'])
+        return os.path.join(*[args.working_dir, 'scripts', 'whisper', 'optimum_notebook', 'non_stateful', 'run_model.py'])
 
     @staticmethod
     def get_cmd(args, key):
@@ -931,7 +931,7 @@ class AppClassGenaiCppStableDiffusion():
         if key == 'Stable-Diffusion LCM FP16':
             return os.path.join(*[args.bin_dir, 'lcm', 'lcm_dreamshaper.exe'])
         elif key == 'Stable Diffusion XL FP16':
-            return os.path.join(*[args.working_dir, 'gpu-tools', 'sdxl', 'run_sdxl.py'])
+            return os.path.join(*[args.working_dir, 'scripts', 'sdxl', 'run_sdxl.py'])
         else:
             return os.path.join(*[args.bin_dir, 'sd', 'stable_diffusion.exe'])
 
@@ -1014,7 +1014,7 @@ class AppClassPythonStableDiffusion():
 
     @staticmethod
     def get_executor_path(args):
-        return os.path.join(*[args.working_dir, 'gpu-tools', 'stable-diffusion', 'run_sd3_ov_daily.py'])
+        return os.path.join(*[args.working_dir, 'scrips', 'stable-diffusion', 'run_sd3_ov_daily.py'])
 
     @staticmethod
     def get_cmd(args, key):

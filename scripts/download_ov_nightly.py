@@ -360,9 +360,9 @@ def main():
                 target_url_list = [ args.download_url ] if args.download_url else get_list_of_openvino_master()
                 for target_url in target_url_list:
                     log.info(f'download pkgs from {target_url}')
-                    if not check_required_packages(target_url):
-                        continue
                     try:
+                        if not check_required_packages(target_url):
+                            continue
                         log.info(f'- download OpenVINO packages')
                         openvino_zip_file_list, new_out_path = download_openvino_packages(target_url, args.output)
                         log.info(f'- download GenAI packages')
