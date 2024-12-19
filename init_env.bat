@@ -28,8 +28,8 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
     )
 )
 
-pip install -U --pre -r requirements.txt
-pip install -U --pre --no-deps --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly openvino-tokenizers
+pip install -r requirements.txt
+pip install -U --pre --no-deps -r requirements_no_deps.txt
 
 call conda deactivate
 

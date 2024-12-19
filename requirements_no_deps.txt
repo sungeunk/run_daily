@@ -1,0 +1,3 @@
+--extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly
+
+openvino-tokenizers
