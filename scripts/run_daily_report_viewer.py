@@ -21,7 +21,7 @@ def get_daily_report_data(filelist, num, filter='daily'):
         with open(file, 'r', encoding='utf8') as fis:
             line_num = 5
             for line in fis.readlines():
-                match_obj = re.search(f'\| Purpose[ ]+\| ([a-zA-Z0-9-_ .&\\/]+)\|', line)
+                match_obj = re.search(f'\|[ ]+Purpose[ ]+\| ([a-zA-Z0-9-_ .&\\/]+)\|', line)
                 if match_obj:
                     purpose = match_obj.groups()[0].strip()
                     if filter in purpose:
