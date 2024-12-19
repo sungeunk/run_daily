@@ -1014,7 +1014,7 @@ class AppClassPythonStableDiffusion():
 
     @staticmethod
     def get_executor_path(args):
-        return os.path.join(*[args.working_dir, 'scrips', 'stable-diffusion', 'run_sd3_ov_daily.py'])
+        return os.path.join(*[args.working_dir, 'scripts', 'stable-diffusion', 'run_sd3_ov_daily.py'])
 
     @staticmethod
     def get_cmd(args, key):
