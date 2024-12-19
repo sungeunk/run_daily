@@ -1,3 +1,4 @@
 openvino_nightly/
 directory_browsing/
 bin/
+__pycache__/

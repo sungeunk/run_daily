@@ -8,7 +8,6 @@ if exist user_definitions_%COMPUTERNAME%.bat (
 )
 
 SET BUILD_BENCHMARK=1
-SET BUILD_CHATGLM=0
 SET BUILD_QWEN=1
 SET BUILD_SD=1
 SET BUILD_LCM=1
@@ -25,7 +24,6 @@ exit /b 0
 if /I "%1" == "-h" call :Help
 if /I "%1" == "-ov" set OV_SETUP_SCRIPT=%2 & shift
 if /I "%1" == "-bb" set BUILD_BENCHMARK=%2 & shift
-if /I "%1" == "-bc" set BUILD_CHATGLM=%2 & shift
 if /I "%1" == "-bq" set BUILD_QWEN=%2 & shift
 if /I "%1" == "-sd" set BUILD_SD=%2 & shift
 if /I "%1" == "-lcm" set BUILD_LCM=%2 & shift
@@ -75,28 +73,9 @@ if %BUILD_BENCHMARK% == 1 (
     popd
 )
 
-
-:: build chatglm
-if %BUILD_CHATGLM% == 1 (
-    pushd openvino.genai.chatglm3
-    if exist build\ (
-        rmdir /S /Q build
-    )
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
-    ninja -j %NPROC% -C build chatglm
-
-    mkdir %BIN_DIR%\chatglm
-    copy /Y build\llm\chatglm_cpp\chatglm.exe %BIN_DIR%\chatglm\
-    copy /Y build\thirdparty\openvino_contrib\modules\custom_operations\user_ie_extensions\user_ov_extensions.dll %BIN_DIR%\chatglm\
-    copy /Y build\_deps\fast_tokenizer-src\third_party\lib\icudt70.dll %BIN_DIR%\chatglm\
-    copy /Y build\_deps\fast_tokenizer-src\third_party\lib\icuuc70.dll %BIN_DIR%\chatglm\
-    copy /Y build\_deps\fast_tokenizer-src\lib\core_tokenizers.dll %BIN_DIR%\chatglm\
-    popd
-)
-
 :: build qwen
 if %BUILD_QWEN% == 1 (
-    pushd openvino.genai.qwen\llm\qwen_cpp
+    pushd cpp_sample\qwen_cpp
     if exist build\ (
         rmdir /S /Q build
     )
@@ -110,7 +89,7 @@ if %BUILD_QWEN% == 1 (
 
 :: build stable_diffusion_1_5
 if %BUILD_SD% == 1 (
-    pushd openvino.genai.token\image_generation\stable_diffusion_1_5\cpp
+    pushd cpp_sample\image_generation\stable_diffusion_1_5\cpp
     if exist build\ (
         rmdir /S /Q build
     )
@@ -125,7 +104,7 @@ if %BUILD_SD% == 1 (
 
 :: build lcm_dreamshaper_v7
 if %BUILD_LCM% == 1 (
-    pushd openvino.genai.lcm\image_generation\lcm_dreamshaper_v7\cpp
+    pushd cpp_sample\image_generation\lcm_dreamshaper_v7\cpp
     if exist build\ (
         rmdir /S /Q build
     )

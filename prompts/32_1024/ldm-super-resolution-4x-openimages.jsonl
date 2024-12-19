@@ -1,0 +1,2 @@
+{"type": "image", "iamge_size": "32x32", "media": "./image/image_32x32.png", "prompt": "./image/image_32x32.png"}
+{"type": "image", "iamge_size": "1024x1024", "media": "./image/image_1024x1024.png", "prompt": "./image/image_1024x1024.png"}
