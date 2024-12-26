@@ -35,6 +35,12 @@ if not IS_WINDOWS:
 else:
     UBUNTU_VER = ''
 
+def check_filepath(path):
+    try:
+        return os.path.exists(path)
+    except:
+        log.error(f'could not find: {path}')
+    return False
 
 def get_text_from_web(url):
     try:
@@ -136,6 +142,9 @@ def check_required_packages(url):
     check_list = required_openvino_packages_list() + required_genai_packages_list()
 
     text = get_text_from_web(url)
+    if not text:
+        return False
+
     for item in check_list:
         match_obj = re.search(item, text)
         if match_obj == None:
@@ -151,22 +160,17 @@ def download_openvino_packages(url, out_path):
     REQUIRED_LIST = required_openvino_packages_list()
 
     COMMIT_ID = None
-    for name in ['commit', 'pre_commit', 'custom_build', 'nightly']:
-        match_obj = re.search(f'{name}\/([\w\d]+)', url)
-        if match_obj:
-            COMMIT_ID = match_obj.groups()[0]
-            break
-    match_obj = re.search(f'releases\/([\d]+)\/([\d]+)\/[\w]+\/([\w]+)', url)
+    match_obj = re.search(r'(custom_build|commit|pre_commit)\/([\w]+)', url)
     if match_obj:
-        COMMIT_ID = match_obj.groups()[2]
+        COMMIT_ID = match_obj.groups()[1]
     if not COMMIT_ID:
-        raise Exception(f'could not parse the commit id from url ({url})')
+        raise Exception(f'could not parse COMMIT_ID url: {url}')
 
     text = get_text_from_web(url)
     log.debug(f'root: {text}')
 
     match_obj = re.search(f'inference-engine_Release-(\d+.\d+.\d+.\d+)-win64-{REQUIRED_LIST[0]}', text)
-    if match_obj == None:
+    if not match_obj:
         raise Exception(f'could not parse the OV_VERSION from text: {text}')
 
     OV_VERSION = match_obj.groups()[0]
@@ -180,7 +184,7 @@ def download_genai_packages(url, ov_dst_path):
 
     text = get_text_from_web(url)
     match_obj = re.search(f'OpenVINOGenAI-([\d.]+)-win64-{REQUIRED_LIST[0]}', text)
-    if match_obj == None:
+    if not match_obj:
         raise Exception(f'could not parse the GENAI_VERSION from text: {text}')
 
     GENAI_VERSION = match_obj.groups()[0]
@@ -204,7 +208,7 @@ def decompress(compressed_filepath, store_path, delete_zip=False):
     return os.path.join(*[store_path, os.path.basename(root)]), ext
 
 def install_openvino(ov_filepath, output):
-    if ov_filepath == None or not os.path.exists(ov_filepath):
+    if check_filepath(ov_filepath):
         return
 
     uncompressed_dir, ext = decompress(ov_filepath, output)
@@ -327,67 +331,95 @@ def get_list_of_openvino_master():
         ret_list.append(MASTER_COMMIT_URL_TEMPLATE.replace('COMMIT_ID', commit_id[0]))
     return ret_list
 
+def get_url(commit_id):
+    url_list = {
+        'master/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/',
+        'master/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/pre_commit/',
+        'releases/2024/4/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/commit/',
+        'releases/2024/4/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/pre_commit/',
+        'releases/2024/5/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/commit/',
+        'releases/2024/5/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/pre_commit/',
+        'releases/2024/6/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/commit/',
+        'releases/2024/6/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/pre_commit/'
+    }
+
+    for key, url in url_list.items():
+        log.info(f'query commit list from {url}')
+        root = get_text_from_web(url)
+        soup = BeautifulSoup(root, 'html.parser')
+        # <a href="fa6b0ec1715d9f09ef17a9ac1a052e4c20781288/">fa6b0ec1715d9f09ef17a9ac1a052e4c20781288/</a>          15-Nov-2024 08:30
+        # <a href="faa6c75a225a775d6b037300d6947c0fb2cba7f2/">faa6c75a225a775d6b037300d6947c0fb2cba7f2/</a>          14-Nov-2024 05:57
+        for line in soup.find_all('a'):
+            match_obj = re.search(r'([\w]+)\/', line["href"])
+            if match_obj:
+                if match_obj.groups()[0].startswith(commit_id):
+                    ret_url = f'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/{key}/{match_obj.groups()[0]}/'
+                    if IS_WINDOWS:
+                        ret_url += 'private_windows_vs2019_release/cpack'
+                    else:
+                        ret_url += f'private_linux_ubuntu_{UBUNTU_VER}_release/cpack'
+                    log.info(f'found url: {ret_url}')
+                    return ret_url
+
 
 ################################################
 # Main
 ################################################
 def main():
-    log.basicConfig(level=log.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+    log.basicConfig(level=log.INFO, format='[%(filename)s:%(lineno)4s:%(funcName)20s] %(levelname)s: %(message)s')
 
     parser = argparse.ArgumentParser(description="download ov nightly" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output', help='openvino package stored directory', type=Path, default=os.path.join(*[PWD, 'openvino_nightly']))
     parser.add_argument('-d', '--download_url', help='download file', type=str, default=None)
-    parser.add_argument('-to', '--target_os', help='download ov package for OS. It\'s working on nightly links.', type=TargetOS.from_string, default=TargetOS.AUTO, choices=list(TargetOS))
-    parser.add_argument('-i', '--install_zip', help='install ov package from compressed file.', type=Path, default=None)
-    parser.add_argument('--clean_up', help='remove old pkg files/directories', type=bool, default=True)
+    parser.add_argument('-c', '--commit_id', help='commit id for openvino', type=str, default=None)
+    parser.add_argument('--keep_old', help='keep old pkg files/directories', action='store_true')
+    parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
 
-    ov_zip_filepath = None
-
     # WA: replace 'https' to 'http'
-    if args.download_url != None:
+    if args.download_url:
         args.download_url = args.download_url.replace('https', 'http')
 
     try:
-        if args.install_zip:
-            ov_zip_filepath = args.install_zip
+        if args.download_url and (args.download_url.endswith('.zip') or args.download_url.endswith('.tgz')):
+            ov_zip_filepath = download_file(args.download_url, args.output)
+            install_openvino(ov_zip_filepath, args.output)
         else:
-            if args.download_url and (args.download_url.endswith('.zip') or args.download_url.endswith('.tgz')):
-                ov_zip_filepath = download_file(args.download_url, args.output)
+            if args.download_url:
+                target_url_list = [ args.download_url ]
+            elif args.commit_id:
+                target_url_list = [ get_url(args.commit_id) ]
             else:
-                target_url_list = [ args.download_url ] if args.download_url else get_list_of_openvino_master()
-                for target_url in target_url_list:
-                    log.info(f'download pkgs from {target_url}')
-                    try:
-                        if not check_required_packages(target_url):
-                            continue
-                        log.info(f'- download OpenVINO packages')
-                        openvino_zip_file_list, new_out_path = download_openvino_packages(target_url, args.output)
-                        log.info(f'- download GenAI packages')
-                        genai_zip_list_list = download_genai_packages(target_url, new_out_path)
+                target_url_list = get_list_of_openvino_master()
 
-                        log.info(f'- decompress zip files')
-                        for zip_file in tqdm(openvino_zip_file_list + genai_zip_list_list):
-                            decompress(zip_file, os.path.dirname(zip_file), True)
-                        update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
-                        break
-                    except Exception as e:
-                        log.warning(f'{e}')
+            for target_url in target_url_list:
+                log.info(f'download pkgs from {target_url}')
+                try:
+                    if not check_required_packages(target_url):
+                        continue
+                    log.info(f'- download OpenVINO packages')
+                    openvino_zip_file_list, new_out_path = download_openvino_packages(target_url, args.output)
+                    log.info(f'- download GenAI packages')
+                    genai_zip_list_list = download_genai_packages(target_url, new_out_path)
+
+                    log.info(f'- decompress zip files')
+                    for zip_file in tqdm(openvino_zip_file_list + genai_zip_list_list):
+                        decompress(zip_file, os.path.dirname(zip_file), True)
+                    update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
+                    break
+                except Exception as e:
+                    log.warning(f'{e}')
     except Exception as e:
         log.error(f'{e}')
         return
 
-    # decompress zip file and update latest_ov_setup_file.txt
-    if ov_zip_filepath and os.path.exists(ov_zip_filepath):
-        install_openvino(ov_zip_filepath, args.output)
-
     # clean up old pkgs(zip/directory)
-    if args.clean_up:
+    if not args.keep_old:
         os.chdir(args.output)
 
-        for file in glob('*.zip'):
+        for file in glob('*.zip') + glob('*.tgz'):
             log.info(f'removed: {file}')
             os.remove(file)
 
