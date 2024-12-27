@@ -27,7 +27,7 @@ FetchContent_MakeAvailable(cxxopts)
 
 add_subdirectory(../../common/imwrite _deps/imwrite)
 add_subdirectory(../../common/diffusers _deps/diffusers)
-add_subdirectory(../../../../openvino.genai/thirdparty/openvino_tokenizers _deps/tokenizers)
+add_subdirectory(../../../openvino_tokenizers _deps/tokenizers)
 
 # create executable
 

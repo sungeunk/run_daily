@@ -4,3 +4,6 @@
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg
+[submodule "cpp_sample/openvino_tokenizers"]
+	path = cpp_sample/openvino_tokenizers
+	url = https://github.com/openvinotoolkit/openvino_tokenizers.git

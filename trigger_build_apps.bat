@@ -99,6 +99,7 @@ if %BUILD_SD% == 1 (
 
     mkdir %BIN_DIR%\sd
     copy /Y build\stable_diffusion.exe %BIN_DIR%\sd\
+    copy /Y build\_deps\tokenizers\src\*dll %BIN_DIR%\sd\
     popd
 )
 
@@ -114,5 +115,6 @@ if %BUILD_LCM% == 1 (
 
     mkdir %BIN_DIR%\lcm
     copy /Y build\lcm_dreamshaper.exe %BIN_DIR%\lcm\
+    copy /Y build\_deps\tokenizers\src\*dll %BIN_DIR%\lcm\
     popd
 )
