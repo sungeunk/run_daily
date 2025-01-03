@@ -11,14 +11,17 @@ import re
 import requests
 import shutil
 import subprocess
+import tqdm.asyncio as tqdm_asyncio
 
 from bs4 import BeautifulSoup
 from dateutil.parser import parse
+from git import Repo, RemoteProgress
 from glob import glob
 from operator import itemgetter
+from packaging.version import Version
 from pathlib import Path
-# from tqdm import tqdm
-from tqdm.asyncio import tqdm
+from tqdm import tqdm
+
 
 ################################################
 # Global variable
@@ -27,13 +30,14 @@ IS_WINDOWS = platform.system() == 'Windows'
 PWD = os.path.abspath('.')
 STORAGE_OV_FILETREE_JSON = 'https://storage.openvinotoolkit.org/filetree.json'
 
-if not IS_WINDOWS:
+
+if IS_WINDOWS:
+    UBUNTU_VER = ''
+else:
     output = subprocess.check_output(['lsb_release', '-r'], text=True)
     match_obj = re.search(r'Release:[ \t]+(\d+.\d+)', output)
     if match_obj != None:
         UBUNTU_VER = match_obj.groups()[0].strip()
-else:
-    UBUNTU_VER = ''
 
 def check_filepath(path):
     try:
@@ -42,6 +46,9 @@ def check_filepath(path):
         log.error(f'could not find: {path}')
     return False
 
+def convert_path(path):
+    return path.replace('/', '\\') if IS_WINDOWS else path.replace('\\', '/')
+
 def get_text_from_web(url):
     try:
         res = requests.get(url, verify=False)
@@ -49,10 +56,10 @@ def get_text_from_web(url):
             return res.text
         else:
             log.error(f'Could not get file: res({res.status_code}/{res.reason}) {url}')
-            return None
+            return ''
     except Exception as e:
         log.error(f'get_text_from_web::Exception: {e}')
-        return None
+        return ''
 
 def download_file(url, out_path):
     res = requests.get(url, stream=True)
@@ -63,7 +70,7 @@ def download_file(url, out_path):
         filename = os.path.basename(url)
         filepath = os.path.join(out_path, filename)
 
-        with open(filepath, 'wb') as file, tqdm(
+        with open(filepath, 'wb') as file, tqdm_asyncio.tqdm(
             desc=filename,
             total=total,
             unit='iB',
@@ -96,7 +103,7 @@ async def async_download_files(url_list, out_path):
                     raise Exception(f'Could not get file: res({res.status_code}/{res.reason}) {url}')
 
     async with aiohttp.ClientSession() as session:
-        return await tqdm.gather(
+        return await tqdm_asyncio.tqdm.gather(
             *[async_download_file(session, url, out_path) for url in url_list]
         )
 
@@ -142,7 +149,7 @@ def check_required_packages(url):
     check_list = required_openvino_packages_list() + required_genai_packages_list()
 
     text = get_text_from_web(url)
-    if not text:
+    if len(text) == 0:
         return False
 
     for item in check_list:
@@ -151,6 +158,43 @@ def check_required_packages(url):
             return False
 
     return True
+
+def get_ov_version(url):
+    text = get_text_from_web(url)
+    match_obj = re.search(f'inference-engine_Release-(\d+.\d+.\d+.\d+)-', text)
+    return match_obj.groups()[0] if match_obj else ''
+
+def save_ov_version(args, new_version):
+    OLD_VERSION_FILEPATH = convert_path(f'{args.output}/OV_NIGHTLY_VERSION')
+    with open(convert_path(OLD_VERSION_FILEPATH), 'w', encoding='utf8') as fos:
+        fos.write(new_version)
+
+def load_ov_version(args) -> str:
+    try:
+        OLD_VERSION_FILEPATH = convert_path(f'{args.output}/OV_NIGHTLY_VERSION')
+        with open(convert_path(OLD_VERSION_FILEPATH), 'r', encoding='utf8') as fis:
+            return fis.readline()
+    except Exception as e:
+        return ''
+
+def check_ov_version(args, url):
+    try:
+        old_version = Version(load_ov_version(args))
+    except Exception as e:
+        log.error(f'check_ov_version::try to load old version: {e}')
+        return True
+
+    try:
+        version_str = get_ov_version(url)
+        if len(version_str) == 0:
+            return False
+        new_version = Version(version_str)
+    except Exception as e:
+        log.error(f'check_ov_version::try to get new version from: {url} / log: {e}')
+        log.error(f'\t{e}')
+        return False
+
+    return new_version > old_version
 
 
 # Target urls
@@ -254,65 +298,42 @@ class TargetOS(enum.Enum):
         except KeyError:
             raise ValueError()
 
-#
-# ret_items: [(build_number, commit-id, json_obj), ...]
-#
-def get_list_of_openvino_nightly():
-    MASTER_COMMIT_URL_ROOT = 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit'
-    log.info(f'query openvino list: {MASTER_COMMIT_URL_ROOT}')
+def get_private_cpack_url():
+    if IS_WINDOWS:
+        return 'private_windows_vs2019_release/cpack'
+    else:
+        return f'private_linux_ubuntu_{UBUNTU_VER}_release/cpack'
 
-    root = get_text_from_web(MASTER_COMMIT_URL_ROOT)
-    soup = BeautifulSoup(root, 'html.parser')
-    # <a href="fa6b0ec1715d9f09ef17a9ac1a052e4c20781288/">fa6b0ec1715d9f09ef17a9ac1a052e4c20781288/</a>          15-Nov-2024 08:30
-    # <a href="faa6c75a225a775d6b037300d6947c0fb2cba7f2/">faa6c75a225a775d6b037300d6947c0fb2cba7f2/</a>          14-Nov-2024 05:57
-    MASTER_COMMIT_URL_TEMPLATE=f'{MASTER_COMMIT_URL_ROOT}/COMMIT_ID/private_windows_vs2019_release/cpack'
-    master_commit_list = []
-    for line in soup.find_all('a'):
-        match_obj = re.search(r'([\w]+)\/', line["href"])
-        if match_obj:
-            master_commit_list.append(match_obj.groups()[0])
+def get_latest_commit_list_from_openvino():
+    OPENVINO_URL = 'https://github.com/openvinotoolkit/openvino.git'
+    OPENVINO_DIR = 'openvino.git'
+    try:
+        repo = Repo(OPENVINO_DIR)
+    except Exception as e:
+        log.error(f'{e.__class__}: {e}')
+        log.warning(f'try to clone --base --single-branch {OPENVINO_URL}')
+        repo = Repo.clone_from(url=OPENVINO_URL, to_path=OPENVINO_DIR, progress=CloneProgress(), multi_options=["--bare", "--single-branch"])
 
-    log.info(f'query openvino nightly list: {STORAGE_OV_FILETREE_JSON}')
-    root = get_text_from_web(STORAGE_OV_FILETREE_JSON)
-    root_json = json.loads(root)
-    nightly_dir = get_directory(root_json, "repositories / openvino / packages / nightly")
-    NIGHTLY_URL = 'https://storage.openvinotoolkit.org/repositories/openvino/packages/nightly'
-    nightly_url_list = []
+    repo.remote().fetch("refs/heads/master:refs/heads/origin")
 
-    if UBUNTU_VER == '':
-        target_os = TargetOS.WINDOWS
-    elif UBUNTU_VER == '22.04':
-        target_os = TargetOS.UBUNTU_22
-    elif UBUNTU_VER == '22.04':
-        target_os = TargetOS.UBUNTU_22
-
-    for commit_dir in nightly_dir["children"]:
-        if commit_dir["type"] == "directory":
-            for file_json_obj in commit_dir["children"]:
-                if file_json_obj["name"].endswith(('.tgz', '.zip')) and target_os.value in file_json_obj["name"]:
-                    nightly_url_list.append((f'{NIGHTLY_URL}/{commit_dir["name"]}/{file_json_obj["name"]}', commit_dir["name"]))
-
-    ret_list = []
-    for url, version in sorted(nightly_url_list, reverse=True)[:10]:
-        commit_id = ''
-        match_obj = re.search(r'[\d.]+-[\d]+-([\w]+)', version)
-        if match_obj:
-            commit_id = match_obj.groups()[0]
-            for master_commit in master_commit_list:
-                if commit_id in master_commit:
-                    ret_list.append(MASTER_COMMIT_URL_TEMPLATE.replace('COMMIT_ID', master_commit))
-
-    return ret_list
+    commit_list = []
+    for commit in repo.iter_commits():
+        # commit_list.append((str(commit), commit.count()))
+        commit_list.append(str(commit))
+        if len(commit_list) >= 10:
+            break
+    repo.close()
+    return commit_list
 
 #
 # ret_items: [(build_number, commit-id, json_obj), ...]
 #
-def get_list_of_openvino_master():
+def get_list_of_openvino_master(args):
     MASTER_COMMIT_URL_ROOT = 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit'
     log.info(f'query openvino list: {MASTER_COMMIT_URL_ROOT}')
 
     root = get_text_from_web(MASTER_COMMIT_URL_ROOT)
-    MASTER_COMMIT_URL_TEMPLATE=f'{MASTER_COMMIT_URL_ROOT}/COMMIT_ID/private_windows_vs2019_release/cpack'
+    MASTER_COMMIT_URL_TEMPLATE=f'{MASTER_COMMIT_URL_ROOT}/COMMIT_ID/{get_private_cpack_url()}'
     master_commit_list = []
     for line in root.splitlines():
         # <a href="fa6b0ec1715d9f09ef17a9ac1a052e4c20781288/">fa6b0ec1715d9f09ef17a9ac1a052e4c20781288/</a>          15-Nov-2024 08:30
@@ -326,9 +347,27 @@ def get_list_of_openvino_master():
             master_commit_list.append([values[0], dateobj])
     master_commit_list.sort(key = lambda x : x[1], reverse=True)
 
+    old_ov_version = load_ov_version(args)
+    latest_commit_list = get_latest_commit_list_from_openvino()
     ret_list = []
-    for commit_id in master_commit_list[:10]:
-        ret_list.append(MASTER_COMMIT_URL_TEMPLATE.replace('COMMIT_ID', commit_id[0]))
+    for commit in master_commit_list[:40]:
+        if not commit[0] in latest_commit_list:
+            log.warning(f'{commit[0]} is not in latest_commit_list')
+            continue
+        url = MASTER_COMMIT_URL_TEMPLATE.replace('COMMIT_ID', commit[0])
+        if check_ov_version(args, url):
+            ret_list.append(url)
+        else:
+            log.warning(f'Exist ov version: {old_ov_version}. old version({get_ov_version(url)}) in {url}')
+        if len(ret_list) >= 10:
+            break
+
+    log.info('url list from openvino/master')
+    if len(ret_list) == 0:
+        log.error(f'no url list')
+    else:
+        for url in ret_list:
+            log.info(f'\t{url}')
     return ret_list
 
 def get_url(commit_id):
@@ -353,14 +392,19 @@ def get_url(commit_id):
             match_obj = re.search(r'([\w]+)\/', line["href"])
             if match_obj:
                 if match_obj.groups()[0].startswith(commit_id):
-                    ret_url = f'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/{key}/{match_obj.groups()[0]}/'
-                    if IS_WINDOWS:
-                        ret_url += 'private_windows_vs2019_release/cpack'
-                    else:
-                        ret_url += f'private_linux_ubuntu_{UBUNTU_VER}_release/cpack'
+                    ret_url = f'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/{key}/{match_obj.groups()[0]}/{get_private_cpack_url()}'
                     log.info(f'found url: {ret_url}')
                     return ret_url
 
+class CloneProgress(RemoteProgress):
+    def __init__(self):
+        super().__init__()
+        self.pbar = tqdm()
+
+    def update(self, op_code, cur_count, max_count=None, message=''):
+        self.pbar.total = max_count
+        self.pbar.n = cur_count
+        self.pbar.refresh()
 
 ################################################
 # Main
@@ -368,9 +412,14 @@ def get_url(commit_id):
 def main():
     log.basicConfig(level=log.INFO, format='[%(filename)s:%(lineno)4s:%(funcName)20s] %(levelname)s: %(message)s')
 
+    help_download_url = """
+    1. Download packages from cpack(OV/genai/tokenizer): http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/ef5678a1098da18c3324a26392236d7974ed1cf5/private_windows_vs2019_release/cpack/\n
+    2. Download zip file(OV only) : https://storage.openvinotoolkit.org/repositories/openvino/packages/nightly/2025.0.0-17738-638f3cb9292/w_openvino_toolkit_windows_2025.0.0.dev20250102_x86_64.zip
+    """
+
     parser = argparse.ArgumentParser(description="download ov nightly" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output', help='openvino package stored directory', type=Path, default=os.path.join(*[PWD, 'openvino_nightly']))
-    parser.add_argument('-d', '--download_url', help='download file', type=str, default=None)
+    parser.add_argument('-d', '--download_url', help=help_download_url, type=str, default=None)
     parser.add_argument('-c', '--commit_id', help='commit id for openvino', type=str, default=None)
     parser.add_argument('--keep_old', help='keep old pkg files/directories', action='store_true')
     parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
@@ -392,7 +441,7 @@ def main():
             elif args.commit_id:
                 target_url_list = [ get_url(args.commit_id) ]
             else:
-                target_url_list = get_list_of_openvino_master()
+                target_url_list = get_list_of_openvino_master(args)
 
             for target_url in target_url_list:
                 log.info(f'download pkgs from {target_url}')
@@ -405,9 +454,10 @@ def main():
                     genai_zip_list_list = download_genai_packages(target_url, new_out_path)
 
                     log.info(f'- decompress zip files')
-                    for zip_file in tqdm(openvino_zip_file_list + genai_zip_list_list):
+                    for zip_file in tqdm_asyncio.tqdm(openvino_zip_file_list + genai_zip_list_list):
                         decompress(zip_file, os.path.dirname(zip_file), True)
                     update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
+                    save_ov_version(args, get_ov_version(target_url))
                     break
                 except Exception as e:
                     log.warning(f'{e}')
