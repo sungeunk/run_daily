@@ -3,3 +3,4 @@ directory_browsing/
 bin/
 __pycache__/
 openvino.git/
+output

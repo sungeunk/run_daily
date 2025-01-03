@@ -400,7 +400,7 @@ def get_url(commit_id):
                     log.info(f'found url: {ret_url}')
                     return ret_url
 
-def print_manifest(cpack_url: str):
+def print_manifest(cpack_url: str, out_path):
     index = cpack_url.rfind('cpack')
     if index > 0:
         raw_data_list = []
@@ -413,6 +413,8 @@ def print_manifest(cpack_url: str):
 
         headers = ['name', 'url', 'branch', 'revision']
         tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
+        with open(convert_path(f'{out_path}/manifest.log'), 'w', encoding='utf8') as fos:
+            fos.write(tabulate_str)
         print(tabulate_str)
 
 class CloneProgress(RemoteProgress):
@@ -429,7 +431,7 @@ class CloneProgress(RemoteProgress):
 # Main
 ################################################
 def main():
-    log.basicConfig(level=log.INFO, format='[%(filename)s:%(lineno)4s:%(funcName)20s] %(levelname)s: %(message)s')
+    log.basicConfig(level=log.INFO, format='[%(asctime)s.%(msecs)03d[%(levelname).1s] %(message)s')
 
     help_download_url = """
     1. Download packages from cpack(OV/genai/tokenizer): http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/ef5678a1098da18c3324a26392236d7974ed1cf5/private_windows_vs2019_release/cpack/\n
@@ -482,7 +484,7 @@ def main():
                         decompress(zip_file, os.path.dirname(zip_file), True)
                     update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
                     save_ov_version(args, get_ov_version(target_url))
-                    print_manifest(target_url)
+                    print_manifest(target_url, new_out_path)
                     break
                 except Exception as e:
                     log.warning(f'{e}')
