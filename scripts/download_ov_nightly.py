@@ -315,6 +315,8 @@ def get_latest_commit_list_from_openvino():
         repo = Repo.clone_from(url=OPENVINO_URL, to_path=OPENVINO_DIR, progress=CloneProgress(), multi_options=["--bare", "--single-branch"])
 
     repo.remote().fetch("refs/heads/master:refs/heads/origin")
+    git = repo.git
+    git.reset('FETCH_HEAD', '--soft')
 
     commit_list = []
     for commit in repo.iter_commits():
