@@ -12,6 +12,7 @@ import requests
 import shutil
 import subprocess
 import tqdm.asyncio as tqdm_asyncio
+import yaml
 
 from bs4 import BeautifulSoup
 from dateutil.parser import parse
@@ -20,6 +21,7 @@ from glob import glob
 from operator import itemgetter
 from packaging.version import Version
 from pathlib import Path
+from tabulate import tabulate
 from tqdm import tqdm
 
 
@@ -311,7 +313,7 @@ def get_latest_commit_list_from_openvino():
         repo = Repo(OPENVINO_DIR)
     except Exception as e:
         log.error(f'{e.__class__}: {e}')
-        log.warning(f'try to clone --base --single-branch {OPENVINO_URL}')
+        log.debug(f'try to clone --base --single-branch {OPENVINO_URL}')
         repo = Repo.clone_from(url=OPENVINO_URL, to_path=OPENVINO_DIR, progress=CloneProgress(), multi_options=["--bare", "--single-branch"])
 
     repo.remote().fetch("refs/heads/master:refs/heads/origin")
@@ -354,7 +356,7 @@ def get_list_of_openvino_master(args):
     ret_list = []
     for commit in master_commit_list[:40]:
         if not commit[0] in latest_commit_list:
-            log.warning(f'{commit[0]} is not in latest_commit_list')
+            log.debug(f'{commit[0]} is not in latest_commit_list')
             continue
         url = MASTER_COMMIT_URL_TEMPLATE.replace('COMMIT_ID', commit[0])
         if check_ov_version(args, url):
@@ -398,6 +400,21 @@ def get_url(commit_id):
                     log.info(f'found url: {ret_url}')
                     return ret_url
 
+def print_manifest(cpack_url: str):
+    index = cpack_url.rfind('cpack')
+    if index > 0:
+        raw_data_list = []
+        cpack_url = f'{cpack_url[:index]}/manifest.yml'
+        manifest = get_text_from_web(cpack_url)
+        data_dic = yaml.safe_load(manifest)
+        for repo in data_dic['components']['dldt']['repository']:
+            if repo["name"] in ['openvino', 'openvino_tokenizers', 'openvino.genai']:
+                raw_data_list.append([repo["name"], repo["url"], repo["branch"], repo["revision"]])
+
+        headers = ['name', 'url', 'branch', 'revision']
+        tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
+        print(tabulate_str)
+
 class CloneProgress(RemoteProgress):
     def __init__(self):
         super().__init__()
@@ -425,6 +442,7 @@ def main():
     parser.add_argument('-c', '--commit_id', help='commit id for openvino', type=str, default=None)
     parser.add_argument('--keep_old', help='keep old pkg files/directories', action='store_true')
     parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
+    parser.add_argument('--no_proxy', help='try to download pkgs with no_proxy', action='store_true')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -432,6 +450,10 @@ def main():
     # WA: replace 'https' to 'http'
     if args.download_url:
         args.download_url = args.download_url.replace('https', 'http')
+
+    # WA: add no_proxy to environment
+    if args.no_proxy:
+        os.environ['no_proxy'] = 'localhost,intel.com,192.168.0.0/16,172.16.0.0/12,127.0.0.0/8,10,0.0.0/8'
 
     try:
         if args.download_url and (args.download_url.endswith('.zip') or args.download_url.endswith('.tgz')):
@@ -460,6 +482,7 @@ def main():
                         decompress(zip_file, os.path.dirname(zip_file), True)
                     update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
                     save_ov_version(args, get_ov_version(target_url))
+                    print_manifest(target_url)
                     break
                 except Exception as e:
                     log.warning(f'{e}')

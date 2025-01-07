@@ -7,7 +7,7 @@ from tqdm.asyncio import tqdm
 
 IS_WINDOWS = platform.system() == 'Windows'
 SERVER_ROOT = 'http://ov-share-05.sclab.intel.com/cv_bench_cache'
-MODEL_COMMIT = 'WW52_llm-optimum_2025.0.0-17715'
+MODEL_COMMIT = 'WW01_llm-optimum_2025.0.0-17733'
 MODEL_LIST = [
     'baichuan2-7b-chat',
     'chatglm3-6b',
@@ -25,7 +25,7 @@ MODEL_LIST = [
 MODEL_PRECISION_LIST = [
     'pytorch/ov/OV_FP16-4BIT_DEFAULT',
 ]
-DOWNLOAD_URL_LIST = [ f'{SERVER_ROOT}/{MODEL_COMMIT}/{model}/{pre}' for model in MODEL_LIST for pre in MODEL_PRECISION_LIST ]
+DOWNLOAD_URL_LIST = [ f'{SERVER_ROOT}/{MODEL_COMMIT}/{model}/{pre}/' for model in MODEL_LIST for pre in MODEL_PRECISION_LIST ]
 
 def convert_cmd_for_popen(cmd):
     return cmd.split() if IS_WINDOWS else cmd
