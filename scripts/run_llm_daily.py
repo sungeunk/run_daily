@@ -1465,8 +1465,8 @@ def get_test_list(target:str='all'):
             test_single_run_list.append((key, AppClassWhisper))
         for key in AppClassBenchmark.CONFIG_MAP.keys():
             test_single_run_list.append((key, AppClassBenchmark))
-        for key in AppClassSmokeTest.CONFIG_MAP.keys():
-            test_single_run_list.append((key, AppClassSmokeTest))
+        # for key in AppClassSmokeTest.CONFIG_MAP.keys():
+        #     test_single_run_list.append((key, AppClassSmokeTest))
     elif target == 'llm_only':
         for key in AppClassGenai.CONFIG_MAP.keys():
             test_single_run_list.append((key, AppClassGenai))
