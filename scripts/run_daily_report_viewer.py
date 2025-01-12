@@ -15,7 +15,6 @@ def get_daily_report_data(filelist, num, filter='daily'):
     # key: date
     # content: purpose, filename, workweek
     info_map = {}
-
     filtered_list = []
     for file in filelist:
         with open(file, 'r', encoding='utf8') as fis:
@@ -107,7 +106,7 @@ def main():
     config_column_1, config_column_2, config_column_3 = st.columns(3)
 
     with config_column_1:
-        DAILY_SERVER_LIST = ['DUT6047BMGFRD', 'ARL1', 'LNL-02', 'MTL-01', 'dg2alderlake']
+        DAILY_SERVER_LIST = ['DUT4016PTLH', 'DUT6047BMGFRD', 'ARL1', 'LNL-02', 'MTL-01', 'dg2alderlake', 'BMG-01']
         server_list = DAILY_SERVER_LIST if daily_server_only else sorted(os.listdir(ROOT_DAILY_REPORT))
         server = st.selectbox("Select Server", server_list)
 
