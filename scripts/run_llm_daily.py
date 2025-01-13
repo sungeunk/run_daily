@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import datetime as dt
 import logging as log
 import logging.config
 import os
@@ -97,7 +98,7 @@ def run_daily(args):
         for cmd_item in cmd_item_list:
             with CmdHelper(cmd_item) as helper:
                 log.info(f'cmd: {cmd_item[CmdItemKey.cmd]}')
-                output, return_code = call_cmd(args, cmd_item[CmdItemKey.cmd])
+                output, return_code = call_cmd2(args, cmd_item[CmdItemKey.cmd])
 
                 cmd_item[CmdItemKey.raw_log] = output
                 cmd_item[CmdItemKey.return_code] = return_code

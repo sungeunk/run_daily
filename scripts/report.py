@@ -147,7 +147,8 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
     def raw_data_for_benchmark(key_tuple):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
-            for result_item in cmd_item[CmdItemKey.data_list]:
+            print(f'cmd_item: {cmd_item}')
+            for result_item in cmd_item.get(CmdItemKey.data_list, []):
                 raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '1st', __get_inf(result_item, 0)])
                 raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '2nd', __get_inf(result_item, 1)])
 
@@ -158,7 +159,7 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
             batch = cmd_item[CmdItemKey.test_config]['batch']
-            for result_item in cmd_item[CmdItemKey.data_list]:
+            for result_item in cmd_item.get(CmdItemKey.data_list, []):
                 raw_data_list.append([key_tuple[0], key_tuple[1], '', '', f'batch:{batch}', __get_inf(result_item, 0, fps_to_ms)])
 
         while len(raw_data_list) < 2: raw_data_list.append([key_tuple[0], key_tuple[1]])
@@ -167,7 +168,7 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
     def raw_data_for_qwen(key_tuple):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
-            for result_item in cmd_item[CmdItemKey.data_list]:
+            for result_item in cmd_item.get(CmdItemKey.data_list, []):
                 raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '1st', __get_inf(result_item, 0)])
                 raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '2nd', __get_inf(result_item, 1)])
 
@@ -177,7 +178,7 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
     def raw_data_for_stablediffusion(key_tuple):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
-            for data_item in cmd_item[CmdItemKey.data_list]:
+            for data_item in cmd_item.get(CmdItemKey.data_list, []):
                 raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'pipeline', __get_inf(data_item, 0)])
 
         while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
@@ -292,7 +293,7 @@ def get_test_list(target:str=''):
         TestStableDiffusion,
         TestWhisperBase,
         TestBenchmarkapp,
-        # TestChatSample,
+        TestChatSample,
     ]
     target_list = target.split(',')
     test_list = []

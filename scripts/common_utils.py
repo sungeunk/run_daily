@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
-import datetime as dt
 import hashlib
+from io import StringIO
 import logging as log
 import os
 import platform
 import subprocess
+import time
 
 
 ################################################
@@ -75,6 +76,46 @@ def call_cmd(args, cmd:str, shell=False, verbose=True) -> tuple[str, int]:
             log.info(f'out_log: {out_log}')
 
     return out_log, returncode
+
+def call_cmd2(args, cmd:str, shell=False, verbose=True) -> tuple[str, int]:
+    out_log = ''
+    returncode = -1
+
+    try:
+        with subprocess.Popen(convert_cmd_for_popen(cmd),
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=shell, text=True, encoding='UTF-8', errors="ignore") as proc:
+            try:
+                timeout = 0
+                out = StringIO()
+                while proc.poll() == None:
+                    if timeout > 5:
+                        raise subprocess.TimeoutExpired()
+                    line = proc.stdout.readline()
+                    if len(line) == 0:
+                        print(f'empty line')
+                        time.sleep(1)
+                        timeout += 1
+                        continue
+                    out.write(line)
+                    timeout = 0
+                    if verbose:
+                        log.info(line[:-1])
+
+                out_log = f'{out.getvalue()}'
+                returncode = proc.returncode
+            except subprocess.TimeoutExpired as e:
+                log.error(f'Timeout: {str(e)}')
+                log.warning('try to kill this process...')
+                proc.kill()
+                log.warning('try to kill this process...done.')
+                out_log = f'{out.getvalue()}'
+                returncode = proc.returncode
+                log.warning(f'returncode: {returncode}')
+    except Exception as e:
+        log.error(f'Exception: {str(e)}')
+
+    return out_log, returncode
+
 
 def compare_class_name(klass, target):
     for class_name in [klass.__name__, klass.__name__[4:]]:

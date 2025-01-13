@@ -13,22 +13,19 @@ class TestChatSample(TestTemplate):
 
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
-        APP_PATH = convert_path(f'{args.working_dir}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
 
         for key_tuple, config_list in __class__.CONFIG_MAP.items():
             ret_dict[key_tuple] = []
             for config in config_list:
+                APP_PATH = convert_path(f'{config["app_path"]}')
                 MODEL_PATH = convert_path(f'{args.model_dir}/{__class__.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
                 cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device}'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
 
         return ret_dict
 
-    def parse_output(output) -> list[dict]:
-        pass
-
-    def generate_tabulate_table(key_tuple, cmd_item_list) -> str:
+    def parse_output(args, output) -> list[dict]:
         pass
 
     def generate_report(result_root) -> str:
