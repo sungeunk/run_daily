@@ -431,7 +431,7 @@ class CloneProgress(RemoteProgress):
 # Main
 ################################################
 def main():
-    log.basicConfig(level=log.INFO, format='[%(asctime)s.%(msecs)03d[%(levelname).1s] %(message)s')
+    log.basicConfig(level=log.INFO, format='%(asctime)s [%(levelname).1s] %(message)s')
 
     help_download_url = """
     1. Download packages from cpack(OV/genai/tokenizer): http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/ef5678a1098da18c3324a26392236d7974ed1cf5/private_windows_vs2019_release/cpack/\n

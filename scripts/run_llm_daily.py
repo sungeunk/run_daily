@@ -97,7 +97,7 @@ def get_test_class(test_class_list, model_name):
 class CmdHelper():
     def __init__(self, cmd_item:dict):
         self.cmd_item = cmd_item
-        self.test_config = self.cmd_item.get(CmdItemKey.test_config, None)
+        self.test_config = self.cmd_item.get(CmdItemKey.test_config, {})
 
     def __enter__(self):
         if self.test_config.get(CmdItemKey.TestConfigKey.mem_check, False):
@@ -123,6 +123,7 @@ def run_daily(args):
         if args.test:
             for key_tuple, cmd_list in cmd_dict.items():
                 cmd_dict[key_tuple] = cmd_list[:1]
+                break
         result_root.update(cmd_dict)
 
     #
