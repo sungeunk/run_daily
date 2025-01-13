@@ -10,7 +10,7 @@ class TestWhisperBase(TestTemplate):
         ('Whisper base', ModelConfig.UNKNOWN): [{'model': 'whisper-base-nonstateful', 'app_path': 'scripts/whisper/optimum_notebook/non_stateful/run_model.py'}],
     }
 
-    def get_command_list(args) -> dict:
+    def get_command_spec(args) -> dict:
         ret_dict = {}
 
         for key_tuple, config_list in __class__.CONFIG_MAP.items():
@@ -61,4 +61,4 @@ class TestWhisperBase(TestTemplate):
         return False
 
     def is_class_name(name) -> bool:
-        return __class__.__name__ == name
+        return compare_class_name(__class__, name)

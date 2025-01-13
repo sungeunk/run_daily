@@ -18,7 +18,7 @@ class TestStableDiffusion(TestTemplate):
         ('SD 3.0 Static', ModelConfig.MIXED): [{'model': f'stable-diffusion-3', 'app_path': 'scripts/stable-diffusion/run_sd3_ov_daily.py', 'dynamic': False}],
     }
 
-    def get_command_list(args) -> dict:
+    def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         ret_dict = {}
 
@@ -87,4 +87,4 @@ class TestStableDiffusion(TestTemplate):
         return False
 
     def is_class_name(name) -> bool:
-        return __class__.__name__ == name
+        return compare_class_name(__class__, name)

@@ -76,6 +76,12 @@ def call_cmd(args, cmd:str, shell=False, verbose=True) -> tuple[str, int]:
 
     return out_log, returncode
 
+def compare_class_name(klass, target):
+    for class_name in [klass.__name__, klass.__name__[4:]]:
+        if target.lower() == class_name.lower():
+            return True
+    return False
+
 #
 # WA: At subprocess.popen(cmd, ...), the cmd should be string on ubuntu or be string array on windows.
 #

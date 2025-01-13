@@ -9,31 +9,31 @@ from .test_template import *
 
 class TestBenchmark(TestTemplate):
     CONFIG_MAP = {
-        (ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
-        (ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [],
+        (ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
     }
 
     def __name__() -> str:
         return 'TestBenchmark'
 
-    def get_command_list(args) -> dict:
+    def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         APP_PATH = convert_path(f'{args.working_dir}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
         for key_tuple, config_list in __class__.CONFIG_MAP.items():
-            ret_dict[key_tuple] = []
+            ret_dict.setdefault(key_tuple, [])
 
-            if len(config_list) == 0:
+            for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
                 PROMPT_PATH = convert_path(f'{args.working_dir}/prompts/32_1024/{key_tuple[0]}.jsonl')
                 cmd = f'python {APP_PATH} -m {MODEL_PATH} -pf {PROMPT_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--genai" if args.genai else "" }'
@@ -138,4 +138,4 @@ class TestBenchmark(TestTemplate):
         return False
 
     def is_class_name(name) -> bool:
-        return __class__.__name__ == name
+        return compare_class_name(__class__, name)

@@ -76,9 +76,9 @@ def get_ov_version_from_report(report_path):
 
 def remove_cache(args):
     if exists_path(args.cache_dir):
-        for file in glob(os.path.join(args.cache_dir, '*.cl_cache')):
+        for file in glob(convert_path(f'{args.cache_dir}/*.cl_cache')):
             os.remove(file)
-        for file in glob(os.path.join(args.cache_dir, '*.blob')):
+        for file in glob(convert_path(f'{args.cache_dir}/*.blob')):
             os.remove(file)
         time.sleep(1)
 
@@ -94,11 +94,36 @@ def get_test_class(test_class_list, model_name):
 # Main
 ################################################
 
+class CmdHelper():
+    def __init__(self, cmd_item:dict):
+        self.cmd_item = cmd_item
+        self.test_config = self.cmd_item.get(CmdItemKey.test_config, None)
+
+    def __enter__(self):
+        if self.test_config.get(CmdItemKey.TestConfigKey.mem_check, False):
+            self.tracker = HWResourceTracker()
+            self.tracker.start()
+
+        self.test_start_time = time.time()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.test_config.get(CmdItemKey.TestConfigKey.mem_check, False):
+            cpu_usage_percent, mem_usage_size, mem_usage_percent = self.tracker.stop()
+            self.cmd_item[CmdItemKey.peak_cpu_usage_percent] = cpu_usage_percent
+            self.cmd_item[CmdItemKey.peak_mem_usage_percent] = mem_usage_percent
+            self.cmd_item[CmdItemKey.peak_mem_usage_size] = sizeof_fmt(mem_usage_size)
+
+        self.cmd_item[CmdItemKey.process_time] = time.time() - self.test_start_time
+
 def run_daily(args):
     test_class_list = get_test_list()
     result_root = {}
     for test_class in test_class_list:
-        result_root.update(test_class.get_command_list(args))
+        cmd_dict = test_class.get_command_spec(args)
+        if args.test:
+            for key_tuple, cmd_list in cmd_dict.items():
+                cmd_dict[key_tuple] = cmd_list[:1]
+        result_root.update(cmd_dict)
 
     #
     # Run all tests
@@ -111,29 +136,13 @@ def run_daily(args):
         remove_cache(args)
 
         for cmd_item in cmd_item_list:
-            test_start_time = time.time()
-            log.info(f'\tcmd: {cmd_item[CmdItemKey.cmd]}')
+            with CmdHelper(cmd_item) as helper:
+                log.info(f'cmd: {cmd_item[CmdItemKey.cmd]}')
+                output, return_code = call_cmd(args, cmd_item[CmdItemKey.cmd])
 
-            test_config = cmd_item.get(CmdItemKey.test_config, None)
-            if test_config != None:
-                EnableProfiling = test_config.get(CmdItemKey.TestConfigKey.mem_check, False)
-
-            if EnableProfiling:
-                tracker = HWResourceTracker()
-                tracker.start()
-
-            output, return_code = call_cmd(args, cmd_item[CmdItemKey.cmd])
-
-            if EnableProfiling:
-                cpu_usage_percent, mem_usage_size, mem_usage_percent = tracker.stop()
-                cmd_item[CmdItemKey.peak_cpu_usage_percent] = cpu_usage_percent
-                cmd_item[CmdItemKey.peak_mem_usage_percent] = mem_usage_percent
-                cmd_item[CmdItemKey.peak_mem_usage_size] = sizeof_fmt(mem_usage_size)
-
-            cmd_item[CmdItemKey.raw_log] = output
-            cmd_item[CmdItemKey.return_code] = return_code
-            cmd_item[CmdItemKey.data_list] = get_test_class(test_class_list, key_tuple[0]).parse_output(args, output)
-            cmd_item[CmdItemKey.process_time] = time.time() - test_start_time
+                cmd_item[CmdItemKey.raw_log] = output
+                cmd_item[CmdItemKey.return_code] = return_code
+                cmd_item[CmdItemKey.data_list] = get_test_class(test_class_list, key_tuple[0]).parse_output(args, output)
 
         log.info(f'Run {key_tuple}... Done\n')
 
@@ -164,7 +173,7 @@ def update_global_config(args):
     if args.test:
         cfg.out_token_length = 32
         cfg.benchmark_iter_num = 1
-    cfg.model_target = args.model_target
+    cfg.test_filter = args.test_filter
 
 def main_setting(args):
     cfg = GlobalConfig()
@@ -221,24 +230,19 @@ def main():
     parser.add_argument('--mail', help='sending mail recipient list. Mail recipients can be separated by comma.', type=str, default='')
     parser.add_argument('--this_report', help='target report to compare performance', type=Path, default=None)
     parser.add_argument('--ref_report', help='reference report to compare performance', type=Path, default=None)
-    parser.add_argument('--test', help='run tests with short config', action='store_true')
-    parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=300)
-    parser.add_argument('--sleep_bf_test', help='set sleep time [unit: seconds].', type=int, default=1)
 
-    parser.add_argument('-cd', '--cache_dir', help='cache directory', type=Path, default=os.path.join(*[cfg.PWD, 'llm-cache']))
-    parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=os.path.join(*['c:\\', 'dev', 'models']))
-    parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=os.path.join(*[cfg.PWD, 'output']))
+    parser.add_argument('--bin_dir', help='binary directory', type=Path, default=convert_path(f'{cfg.PWD}/bin'))
+    parser.add_argument('-cd', '--cache_dir', help='cache directory', type=Path, default=convert_path(f'{cfg.PWD}/llm-cache'))
+    parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'{cfg.PWD}/dev/models'))
+    parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
     parser.add_argument('-w', '--working_dir', help='working directory', type=Path, default=cfg.PWD)
-    parser.add_argument('--bin_dir', help='binary directory', type=Path, default=os.path.join(*[cfg.PWD, 'bin']))
 
     # config for test
-    parser.add_argument('--model_target', help='test class name (delimiter: comma)', type=str, default='')
     parser.add_argument('--genai', help='enable genai option for llm benchmark', action='store_true')
+    parser.add_argument('--test', help='run tests with short config', action='store_true')
+    parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=300)
+    parser.add_argument('--test_filter', help=f'test class name (delimiter: comma): {[test_class.__name__ for test_class in get_test_list()]}. empty string or all will run all tests', type=str, default='')
 
-    # deprecated
-    parser.add_argument('--repeat', help='Do not use.', type=int, default=1)
-    parser.add_argument('--benchmark_app', help='benchmark_app(cpp) path', type=Path, default=os.path.join(*[cfg.PWD, 'bin', 'benchmark_app', 'benchmark_app']))
-    parser.add_argument('--convert_models', help='', action='store_true')
     args = parser.parse_args()
 
     main_setting(args)
@@ -264,19 +268,22 @@ def main():
         with open(REPORT_PATH, 'w', encoding='utf-8') as fos:
             fos.write(generate_report_str(args, result_root, PROCESS_TIME))
 
-        # create a pip freeze file.
-        PIP_FREEZE_PATH = convert_path(f'{args.output_dir}/{cfg.PIP_FREEZE_FILENAME}')
-        with open(PIP_FREEZE_PATH, 'w', encoding='utf-8') as fos:
-            fos.write(f'{python_packages()}')
+        if args.test:
+            log.info(f'Report: {REPORT_PATH}')
+        else:
+            # create a pip freeze file.
+            PIP_FREEZE_PATH = convert_path(f'{args.output_dir}/{cfg.PIP_FREEZE_FILENAME}')
+            with open(PIP_FREEZE_PATH, 'w', encoding='utf-8') as fos:
+                fos.write(f'{python_packages()}')
 
-        # backup report & results
-        backup_list = [ convert_path(f'{args.output_dir}/{filename}') for filename in cfg.BACKUP_FILENAME_LIST ]
-        backup_files(args, [REPORT_PATH] + backup_list)
+            # backup report & results
+            backup_list = [ convert_path(f'{args.output_dir}/{filename}') for filename in cfg.BACKUP_FILENAME_LIST ]
+            backup_files(args, [REPORT_PATH] + backup_list)
 
-        # Send mail
-        if args.mail:
-            suffix_title = generate_mail_title_suffix(result_root)
-            send_mail(REPORT_PATH, args.mail, args.description, suffix_title)
+            # Send mail
+            if args.mail:
+                suffix_title = generate_mail_title_suffix(result_root)
+                send_mail(REPORT_PATH, args.mail, args.description, suffix_title)
 
 
 

@@ -11,15 +11,17 @@ class TestChatSample(TestTemplate):
         (ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT): [{'app_path': 'openvino.genai/samples/python/chat_sample/chat_sample.py'}],
     }
 
-    def get_command_list(args) -> dict:
+    def get_command_spec(args) -> dict:
+        cfg = GlobalConfig()
+        APP_PATH = convert_path(f'{args.working_dir}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
 
         for key_tuple, config_list in __class__.CONFIG_MAP.items():
             ret_dict[key_tuple] = []
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{__class__.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                APP_PATH = convert_path(f'{args.working_dir}/{config["app_path"]}')
-                ret_dict[key_tuple].append({ResultKey.cmd: f'python {APP_PATH} -m {MODEL_PATH} -d {args.device}'})
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device}'
+                ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
 
         return ret_dict
 
@@ -34,7 +36,7 @@ class TestChatSample(TestTemplate):
         raw_data_list = []
         for key_tuple in __class__.CONFIG_MAP.keys():
             for cmd_item in result_root.get(key_tuple, []):
-                report_str += cmd_item[ResultKey.raw_log]
+                report_str += cmd_item[CmdItemKey.raw_log]
 
         if len(report_str):
             return '[RESULT] benchmark\n' + report_str + '\n'
@@ -46,3 +48,6 @@ class TestChatSample(TestTemplate):
             if model_name == key_tuple[0]:
                 return True
         return False
+
+    def is_class_name(name) -> bool:
+        return compare_class_name(__class__, name)

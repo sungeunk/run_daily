@@ -19,7 +19,7 @@ class TestMeasuredUsageCpp(TestTemplate):
         ]
     }
 
-    def get_command_list(args) -> dict:
+    def get_command_spec(args) -> dict:
         ret_dict = {}
         APP_PATH = convert_path(f'{args.bin_dir}/qwen/main{".exe" if is_windows() else ""}')
         MODEL_PATH = convert_path(f'{args.model_dir}/ww52-qwen-bkm-stateful/modified_openvino_model.xml')
@@ -106,4 +106,4 @@ class TestMeasuredUsageCpp(TestTemplate):
         return False
 
     def is_class_name(name) -> bool:
-        return __class__.__name__ == name
+        return compare_class_name(__class__, name)

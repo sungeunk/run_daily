@@ -281,7 +281,10 @@ def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
 
 def get_test_list(target:str=''):
     if target == '':
-        target = GlobalConfig().model_target
+        try:
+            target = GlobalConfig().test_filter
+        except Exception as e:
+            pass
 
     all_test_list = [
         TestBenchmark,
@@ -291,7 +294,6 @@ def get_test_list(target:str=''):
         TestBenchmarkapp,
         # TestChatSample,
     ]
-
     target_list = target.split(',')
     test_list = []
     if target == '':
@@ -302,7 +304,6 @@ def get_test_list(target:str=''):
                 if test_class.is_class_name(target):
                     test_list.append(test_class)
                     break
-
     return test_list
 
 def generate_report_for_each_test(result_root):

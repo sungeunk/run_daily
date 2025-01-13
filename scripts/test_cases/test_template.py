@@ -9,16 +9,6 @@ from tabulate import tabulate
 # Key
 ################################################
 
-class StrEnum(str, enum.Enum):
-    def _generate_next_value_(name, start, count, last_values):
-        return name
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return self.name
-
 """ Json struct
 {
     "tuple(model_name:str, model_config:str)": [
@@ -108,7 +98,7 @@ class TestTemplate(abc.ABC):
     """
     @staticmethod
     @abc.abstractmethod
-    def get_command_list(args) -> dict:
+    def get_command_spec(args) -> dict:
         pass
 
     """
