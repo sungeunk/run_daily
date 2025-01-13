@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import re
+import time
 
 from statistics import geometric_mean
 
@@ -103,9 +104,12 @@ class TestBenchmark(TestTemplate):
             except:
                 return ''
 
+        take_time = 0
         raw_data_list = []
         for key_tuple in __class__.CONFIG_MAP.keys():
             for cmd_item in result_root.get(key_tuple, []):
+                take_time += cmd_item.get(CmdItemKey.process_time, 0)
+
                 for result_item in cmd_item.get(CmdItemKey.data_list, []):
                     raw_data_list.append([key_tuple[0], key_tuple[1],
                                           result_item[CmdItemKey.DataItemKey.in_token],
@@ -127,7 +131,7 @@ class TestBenchmark(TestTemplate):
 
             headers = ['model', 'precision', 'in token', 'out token', '1st inf', '2nd inf']
             tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='right')
-            return '[RESULT] benchmark (python)\n' + tabulate_str + '\n'
+            return f'[RESULT] benchmark (python) / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:
             return ''
 

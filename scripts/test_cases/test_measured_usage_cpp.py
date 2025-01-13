@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import re
+import time
 
 from common_utils import *
 from .test_template import *
@@ -79,10 +80,13 @@ class TestMeasuredUsageCpp(TestTemplate):
             except:
                 return ''
 
+        take_time = 0
         raw_data_list = []
         index = 0
         for key_tuple in __class__.CONFIG_MAP.keys():
             for cmd_item in result_root.get(key_tuple, []):
+                take_time += cmd_item.get(CmdItemKey.process_time, 0)
+
                 for result_item in cmd_item.get(CmdItemKey.data_list, []):
                     raw_data_list.append([index, result_item.get(CmdItemKey.DataItemKey.in_token, 0), result_item.get(CmdItemKey.DataItemKey.out_token, 0),
                                         __get_inf(result_item, 0), __get_inf(result_item, 1),
@@ -95,7 +99,7 @@ class TestMeasuredUsageCpp(TestTemplate):
             headers = ['index', 'in token', 'out token', '1st inf', '2nd inf', 'CPU (%)', 'Memory', 'Memory (%)']
             floatfmt = ['', '', '', '.2f', '.2f', '.2f', '', '.2f']
             tabulate_str =  tabulate(raw_data_list, tablefmt="github", headers=headers, floatfmt=floatfmt, stralign='right', numalign='right')
-            return '[RESULT] measured usage(cpp)\n' + tabulate_str + '\n'
+            return f'[RESULT] measured usage(cpp) / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:
             return ''
 

@@ -48,9 +48,11 @@ class TestBenchmarkapp(TestTemplate):
             except:
                 return ''
 
+        take_time = 0
         raw_data_list = []
         for key_tuple in __class__.CONFIG_MAP.keys():
             for cmd_item in result_root.get(key_tuple, []):
+                take_time += cmd_item.get(CmdItemKey.process_time, 0)
                 batch = cmd_item[CmdItemKey.test_config]['batch']
                 for data_item in cmd_item.get(CmdItemKey.data_list, []):
                     raw_data_list.append([key_tuple[0], key_tuple[1], batch, __get_inf(data_item, 0)])
@@ -59,7 +61,7 @@ class TestBenchmarkapp(TestTemplate):
             headers = ['model', 'precision', 'batch', 'throughput(fps)']
             floatfmt = ['', '', '', '.2f']
             tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, floatfmt=floatfmt, stralign='right', numalign='right')
-            return '[RESULT] benchmark_app(cpp)\n' + tabulate_str + '\n'
+            return f'[RESULT] benchmark_app(cpp) / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:
             return ''
 
