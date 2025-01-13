@@ -32,48 +32,6 @@ from test_cases.test_template import *
 ################################################
 # Utils
 ################################################
-def call_cmd(args, cmd:str, shell=False, verbose=True) -> tuple[str, int]:
-    out_log = ''
-    returncode = -1
-
-    try:
-        with subprocess.Popen(convert_cmd_for_popen(cmd),
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=shell, text=True, encoding='UTF-8', errors="ignore") as proc:
-            try:
-                out_log, error = proc.communicate(timeout=args.timeout)
-                returncode = proc.returncode
-            except subprocess.TimeoutExpired as e:
-                log.error(f'Timeout: {str(e)}')
-                log.warning('try to kill this process...')
-                proc.kill()
-                log.warning('try to kill this process...done.')
-                out_log, error = proc.communicate()
-                returncode = proc.returncode
-                log.warning(f'returncode: {returncode}')
-    except Exception as e:
-        log.error(f'Exception: {str(e)}')
-
-    if returncode != 0:
-        log.error(f'returncode: {returncode}')
-        log.error(f'out_log:\n{out_log}')
-    else:
-        if verbose:
-            log.info(f'returncode: {returncode}')
-            log.info(f'out_log:\n{out_log}')
-
-    return out_log, returncode
-
-def get_ov_version_from_report(report_path):
-    if exists_path(report_path):
-        with open(report_path, 'r', encoding='utf8') as fis:
-            for line in fis.readlines():
-                # OpenVINO: 2024.2.0-15519-5c0f38f83f6-releases/2024/2
-                # 2025.0.0-17598-329670f2266
-                match_obj = re.search(f'([\d]+.[\d]+.[\d]+-[\d]+-[\da-z\-\/]+)', line)
-                if match_obj != None:
-                    return match_obj.groups()[0]
-    return None
-
 def remove_cache(args):
     if exists_path(args.cache_dir):
         for file in glob(convert_path(f'{args.cache_dir}/*.cl_cache')):
@@ -234,7 +192,7 @@ def main():
 
     parser.add_argument('--bin_dir', help='binary directory', type=Path, default=convert_path(f'{cfg.PWD}/bin'))
     parser.add_argument('-cd', '--cache_dir', help='cache directory', type=Path, default=convert_path(f'{cfg.PWD}/llm-cache'))
-    parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'{cfg.PWD}/dev/models'))
+    parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'c:/dev/models'))
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
     parser.add_argument('-w', '--working_dir', help='working directory', type=Path, default=cfg.PWD)
 

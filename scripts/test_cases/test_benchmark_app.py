@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import re
+import time
 
 from common_utils import *
 from .test_template import *
