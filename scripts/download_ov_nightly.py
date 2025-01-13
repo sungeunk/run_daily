@@ -415,7 +415,7 @@ def print_manifest(cpack_url: str, out_path):
         tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
         with open(convert_path(f'{out_path}/manifest.log'), 'w', encoding='utf8') as fos:
             fos.write(tabulate_str)
-        print(tabulate_str)
+        log.info(tabulate_str)
 
 class CloneProgress(RemoteProgress):
     def __init__(self):

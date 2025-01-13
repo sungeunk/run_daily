@@ -339,11 +339,29 @@ def generate_summary(args, PROCESS_TIME) -> str:
     summary_table = tabulate(summary_table_data, tablefmt="youtrack")
     return '[ Summary ]\n' + summary_table
 
+def generate_versions() -> str:
+    cfg = GlobalConfig()
+
+    # C:\dev\sungeunk\run_daily\openvino_nightly\latest_ov_setup_file.txt
+    # C:\dev\sungeunk\run_daily\openvino_nightly\2025.0.0.17826_a8dfb18f\setupvars.bat
+    LATEST_OV_FILEPATH = convert_path(f'{cfg.PWD}/openvino_nightly/latest_ov_setup_file.txt')
+    with open(LATEST_OV_FILEPATH, 'rt') as fis1:
+        SETUP_FILEPATH = fis1.readline()
+        MANIFEST_FILEPATH = convert_path(f'{SETUP_FILEPATH[:-14]}/manifest.log')
+        with open(MANIFEST_FILEPATH, 'rt') as fis2:
+            ret_str = '[ manifest ]\n'
+            for line in fis2.readlines():
+                ret_str += line
+            return ret_str
+
+    return ''
+
 def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     out = StringIO()
     ccg_tabulate = generate_ccg_table(result_root)
     csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
     summary_tabulate = generate_summary(args, PROCESS_TIME)
+    versions_table = generate_versions()
 
     #
     # System info
@@ -356,6 +374,7 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     #
     out.write('<pre>\n')
     out.write(f'{summary_tabulate}\n\n')
+    out.write(f'{versions_table}\n\n')
     out.write(f'{system_info}\n\n')
 
     # Error list
