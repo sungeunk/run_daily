@@ -88,7 +88,6 @@ def run_daily(args):
     #
     # Run all tests
     #
-    EnableProfiling = False
     for key_tuple, cmd_item_list in result_root.items():
         log.info(f'Run {key_tuple}...')
 
@@ -98,7 +97,7 @@ def run_daily(args):
         for cmd_item in cmd_item_list:
             with CmdHelper(cmd_item) as helper:
                 log.info(f'cmd: {cmd_item[CmdItemKey.cmd]}')
-                output, return_code = call_cmd2(args, cmd_item[CmdItemKey.cmd])
+                output, return_code = call_cmd(args, cmd_item[CmdItemKey.cmd])
 
                 cmd_item[CmdItemKey.raw_log] = output
                 cmd_item[CmdItemKey.return_code] = return_code

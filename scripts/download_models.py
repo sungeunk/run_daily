@@ -7,7 +7,7 @@ from tqdm.asyncio import tqdm
 
 IS_WINDOWS = platform.system() == 'Windows'
 SERVER_ROOT = 'http://ov-share-05.sclab.intel.com/cv_bench_cache'
-MODEL_COMMIT = 'WW01_llm-optimum_2025.0.0-17733'
+MODEL_COMMIT = 'WW02_llm-optimum_2025.0.0-17771'
 MODEL_LIST = [
     'baichuan2-7b-chat',
     'chatglm3-6b',
@@ -37,9 +37,13 @@ async def async_download_files(url_list, output):
         async with semaphore:
             wget_cmd = f'wget -q --no-proxy -c -r --compression=auto --reject=html,tmp -nH --cut-dirs=1 --no-parent -P {output} {url}'
             print(f'call: {wget_cmd}')
-            process = await asyncio.create_subprocess_exec(*convert_cmd_for_popen(wget_cmd), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            if IS_WINDOWS:
+                process = await asyncio.create_subprocess_exec(*convert_cmd_for_popen(wget_cmd), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            else:
+                process = await asyncio.create_subprocess_shell(wget_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             stdout, stderr = await process.communicate()
             print(f'done: {wget_cmd}')
+            print(f'stdout: {stdout}')
             print(f'stderr: {stderr}')
 
     await tqdm.gather(

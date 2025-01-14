@@ -302,7 +302,7 @@ class TargetOS(enum.Enum):
 
 def get_private_cpack_url():
     if IS_WINDOWS:
-        return 'private_windows_vs2019_release/cpack'
+        return 'private_windows_vs2022_release/cpack'
     else:
         return f'private_linux_ubuntu_{UBUNTU_VER}_release/cpack'
 
@@ -324,7 +324,7 @@ def get_latest_commit_list_from_openvino():
     for commit in repo.iter_commits():
         # commit_list.append((str(commit), commit.count()))
         commit_list.append(str(commit))
-        if len(commit_list) >= 10:
+        if len(commit_list) >= 40:
             break
     repo.close()
     return commit_list
@@ -354,7 +354,7 @@ def get_list_of_openvino_master(args):
     old_ov_version = load_ov_version(args)
     latest_commit_list = get_latest_commit_list_from_openvino()
     ret_list = []
-    for commit in master_commit_list[:40]:
+    for commit in master_commit_list:
         if not commit[0] in latest_commit_list:
             log.debug(f'{commit[0]} is not in latest_commit_list')
             continue
@@ -431,7 +431,7 @@ class CloneProgress(RemoteProgress):
 # Main
 ################################################
 def main():
-    log.basicConfig(level=log.INFO, format='%(asctime)s [%(levelname).1s] %(message)s')
+    log.basicConfig(level=log.INFO, format='%(asctime)s[%(lineno)4d][%(levelname).1s] %(message)s')
 
     help_download_url = """
     1. Download packages from cpack(OV/genai/tokenizer): http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/ef5678a1098da18c3324a26392236d7974ed1cf5/private_windows_vs2019_release/cpack/\n

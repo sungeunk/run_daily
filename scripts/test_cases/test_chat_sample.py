@@ -26,7 +26,7 @@ class TestChatSample(TestTemplate):
         return ret_dict
 
     def parse_output(args, output) -> list[dict]:
-        pass
+        return []
 
     def generate_report(result_root) -> str:
         report_str = ''
