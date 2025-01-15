@@ -11,7 +11,7 @@ from tabulate import tabulate
 
 """ Json struct
 {
-    "tuple(model_name:str, model_config:str)": [
+    "tuple(model_name:str, model_config:str, class)": [
         {
             "cmd": str,
             "raw_log": str,
@@ -121,11 +121,6 @@ class TestTemplate(abc.ABC):
     @abc.abstractmethod
     def generate_report(result_root) -> str:
         return ''
-
-    @staticmethod
-    @abc.abstractmethod
-    def is_included(model_name) -> bool:
-        pass
 
     @staticmethod
     @abc.abstractmethod

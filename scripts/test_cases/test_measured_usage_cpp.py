@@ -20,14 +20,21 @@ class TestMeasuredUsageCpp(TestTemplate):
         ]
     }
 
+    def __get_configs():
+        ret_configs = {}
+        for key_tuple, config_list in __class__.CONFIG_MAP.items():
+            ret_configs[(key_tuple[0], key_tuple[1], __class__)] = config_list
+        return ret_configs
+
     def get_command_spec(args) -> dict:
+        cfg = GlobalConfig()
         ret_dict = {}
-        APP_PATH = convert_path(f'{args.bin_dir}/qwen/main{".exe" if is_windows() else ""}')
+        APP_PATH = convert_path(f'{cfg.BIN_DIR}/qwen/main{".exe" if is_windows() else ""}')
         MODEL_PATH = convert_path(f'{args.model_dir}/ww52-qwen-bkm-stateful/modified_openvino_model.xml')
         TOKENIZER_PATH = convert_path(f'{args.model_dir}/ww52-qwen-bkm-stateful/qwen.tiktoken')
         OUT_TOKEN_LEN = 256
 
-        for key_tuple, config_list in __class__.CONFIG_MAP.items():
+        for key_tuple, config_list in __class__.__get_configs().items():
             ret_dict[key_tuple] = []
             for config in config_list:
                 ret_dict[key_tuple].append({
@@ -83,7 +90,7 @@ class TestMeasuredUsageCpp(TestTemplate):
         take_time = 0
         raw_data_list = []
         index = 0
-        for key_tuple in __class__.CONFIG_MAP.keys():
+        for key_tuple in __class__.__get_configs().keys():
             for cmd_item in result_root.get(key_tuple, []):
                 take_time += cmd_item.get(CmdItemKey.process_time, 0)
 
@@ -102,12 +109,6 @@ class TestMeasuredUsageCpp(TestTemplate):
             return f'[RESULT] measured usage(cpp) / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:
             return ''
-
-    def is_included(model_name) -> bool:
-        for key_tuple in __class__.CONFIG_MAP.keys():
-            if model_name == key_tuple[0]:
-                return True
-        return False
 
     def is_class_name(name) -> bool:
         return compare_class_name(__class__, name)

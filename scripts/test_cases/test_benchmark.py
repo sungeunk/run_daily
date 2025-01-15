@@ -24,19 +24,22 @@ class TestBenchmark(TestTemplate):
         (ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
     }
 
-    def __name__() -> str:
-        return 'TestBenchmark'
+    def __get_configs():
+        ret_configs = {}
+        for key_tuple, config_list in __class__.CONFIG_MAP.items():
+            ret_configs[(key_tuple[0], key_tuple[1], __class__)] = config_list
+        return ret_configs
 
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
-        APP_PATH = convert_path(f'{args.working_dir}/openvino.genai/tools/llm_bench/benchmark.py')
+        APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
-        for key_tuple, config_list in __class__.CONFIG_MAP.items():
+        for key_tuple, config_list in __class__.__get_configs().items():
             ret_dict.setdefault(key_tuple, [])
 
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                PROMPT_PATH = convert_path(f'{args.working_dir}/prompts/32_1024/{key_tuple[0]}.jsonl')
+                PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/32_1024/{key_tuple[0]}.jsonl')
                 cmd = f'python {APP_PATH} -m {MODEL_PATH} -pf {PROMPT_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--genai" if args.genai else "" }'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
         return ret_dict
@@ -106,7 +109,7 @@ class TestBenchmark(TestTemplate):
 
         take_time = 0
         raw_data_list = []
-        for key_tuple in __class__.CONFIG_MAP.keys():
+        for key_tuple in __class__.__get_configs().keys():
             for cmd_item in result_root.get(key_tuple, []):
                 take_time += cmd_item.get(CmdItemKey.process_time, 0)
 
@@ -134,12 +137,6 @@ class TestBenchmark(TestTemplate):
             return f'[RESULT] benchmark (python) / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:
             return ''
-
-    def is_included(model_name) -> bool:
-        for key_tuple in __class__.CONFIG_MAP.keys():
-            if model_name == key_tuple[0]:
-                return True
-        return False
 
     def is_class_name(name) -> bool:
         return compare_class_name(__class__, name)

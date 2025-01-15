@@ -73,49 +73,49 @@ def generate_ccg_table(result_root):
 
     table = []
 
-    result_item = find_result_item(result_root, ('Resnet50', ModelConfig.INT8), lambda item: item.get(CmdItemKey.test_config, {}).get('batch', 0) == 1)
+    result_item = find_result_item(result_root, ('Resnet50', ModelConfig.INT8, TestBenchmarkapp), lambda item: item.get(CmdItemKey.test_config, {}).get('batch', 0) == 1)
     table.append(['Resnet50 INT8 bs=1', 'fps', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
-    result_item = find_result_item(result_root, ('Resnet50', ModelConfig.INT8), lambda item: item.get(CmdItemKey.test_config, {}).get('batch', 0) == 64)
+    result_item = find_result_item(result_root, ('Resnet50', ModelConfig.INT8, TestBenchmarkapp), lambda item: item.get(CmdItemKey.test_config, {}).get('batch', 0) == 64)
     table.append(['Resnet50 INT8 bs=64', 'fps', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
 
-    result_item = find_result_item(result_root, ('SD 1.5', ModelConfig.INT8))
+    result_item = find_result_item(result_root, ('SD 1.5', ModelConfig.INT8, TestStableDiffusion))
     table.append(['SD 1.5 INT8', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('SD 1.5', ModelConfig.FP16))
+    result_item = find_result_item(result_root, ('SD 1.5', ModelConfig.FP16, TestStableDiffusion))
     table.append(['SD 1.5 FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.INT8))
+    result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.INT8, TestStableDiffusion))
     table.append(['SD 2.1 INT8', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.FP16))
+    result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.FP16, TestStableDiffusion))
     table.append(['SD 2.1 FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('Stable-Diffusion LCM', ModelConfig.FP16))
+    result_item = find_result_item(result_root, ('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion))
     table.append(['Stable-Diffusion LCM FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('Stable Diffusion XL', ModelConfig.FP16))
+    result_item = find_result_item(result_root, ('Stable Diffusion XL', ModelConfig.FP16, TestStableDiffusion))
     table.append(['Stable Diffusion XL FP16', 'second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
 
     MODEL_CONFIG = [
-        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT), 'llama2-7b INT4 DEFAULT', 1024],
-        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT), 'llama2-7b INT4 DEFAULT', 32],
-        [(ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT), 'llama3-8b INT4 DEFAULT', 1024],
-        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT), 'chatGLM3-6b INT4 DEFAULT', 1024],
-        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT), 'chatGLM3-6b INT4 DEFAULT', 32],
-        [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT), 'Qwen-7b INT4 DEFAULT', 1024],
-        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT), 'Phi-3-mini INT4 DEFAULT', 1024],
-        [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT), 'Gemma-7B INT4 DEFAULT', 1024],
-        [(ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT), 'mistral-7B INT4 DEFAULT', 1024],
+        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama2-7b INT4 DEFAULT', 1024],
+        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama2-7b INT4 DEFAULT', 32],
+        [(ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama3-8b INT4 DEFAULT', 1024],
+        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'chatGLM3-6b INT4 DEFAULT', 1024],
+        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'chatGLM3-6b INT4 DEFAULT', 32],
+        [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Qwen-7b INT4 DEFAULT', 1024],
+        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Phi-3-mini INT4 DEFAULT', 1024],
+        [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Gemma-7B INT4 DEFAULT', 1024],
+        [(ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'mistral-7B INT4 DEFAULT', 1024],
     ]
     for config in MODEL_CONFIG:
         result_item = find_result_item(result_root, config[0], None, lambda item: item.get(CmdItemKey.DataItemKey.in_token, 0) == config[2])
         table.append([config[1], f'{config[2]}/{result_item.get(CmdItemKey.DataItemKey.out_token)}, 1st token latency (ms)', __get_inf(result_item, 0), __get_inf(result_item, 0)])
         table.append([config[1], f'{config[2]}/{result_item.get(CmdItemKey.DataItemKey.out_token)}, 2nd token avg (ms)', __get_inf(result_item, 0), __get_inf(result_item, 0)])
 
-    result_item = find_result_item(result_root, ('Whisper base', ModelConfig.UNKNOWN))
+    result_item = find_result_item(result_root, ('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase))
     table.append(['Whisper base', 'tokens/second', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
     result_item = {}
     table.append(['Stable-Diffusion3 (bs=1, FP16, 1024x1024, 28steps)', '', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
 
     MODEL_CONFIG = [
-        [(ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT), 'qwen2-7b INT4 DEFAULT', 1024],
-        [(ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT), 'Phi-2 INT4 DEFAULT', 1024],
-        [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT), 'minicpm-1b-sft INT4 DEFAULT', 1024],
+        [(ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'qwen2-7b INT4 DEFAULT', 1024],
+        [(ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Phi-2 INT4 DEFAULT', 1024],
+        [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'minicpm-1b-sft INT4 DEFAULT', 1024],
     ]
     for config in MODEL_CONFIG:
         result_item = find_result_item(result_root, config[0], None, lambda item: item.get(CmdItemKey.DataItemKey.in_token, 0) == config[2])
@@ -147,7 +147,6 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
     def raw_data_for_benchmark(key_tuple):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
-            print(f'cmd_item: {cmd_item}')
             for result_item in cmd_item.get(CmdItemKey.data_list, []):
                 raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '1st', __get_inf(result_item, 0)])
                 raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '2nd', __get_inf(result_item, 1)])
@@ -185,29 +184,29 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
         return raw_data_list
 
     MODEL_REPORT_CONFIG = [
-        [(ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [('qwen_usage', ModelConfig.INT8), raw_data_for_qwen],
-        [(ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT), raw_data_for_benchmark],
-        [('Resnet50', ModelConfig.INT8), raw_data_for_benchmarkapp],
-        [('SD 1.5', ModelConfig.FP16), raw_data_for_stablediffusion],
-        [('SD 1.5', ModelConfig.INT8), raw_data_for_stablediffusion],
-        [('SD 2.1', ModelConfig.FP16), raw_data_for_stablediffusion],
-        [('SD 2.1', ModelConfig.INT8), raw_data_for_stablediffusion],
-        [('Stable-Diffusion LCM', ModelConfig.FP16), raw_data_for_stablediffusion],
-        [('Stable Diffusion XL', ModelConfig.FP16), raw_data_for_stablediffusion],
-        [('Whisper base', ModelConfig.UNKNOWN), raw_data_for_stablediffusion],
-        [('SD 3.0 Dynamic', ModelConfig.MIXED), raw_data_for_stablediffusion],
-        [('SD 3.0 Static', ModelConfig.MIXED), raw_data_for_stablediffusion],
+        [(ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_qwen],
+        [(ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
+        [('SD 1.5', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('SD 1.5', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('SD 2.1', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('SD 2.1', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('Stable Diffusion XL', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase), raw_data_for_stablediffusion],
+        [('SD 3.0 Dynamic', ModelConfig.MIXED, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('SD 3.0 Static', ModelConfig.MIXED, TestStableDiffusion), raw_data_for_stablediffusion],
     ]
 
     table = []
@@ -217,8 +216,6 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
         table.extend(raw_data_func(key_tuple))
 
     value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) ]
-    # for raw_list in table:
-    #     print(f'raw_list: {raw_list} / len(raw_list): {len(raw_list)} / raw_list[5].isdigit(): {isinstance(float(raw_list[5]), float)}')
     success_count = len(value_list)
     geomean = 0
     if len(value_list):
@@ -293,7 +290,7 @@ def get_test_list(target:str=''):
         TestStableDiffusion,
         TestWhisperBase,
         TestBenchmarkapp,
-        TestChatSample,
+        # TestChatSample,
     ]
     target_list = target.split(',')
     test_list = []
@@ -354,12 +351,24 @@ def generate_versions() -> str:
             for line in fis2.readlines():
                 ret_str += line
             return ret_str
-
     return ''
+
+def generate_error_table(result_root) -> str:
+    raw_data_list = []
+    for key_tuple, cmd_item_list in result_root.items():
+        for cmd_item in cmd_item_list:
+            returncode = cmd_item.get(CmdItemKey.return_code, -1)
+            if returncode != 0:
+                raw_data_list.append([key_tuple[2].__name__, key_tuple[0], key_tuple[1], returncode])
+
+    if len(raw_data_list):
+        return '[ Error ] \n' + tabulate(raw_data_list, tablefmt="github", headers=['TestClass', 'Model', 'Precision', 'returncode'])
+    else:
+        return ''
 
 def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     out = StringIO()
-    ccg_tabulate = generate_ccg_table(result_root)
+    ccg_tabulate = ''#generate_ccg_table(result_root)
     csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
     summary_tabulate = generate_summary(args, PROCESS_TIME)
     versions_table = generate_versions()
@@ -375,16 +384,11 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     #
     out.write('<pre>\n')
     out.write(f'{summary_tabulate}\n\n')
-    out.write(f'{versions_table}\n\n')
-    out.write(f'{system_info}\n\n')
 
     # Error list
-    for key, cmd_item_list in result_root.items():
-        for cmd_item in cmd_item_list:
-            if cmd_item.get(CmdItemKey.return_code, -1) != 0:
-                for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                    out.write(f'[ERROR][{key}] in_token: {data_item.get(CmdItemKey.DataItemKey.in_token)}\n')
-                    break
+    error_str = generate_error_table(result_root)
+    if len(error_str) > 0:
+        out.write(f'{error_str}\n\n')
 
     if len(ccg_tabulate) > 0:
         out.write(ccg_tabulate + '\n\n')
@@ -394,6 +398,10 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     test_report_str = generate_report_for_each_test(result_root)
     if len(test_report_str) > 0:
         out.write(test_report_str + '\n\n')
+
+    # Version & system
+    out.write(f'{versions_table}\n\n')
+    out.write(f'{system_info}\n\n')
 
     # generated text
     result_ref_map = load_result_file(replace_ext(args.ref_report, "pickle"))

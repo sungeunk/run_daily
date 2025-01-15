@@ -19,15 +19,21 @@ class TestStableDiffusion(TestTemplate):
         ('SD 3.0 Static', ModelConfig.MIXED): [{'model': f'stable-diffusion-3', 'app_path': 'scripts/stable-diffusion/run_sd3_ov_daily.py', 'dynamic': False}],
     }
 
+    def __get_configs():
+        ret_configs = {}
+        for key_tuple, config_list in __class__.CONFIG_MAP.items():
+            ret_configs[(key_tuple[0], key_tuple[1], __class__)] = config_list
+        return ret_configs
+
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         ret_dict = {}
 
-        for key_tuple, config_list in __class__.CONFIG_MAP.items():
+        for key_tuple, config_list in __class__.__get_configs().items():
             ret_dict[key_tuple] = []
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{config["model"]}')
-                APP_PATH = convert_path(f'{args.working_dir}/{config["app_path"]}')
+                APP_PATH = convert_path(f'{cfg.PWD}/{config["app_path"]}')
 
                 dynamic = config.get("dynamic", None)
                 if dynamic != None:
@@ -69,7 +75,7 @@ class TestStableDiffusion(TestTemplate):
 
         take_time = 0
         raw_data_list = []
-        for key_tuple in __class__.CONFIG_MAP.keys():
+        for key_tuple in __class__.__get_configs().keys():
             for cmd_item in result_root.get(key_tuple, []):
                 take_time += cmd_item.get(CmdItemKey.process_time, 0)
 
@@ -83,12 +89,6 @@ class TestStableDiffusion(TestTemplate):
             return f'[RESULT] stable_diffusion / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:
             return ''
-
-    def is_included(model_name) -> bool:
-        for key_tuple in __class__.CONFIG_MAP.keys():
-            if model_name == key_tuple[0]:
-                return True
-        return False
 
     def is_class_name(name) -> bool:
         return compare_class_name(__class__, name)

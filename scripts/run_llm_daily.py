@@ -41,12 +41,6 @@ def remove_cache(args):
             os.remove(file)
         time.sleep(1)
 
-def get_test_class(test_class_list, model_name):
-    for test_class in test_class_list:
-        if test_class.is_included(model_name):
-            return test_class
-    return None
-
 
 
 ################################################
@@ -75,6 +69,7 @@ class CmdHelper():
         self.cmd_item[CmdItemKey.process_time] = time.time() - self.test_start_time
 
 def run_daily(args):
+    cfg = GlobalConfig()
     test_class_list = get_test_list()
     result_root = {}
     for test_class in test_class_list:
@@ -101,11 +96,11 @@ def run_daily(args):
 
                 cmd_item[CmdItemKey.raw_log] = output
                 cmd_item[CmdItemKey.return_code] = return_code
-                cmd_item[CmdItemKey.data_list] = get_test_class(test_class_list, key_tuple[0]).parse_output(args, output)
+                cmd_item[CmdItemKey.data_list] = key_tuple[2].parse_output(args, output)
 
         log.info(f'Run {key_tuple}... Done\n')
 
-    save_result_file(convert_path(f'{args.output_dir}/{GlobalConfig().RESULT_PICKLE_FILENAME}'), result_root)
+    save_result_file(convert_path(f'{args.output_dir}/{cfg.RESULT_PICKLE_FILENAME}'), result_root)
     return result_root
 
 def set_global_config():
@@ -113,6 +108,8 @@ def set_global_config():
     cfg.NOW = dt.datetime.now().strftime("%Y%m%d_%H%M")
     cfg.PWD = Path(__file__).parent.parent
     cfg.OV_VERSION = get_version()
+
+    cfg.BIN_DIR = convert_path(f'{cfg.PWD}/bin')
 
     pre_daily_filename = f'daily.{cfg.NOW}.{cfg.OV_VERSION.replace("/", "_")}'
     cfg.RESULT_PICKLE_FILENAME = f'{pre_daily_filename}.pickle'
@@ -123,7 +120,7 @@ def set_global_config():
     cfg.RESULT_SD3_STATIC_FILENAME = f'{pre_daily_filename}.sd.static.png'
     cfg.BACKUP_FILENAME_LIST = [cfg.RAW_FILENAME, cfg.RESULT_SD3_DYNAMIC_FILENAME, cfg.RESULT_SD3_STATIC_FILENAME, cfg.RESULT_PICKLE_FILENAME]
     cfg.BACKUP_SERVER = 'http://dg2raptorlake.ikor.intel.com'
-    cfg.MODEL_DATE = 'WW44_llm-optimum_2024.5.0-17246-44b86a860ec'
+    cfg.MODEL_DATE = 'WW02_llm-optimum_2025.0.0-17771'
     cfg.out_token_length = 256
     cfg.benchmark_iter_num = 3
 
@@ -140,7 +137,7 @@ def main_setting(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Change working directory
-    os.chdir(args.working_dir)
+    os.chdir(cfg.PWD)
 
     if not is_windows():
         # WA: this is needed to run an executable without './'.
@@ -190,11 +187,9 @@ def main():
     parser.add_argument('--this_report', help='target report to compare performance', type=Path, default=None)
     parser.add_argument('--ref_report', help='reference report to compare performance', type=Path, default=None)
 
-    parser.add_argument('--bin_dir', help='binary directory', type=Path, default=convert_path(f'{cfg.PWD}/bin'))
     parser.add_argument('-cd', '--cache_dir', help='cache directory', type=Path, default=convert_path(f'{cfg.PWD}/llm-cache'))
     parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'c:/dev/models'))
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
-    parser.add_argument('-w', '--working_dir', help='working directory', type=Path, default=cfg.PWD)
 
     # config for test
     parser.add_argument('--genai', help='enable genai option for llm benchmark', action='store_true')
