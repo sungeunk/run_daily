@@ -120,7 +120,7 @@ def set_global_config():
     cfg.RESULT_SD3_STATIC_FILENAME = f'{pre_daily_filename}.sd.static.png'
     cfg.BACKUP_FILENAME_LIST = [cfg.RAW_FILENAME, cfg.RESULT_SD3_DYNAMIC_FILENAME, cfg.RESULT_SD3_STATIC_FILENAME, cfg.RESULT_PICKLE_FILENAME]
     cfg.BACKUP_SERVER = 'http://dg2raptorlake.ikor.intel.com'
-    cfg.MODEL_DATE = 'WW02_llm-optimum_2025.0.0-17771'
+    cfg.MODEL_DATE = 'WW44_llm-optimum_2024.5.0-17246-44b86a860ec'
     cfg.out_token_length = 256
     cfg.benchmark_iter_num = 3
 
