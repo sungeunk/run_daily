@@ -13,7 +13,7 @@ from tabulate import tabulate
 # import class/method from local
 from common_utils import *
 from test_cases.test_template import *
-from download_ov_nightly import print_manifest
+from download_ov_nightly import generate_manifest
 
 # import all class in test_cases directory
 from test_cases.test_benchmark import TestBenchmark
@@ -346,12 +346,8 @@ def generate_versions() -> str:
     LATEST_OV_FILEPATH = convert_path(f'{cfg.PWD}/openvino_nightly/latest_ov_setup_file.txt')
     with open(LATEST_OV_FILEPATH, 'rt') as fis1:
         SETUP_FILEPATH = fis1.readline()
-        MANIFEST_FILEPATH = convert_path(os.path.join(os.path.dirname(SETUP_FILEPATH), 'manifest.log'))
-        with open(MANIFEST_FILEPATH, 'rt') as fis2:
-            ret_str = '[ manifest ]\n'
-            for line in fis2.readlines():
-                ret_str += line
-            return ret_str
+        MANIFEST_FILEPATH = convert_path(os.path.join(os.path.dirname(SETUP_FILEPATH), 'manifest.yml'))
+        return '[ manifest ]\n' + generate_manifest(MANIFEST_FILEPATH)
     return ''
 
 def generate_error_table(result_root) -> str:

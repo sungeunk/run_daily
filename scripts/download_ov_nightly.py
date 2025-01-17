@@ -407,7 +407,7 @@ def save_manifest(cpack_url, new_out_path):
         return download_file(f'{cpack_url[:index]}/manifest.yml', new_out_path)
     return ''
 
-def print_manifest(manifest_path):
+def generate_manifest(manifest_path) -> str:
     if check_filepath(manifest_path):
         with open(manifest_path, 'rt') as fis:
             raw_data_list = []
@@ -417,8 +417,8 @@ def print_manifest(manifest_path):
                     raw_data_list.append([repo["name"], repo["url"], repo["branch"], repo["revision"]])
 
             headers = ['name', 'url', 'branch', 'revision']
-            tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
-            print(tabulate_str)
+            return tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
+    return ''
 
 class CloneProgress(RemoteProgress):
     def __init__(self):
@@ -488,7 +488,7 @@ def main():
                     update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
                     save_ov_version(args, get_ov_version(target_url))
                     manifest_filepath = save_manifest(target_url, new_out_path)
-                    print_manifest(manifest_filepath)
+                    log.info(f'{generate_manifest(manifest_filepath)}')
                     break
                 except Exception as e:
                     log.warning(f'{e}')
