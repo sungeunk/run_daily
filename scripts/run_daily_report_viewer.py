@@ -1,15 +1,18 @@
 
-from glob import glob
-from datetime import datetime
+import argparse
 import os
 import pandas as pd
 import re
 import streamlit as st
 
+from glob import glob
+from datetime import datetime
+from pathlib import Path
+
 ROOT_DAILY_REPORT = '/var/www/html/daily'
 
-def get_daily_report_list(server):
-    return glob(os.path.join(ROOT_DAILY_REPORT, server, '*.report'))
+def get_daily_report_list(directory):
+    return glob(os.path.join(directory, '*.report'))
 
 def get_daily_report_data(filelist, num, filter='daily'):
     # key: date
@@ -20,7 +23,7 @@ def get_daily_report_data(filelist, num, filter='daily'):
         with open(file, 'r', encoding='utf8') as fis:
             line_num = 5
             for line in fis.readlines():
-                match_obj = re.search(f'\|[ ]+Purpose[ ]+\| ([a-zA-Z0-9-_ .&\\/]+)\|', line)
+                match_obj = re.search(f'\|[ ]+Purpose[ ]+\| ([a-zA-Z0-9-_ .&\\/\(\)]+)\|', line)
                 if match_obj:
                     purpose = match_obj.groups()[0].strip()
                     if filter in purpose:
@@ -52,26 +55,32 @@ def get_dataframe_ccg_table(filename, need_column=False):
             line = fis.readline()
             if line == '': break
 
-            # '| model | in | out | exec |'
-            match_obj = re.search(f'\| +model +\| +in +\| +out +\|', line)
-            if match_obj == None:
+            # '| model | precision | in | out | exec | latency(ms) |'
+            match_obj_1 = re.search(f'\| +model +\| +in +\| +out +\|', line)
+            match_obj_2 = re.search(f'\| +model +\| +precision +\| +in +\| +out +\| +exec +\| +latency\(ms\) +\|', line)
+            if match_obj_1 == None and match_obj_2 == None:
                 continue
 
             while True:
                 line = fis.readline()
                 if line[0] != '|': break
 
-                # '| baichuan2-7b-chat INT4 DEFAULT | 32   | 256   |    82.01 |'
-                match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([0-9. ]+) +\|', line)
+                # '|      baichuan2-7b-chat | OV_FP16-4BIT_DEFAULT |   32 |   256 |      1st |         28.76 |'
+                match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([a-zA-Z0-9 ]+) +\| +([0-9. ]+) +\|', line)
                 if match_obj != None:
                     values = match_obj.groups()
                     if need_column:
-                        table.append([values[0].strip(), int(values[1]) if values[1].strip() else '', int(values[2]) if values[2].strip() else '', float(values[3]) if values[3].strip() else ''])
+                        table.append([values[0].strip(),
+                                      values[1].strip(),
+                                      int(values[2]) if values[2].strip() else '',
+                                      int(values[3]) if values[3].strip() else '',
+                                      values[4].strip(),
+                                      f'{float(values[5]):.2f}' if values[5].strip() else ''])
                     else:
-                        table.append([float(values[3]) if values[3].strip() else ''])
+                        table.append([f'{float(values[5]):.2f}' if values[5].strip() else ''])
                     continue
 
-    return pd.DataFrame(columns=['model', 'in', 'out', daily_date] if need_column else [daily_date], data=table)
+    return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
 
 def get_excel_data(dataframe, info_map) -> str:
     table_str = '\n\n'
@@ -102,16 +111,21 @@ def settings():
 def main():
     settings()
 
-    daily_server_only = st.checkbox('daily server only', value=True)
+    parser = argparse.ArgumentParser(description="daily report viewer" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-i', '--report_dir', help=f'daily reports stored directory (for debugging. default path: {ROOT_DAILY_REPORT})', type=str, default=None)
+    args = parser.parse_args()
+
     config_column_1, config_column_2, config_column_3 = st.columns(3)
+    if args.report_dir == None:
+        daily_server_only = st.checkbox('daily server only', value=True)
 
-    with config_column_1:
-        DAILY_SERVER_LIST = ['DUT4016PTLH', 'DUT6047BMGFRD', 'ARL1', 'LNL-02', 'MTL-01', 'dg2alderlake', 'BMG-01']
-        server_list = DAILY_SERVER_LIST if daily_server_only else sorted(os.listdir(ROOT_DAILY_REPORT))
-        server = st.selectbox("Select Server", server_list)
-
-    # get report list from server
-    report_list = get_daily_report_list(server)
+        with config_column_1:
+            DAILY_SERVER_LIST = ['DUT4016PTLH', 'DUT6047BMGFRD', 'ARL1', 'LNL-02', 'MTL-01', 'dg2alderlake', 'BMG-01']
+            server_list = DAILY_SERVER_LIST if daily_server_only else sorted(os.listdir(args.report_dir))
+            report_dir = os.path.join(ROOT_DAILY_REPORT, st.selectbox("Select Server", server_list))
+    else:
+        report_dir = args.report_dir
+    report_list = get_daily_report_list(report_dir)
 
     # filter report list by number + purpose
     with config_column_2:
@@ -134,7 +148,7 @@ def main():
 
         # generate excel data
         # input: removed model_name/in_token/out_token columns
-        excel_str = get_excel_data(df_all.iloc[:, 3:], info_map)
+        excel_str = get_excel_data(df_all.iloc[:, 5:], info_map)
         st.text_area('Text for Excel', value=excel_str, label_visibility="visible")
 
     # with view_tab_2:

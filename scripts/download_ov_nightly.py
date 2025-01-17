@@ -163,7 +163,7 @@ def check_required_packages(url):
 
 def get_ov_version(url):
     text = get_text_from_web(url)
-    match_obj = re.search(f'inference-engine_Release-(\d+.\d+.\d+.\d+)-', text)
+    match_obj = re.search(r'inference-engine_Release-(\d+.\d+.\d+.\d+)-', text)
     return match_obj.groups()[0] if match_obj else ''
 
 def save_ov_version(args, new_version):
@@ -401,20 +401,24 @@ def get_url(commit_id):
                     log.info(f'found url: {ret_url}')
                     return ret_url
 
-def print_manifest(cpack_url: str):
+def save_manifest(cpack_url, new_out_path):
     index = cpack_url.rfind('cpack')
     if index > 0:
-        raw_data_list = []
-        cpack_url = f'{cpack_url[:index]}/manifest.yml'
-        manifest = get_text_from_web(cpack_url)
-        data_dic = yaml.safe_load(manifest)
-        for repo in data_dic['components']['dldt']['repository']:
-            if repo["name"] in ['openvino', 'openvino_tokenizers', 'openvino.genai']:
-                raw_data_list.append([repo["name"], repo["url"], repo["branch"], repo["revision"]])
+        return download_file(f'{cpack_url[:index]}/manifest.yml', new_out_path)
+    return ''
 
-        headers = ['name', 'url', 'branch', 'revision']
-        tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
-        print(tabulate_str)
+def print_manifest(manifest_path):
+    if check_filepath(manifest_path):
+        with open(manifest_path, 'rt') as fis:
+            raw_data_list = []
+            data_dic = yaml.safe_load(fis.read())
+            for repo in data_dic['components']['dldt']['repository']:
+                if repo["name"] in ['openvino', 'openvino_tokenizers', 'openvino.genai']:
+                    raw_data_list.append([repo["name"], repo["url"], repo["branch"], repo["revision"]])
+
+            headers = ['name', 'url', 'branch', 'revision']
+            tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
+            print(tabulate_str)
 
 class CloneProgress(RemoteProgress):
     def __init__(self):
@@ -483,7 +487,8 @@ def main():
                         decompress(zip_file, os.path.dirname(zip_file), True)
                     update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
                     save_ov_version(args, get_ov_version(target_url))
-                    print_manifest(target_url)
+                    manifest_filepath = save_manifest(target_url, new_out_path)
+                    print_manifest(manifest_filepath)
                     break
                 except Exception as e:
                     log.warning(f'{e}')
