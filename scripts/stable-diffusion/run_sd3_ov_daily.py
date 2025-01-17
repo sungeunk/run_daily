@@ -716,6 +716,8 @@ def main():
     print(f'SD3 config:\n{cfg}')
 
     ov_config = {}
+    ov_config["INFERENCE_PRECISION_HINT"] = "f16"
+    ov_config["ACTIVATIONS_SCALE_FACTOR"] = "8"
     # if "GPU" in args.device:
     #     ov_config["INFERENCE_PRECISION_HINT"] = "f32"
     core = ov.Core()

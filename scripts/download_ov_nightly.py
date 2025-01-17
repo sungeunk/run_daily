@@ -254,11 +254,12 @@ def decompress(compressed_filepath, store_path, delete_zip=False):
     return os.path.join(*[store_path, os.path.basename(root)]), ext
 
 def install_openvino(ov_filepath, output):
-    if check_filepath(ov_filepath):
+    if not check_filepath(ov_filepath):
+        log.warning(f'no file: {ov_filepath}')
         return
 
     uncompressed_dir, ext = decompress(ov_filepath, output)
-    setup_script = os.path.join(*[uncompressed_dir, 'setupvars.bat' if ext == '.zip' else 'setupvars.sh'])
+    setup_script = os.path.join(*[uncompressed_dir, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh'])
     update_latest_ov_setup_file(setup_script, output)
 
 def update_latest_ov_setup_file(setup_script_path, output):
@@ -324,7 +325,7 @@ def get_latest_commit_list_from_openvino():
     for commit in repo.iter_commits():
         # commit_list.append((str(commit), commit.count()))
         commit_list.append(str(commit))
-        if len(commit_list) >= 40:
+        if len(commit_list) >= 10:
             break
     repo.close()
     return commit_list
@@ -354,7 +355,7 @@ def get_list_of_openvino_master(args):
     old_ov_version = load_ov_version(args)
     latest_commit_list = get_latest_commit_list_from_openvino()
     ret_list = []
-    for commit in master_commit_list:
+    for commit in master_commit_list[:40]:
         if not commit[0] in latest_commit_list:
             log.debug(f'{commit[0]} is not in latest_commit_list')
             continue
@@ -400,7 +401,7 @@ def get_url(commit_id):
                     log.info(f'found url: {ret_url}')
                     return ret_url
 
-def print_manifest(cpack_url: str, out_path):
+def print_manifest(cpack_url: str):
     index = cpack_url.rfind('cpack')
     if index > 0:
         raw_data_list = []
@@ -413,9 +414,7 @@ def print_manifest(cpack_url: str, out_path):
 
         headers = ['name', 'url', 'branch', 'revision']
         tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='left')
-        with open(convert_path(f'{out_path}/manifest.log'), 'w', encoding='utf8') as fos:
-            fos.write(tabulate_str)
-        log.info(tabulate_str)
+        print(tabulate_str)
 
 class CloneProgress(RemoteProgress):
     def __init__(self):
@@ -431,7 +430,7 @@ class CloneProgress(RemoteProgress):
 # Main
 ################################################
 def main():
-    log.basicConfig(level=log.INFO, format='%(asctime)s[%(lineno)4d][%(levelname).1s] %(message)s')
+    log.basicConfig(level=log.INFO, format='[%(filename)s:%(lineno)4s:%(funcName)20s] %(levelname)s: %(message)s')
 
     help_download_url = """
     1. Download packages from cpack(OV/genai/tokenizer): http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/ef5678a1098da18c3324a26392236d7974ed1cf5/private_windows_vs2019_release/cpack/\n
@@ -484,7 +483,7 @@ def main():
                         decompress(zip_file, os.path.dirname(zip_file), True)
                     update_latest_ov_setup_file(os.path.join(*[new_out_path, 'setupvars.bat' if IS_WINDOWS else 'setupvars.sh']), args.output)
                     save_ov_version(args, get_ov_version(target_url))
-                    print_manifest(target_url, new_out_path)
+                    print_manifest(target_url)
                     break
                 except Exception as e:
                     log.warning(f'{e}')
