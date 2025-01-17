@@ -194,7 +194,7 @@ def main():
     # config for test
     parser.add_argument('--genai', help='enable genai option for llm benchmark', action='store_true')
     parser.add_argument('--test', help='run tests with short config', action='store_true')
-    parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=300)
+    parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=600)
     parser.add_argument('--test_filter', help=f'test class name (delimiter: comma): {[test_class.__name__ for test_class in get_test_list()]}. empty string or all will run all tests', type=str, default='')
 
     args = parser.parse_args()
