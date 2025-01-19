@@ -36,9 +36,6 @@ def save_result_file(filepath, result_root):
         log.error(f'Report::save: {e}')
 
 def load_result_file(filepath) -> dict:
-    if not exists_path(filepath):
-        return {}
-
     try:
         with open(filepath, 'rb') as fis:
             return pickle.load(fis)
@@ -137,7 +134,7 @@ def generate_ccg_table(result_root):
                         headers=['KPI Model', 'description', 'value', 'ms'], floatfmt=['', '', '.2f', '.2f'])
     return f'[Result] ccg table\n{table_str}'
 
-def generate_csv_table(result_root) -> tuple[str, int, int]:
+def generate_csv_raw_data(result_root) -> list:
     def __get_inf(item:dict, index, convert=pass_value):
         try:
             return f'{convert(float(item[CmdItemKey.DataItemKey.perf][index])):.2f}'
@@ -215,6 +212,10 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
         key_tuple = config[0]
         raw_data_func = config[1]
         table.extend(raw_data_func(key_tuple))
+    return table
+
+def generate_csv_table(result_root) -> tuple[str, int, int]:
+    table = generate_csv_raw_data(result_root)
 
     value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) ]
     success_count = len(value_list)
@@ -222,9 +223,22 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
     if len(value_list):
         geomean = geometric_mean(value_list)
 
-    table.append([])
+    def add_table_for_llm(table, token_size, exec):
+        __value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) and raw_list[2] == token_size and raw_list[4] == exec ]
+        __success_count = len(value_list)
+        if len(__value_list):
+            __geomean = geometric_mean(__value_list)
+            table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', f'{float(__geomean):.2f}'])
+        else:
+            table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', 0])
+
+    table.append(['', '', '', '', '', '-'])
     table.append(['Success count', '', '', '', '', success_count])
     table.append(['geomean', '', '', '', '', f'{float(geomean):.2f}'])
+    add_table_for_llm(table, 32, '2nd')
+    add_table_for_llm(table, 32, '1st')
+    add_table_for_llm(table, 1024, '2nd')
+    add_table_for_llm(table, 1024, '1st')
 
     tabulate_str = tabulate(table, tablefmt="github", headers=['model', 'precision', 'in', 'out', 'exec', 'latency(ms)'], floatfmt='.2f', stralign='right', numalign='right')
     return f'[Result] csv table\n' + tabulate_str, geomean, success_count
@@ -344,11 +358,13 @@ def generate_versions() -> str:
     # C:\dev\sungeunk\run_daily\openvino_nightly\latest_ov_setup_file.txt
     # C:\dev\sungeunk\run_daily\openvino_nightly\2025.0.0.17826_a8dfb18f\setupvars.bat
     LATEST_OV_FILEPATH = convert_path(f'{cfg.PWD}/openvino_nightly/latest_ov_setup_file.txt')
-    with open(LATEST_OV_FILEPATH, 'rt') as fis1:
-        SETUP_FILEPATH = fis1.readline()
-        MANIFEST_FILEPATH = convert_path(os.path.join(os.path.dirname(SETUP_FILEPATH), 'manifest.yml'))
-        return '[ manifest ]\n' + generate_manifest(MANIFEST_FILEPATH)
-    return ''
+    try:
+        with open(LATEST_OV_FILEPATH, 'rt') as fis1:
+            SETUP_FILEPATH = fis1.readline()
+            MANIFEST_FILEPATH = convert_path(os.path.join(os.path.dirname(SETUP_FILEPATH), 'manifest.yml'))
+            return '[ manifest ]\n' + generate_manifest(MANIFEST_FILEPATH)
+    except:
+        return ''
 
 def generate_error_table(result_root) -> str:
     raw_data_list = []
