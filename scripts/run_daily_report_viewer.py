@@ -55,34 +55,67 @@ def get_dataframe_ccg_table(filename, need_column=False):
             line = fis.readline()
             if line == '': break
 
-            # '| model | precision | in | out | exec | latency(ms) |'
-            match_obj_1 = re.search(f'\| +model +\| +in +\| +out +\|', line)
-            match_obj_2 = re.search(f'\| +model +\| +precision +\| +in +\| +out +\| +exec +\| +latency\(ms\) +\|', line)
-            if match_obj_1 == None and match_obj_2 == None:
-                continue
+            # '| model | in | out | latency(ms) |'
+            match_obj = re.search(f'\| +model +\| +in +\| +out +\|', line)
+            if match_obj:
+                skip_list = ['chatglm3', 'chatGLM3-6b INT4', 'chatglm3_usage', 'Gemma-7B INT4', 'llama2-7b INT4', 'llama3-8b INT4', 'mistral-7B INT4', 'Phi-2 INT4',
+                             'Phi-3-mini INT4', 'qwen', 'Qwen-7b INT4']
 
-            while True:
-                line = fis.readline()
-                if line[0] != '|': break
+                while True:
+                    line = fis.readline()
+                    if line[0] != '|': break
 
-                # '|      baichuan2-7b-chat | OV_FP16-4BIT_DEFAULT |   32 |   256 |      1st |         28.76 |'
-                match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([a-zA-Z0-9 ]+) +\| +([0-9. ]+) +\|', line)
-                if match_obj != None:
-                    values = match_obj.groups()
-                    if need_column:
-                        table.append([values[0].strip(),
-                                      values[1].strip(),
-                                      int(values[2]) if values[2].strip() else '',
-                                      int(values[3]) if values[3].strip() else '',
-                                      values[4].strip(),
-                                      f'{float(values[5]):.2f}' if values[5].strip() else ''])
-                    else:
-                        table.append([f'{float(values[5]):.2f}' if values[5].strip() else ''])
-                    continue
+                    # '|      baichuan2-7b-chat |   32 |   256 |         28.76 |'
+                    match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([0-9. ]+) +\|', line)
+                    if match_obj != None:
+                        values = match_obj.groups()
 
-    return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
+                        # skip data
+                        skip_line = False
+                        for skip_item in skip_list:
+                            if skip_item == values[0].strip():
+                                skip_line = True
+                                break
+                        if skip_line:
+                            continue
+
+                        if need_column:
+                            table.append([values[0].strip(),
+                                        int(values[1]) if values[1].strip() else '',
+                                        int(values[2]) if values[2].strip() else '',
+                                        f'{float(values[3]):.2f}' if values[3].strip() else ''])
+                        else:
+                            table.append([f'{float(values[3]):.2f}' if values[3].strip() else ''])
+                        continue
+                return pd.DataFrame(columns=['model', 'in', 'out', daily_date] if need_column else [daily_date], data=table)
+
+            match_obj = re.search(f'\| +model +\| +precision +\| +in +\| +out +\| +exec +\| +latency\(ms\) +\|', line)
+            if match_obj:
+                while True:
+                    line = fis.readline()
+                    if line[0] != '|': break
+
+                    # '|      baichuan2-7b-chat | OV_FP16-4BIT_DEFAULT |   32 |   256 |      1st |         28.76 |'
+                    match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([a-zA-Z0-9: ]+) +\| +([0-9. ]+) +\|', line)
+                    if match_obj != None:
+                        values = match_obj.groups()
+                        if need_column:
+                            table.append([values[0].strip(),
+                                        values[1].strip(),
+                                        int(values[2]) if values[2].strip() else '',
+                                        int(values[3]) if values[3].strip() else '',
+                                        values[4].strip(),
+                                        f'{float(values[5]):.2f}' if values[5].strip() else ''])
+                        else:
+                            table.append([f'{float(values[5]):.2f}' if values[5].strip() else ''])
+                        continue
+                return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
+
 
 def get_excel_data(dataframe, info_map) -> str:
+    if dataframe.size == 0:
+        return ''
+
     table_str = '\n\n'
     commit_line = ''
     ww_line = ''
@@ -148,7 +181,11 @@ def main():
 
         # generate excel data
         # input: removed model_name/in_token/out_token columns
-        excel_str = get_excel_data(df_all.iloc[:, 5:], info_map)
+        excel_str = ''
+        if len(df_all.columns) == 4:
+            excel_str = get_excel_data(df_all.iloc[:, 3:], info_map)
+        elif len(df_all.columns) == 6:
+            excel_str = get_excel_data(df_all.iloc[:, 5:], info_map)
         st.text_area('Text for Excel', value=excel_str, label_visibility="visible")
 
     # with view_tab_2:
