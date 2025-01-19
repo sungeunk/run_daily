@@ -57,7 +57,7 @@ class TestWhisperBase(TestTemplate):
                     raw_data_list.append([key_tuple[0], key_tuple[1], __get_inf(data_item, 0)])
 
         if len(raw_data_list):
-            headers = ['model', 'precision', 'pipeline time(ms)']
+            headers = ['model', 'precision', 'process time(tps)']
             floatfmt = ['', '', '', '.2f']
             tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, floatfmt=floatfmt, stralign='right', numalign='right')
             return f'[RESULT] whisper_base / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'

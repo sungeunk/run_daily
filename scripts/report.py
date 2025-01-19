@@ -84,10 +84,10 @@ def generate_ccg_table(result_root):
     table.append(['SD 2.1 INT8', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
     result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.FP16, TestStableDiffusion))
     table.append(['SD 2.1 FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion))
-    table.append(['Stable-Diffusion LCM FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
     result_item = find_result_item(result_root, ('Stable Diffusion XL', ModelConfig.FP16, TestStableDiffusion))
     table.append(['Stable Diffusion XL FP16', 'second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
+    result_item = find_result_item(result_root, ('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion))
+    table.append(['Stable-Diffusion LCM FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
 
     MODEL_CONFIG = [
         [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama2-7b INT4 DEFAULT', 1024],
@@ -181,6 +181,15 @@ def generate_csv_raw_data(result_root) -> list:
         while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
+    def raw_data_for_whisperbase(key_tuple):
+        raw_data_list = []
+        for cmd_item in result_root.get(key_tuple, []):
+            for data_item in cmd_item.get(CmdItemKey.data_list, []):
+                raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'ms/token', __get_inf(data_item, 0, fps_to_ms)])
+
+        while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
+        return raw_data_list
+
     MODEL_REPORT_CONFIG = [
         [(ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
@@ -202,7 +211,7 @@ def generate_csv_raw_data(result_root) -> list:
         [('SD 2.1', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
         [('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
         [('Stable Diffusion XL', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase), raw_data_for_stablediffusion],
+        [('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase), raw_data_for_whisperbase],
         [('SD 3.0 Dynamic', ModelConfig.MIXED, TestStableDiffusion), raw_data_for_stablediffusion],
         [('SD 3.0 Static', ModelConfig.MIXED, TestStableDiffusion), raw_data_for_stablediffusion],
     ]
