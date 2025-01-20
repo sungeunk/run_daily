@@ -120,7 +120,7 @@ def set_global_config():
     cfg.RESULT_SD3_STATIC_FILENAME = f'{pre_daily_filename}.sd.static.png'
     cfg.BACKUP_FILENAME_LIST = [cfg.RAW_FILENAME, cfg.RESULT_SD3_DYNAMIC_FILENAME, cfg.RESULT_SD3_STATIC_FILENAME, cfg.RESULT_PICKLE_FILENAME]
     cfg.BACKUP_SERVER = 'http://dg2raptorlake.ikor.intel.com'
-    cfg.MODEL_DATE = 'WW03_llm-optimum_2025.0.0-17891'
+    cfg.MODEL_DATE = ''
     cfg.out_token_length = 256
     cfg.benchmark_iter_num = 3
 
@@ -130,6 +130,7 @@ def update_global_config(args):
         cfg.out_token_length = 32
         cfg.benchmark_iter_num = 1
     cfg.test_filter = args.test_filter
+    cfg.MODEL_DATE = args.model_cache
 
 def main_setting(args):
     cfg = GlobalConfig()
@@ -192,9 +193,10 @@ def main():
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
 
     # config for test
+    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW03_llm-optimum_2025.0.0-17891')
     parser.add_argument('--genai', help='enable genai option for llm benchmark', action='store_true')
     parser.add_argument('--test', help='run tests with short config', action='store_true')
-    parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=600)
+    parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=1800)
     parser.add_argument('--test_filter', help=f'test class name (delimiter: comma): {[test_class.__name__ for test_class in get_test_list()]}. empty string or all will run all tests', type=str, default='')
 
     args = parser.parse_args()
