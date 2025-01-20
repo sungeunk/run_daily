@@ -5,8 +5,9 @@ import pandas as pd
 import re
 import streamlit as st
 
-from glob import glob
+from common_utils import is_float
 from datetime import datetime
+from glob import glob
 from pathlib import Path
 
 ROOT_DAILY_REPORT = '/var/www/html/daily'
@@ -61,10 +62,7 @@ def get_dataframe_ccg_table(filename, need_column=False):
                 skip_list = ['chatglm3', 'chatGLM3-6b INT4', 'chatglm3_usage', 'Gemma-7B INT4', 'llama2-7b INT4', 'llama3-8b INT4', 'mistral-7B INT4', 'Phi-2 INT4',
                              'Phi-3-mini INT4', 'qwen', 'Qwen-7b INT4']
 
-                while True:
-                    line = fis.readline()
-                    if line[0] != '|': break
-
+                for line in fis.readlines():
                     # '|      baichuan2-7b-chat |   32 |   256 |         28.76 |'
                     match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([0-9. ]+) +\|', line)
                     if match_obj != None:
@@ -86,31 +84,46 @@ def get_dataframe_ccg_table(filename, need_column=False):
                                         f'{float(values[3]):.2f}' if values[3].strip() else ''])
                         else:
                             table.append([f'{float(values[3]):.2f}' if values[3].strip() else ''])
-                        continue
                 return pd.DataFrame(columns=['model', 'in', 'out', daily_date] if need_column else [daily_date], data=table)
 
             match_obj = re.search(f'\| +model +\| +precision +\| +in +\| +out +\| +exec +\| +latency\(ms\) +\|', line)
             if match_obj:
-                while True:
-                    line = fis.readline()
-                    if line[0] != '|': break
-
+                for line in fis.readlines():
+                    words = line.split(sep='|')
                     # '|      baichuan2-7b-chat | OV_FP16-4BIT_DEFAULT |   32 |   256 |      1st |         28.76 |'
-                    match_obj = re.search(f'\| +([a-zA-Z0-9\-\_.= ]+) +\| +([a-zA-Z0-9\-\_.= ]+) +\| +([0-9 ]+) +\| +([0-9 ]+) +\| +([a-zA-Z0-9: ]+) +\| +([0-9. ]+) +\|', line)
-                    if match_obj != None:
-                        values = match_obj.groups()
-                        if need_column:
-                            table.append([values[0].strip(),
-                                        values[1].strip(),
-                                        int(values[2]) if values[2].strip() else '',
-                                        int(values[3]) if values[3].strip() else '',
-                                        values[4].strip(),
-                                        f'{float(values[5]):.2f}' if values[5].strip() else ''])
-                        else:
-                            table.append([f'{float(values[5]):.2f}' if values[5].strip() else ''])
-                        continue
-                return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
+                    if len(words) == 8:
+                        model_name = get_str(r'([\w\d\(\)\/\-\_\.\= ]+)', words[1].strip())
+                        if model_name.startswith('-'):
+                            continue
 
+                        model_precision = get_str(r'([\w\d\-\_]+)', words[2].strip())
+                        in_token = get_str(r'(\d+)', words[3])
+                        out_token = get_str(r'(\d+)', words[4])
+                        exec = get_str(r'([\w\d\:\/ ]+)', words[5].strip())
+                        latency = get_float(r'([\d+\.]+)', words[6])
+
+                        if need_column:
+                            table.append([model_name, model_precision, in_token, out_token, exec, f'{latency:.02f}'])
+                        else:
+                            table.append([f'{latency:.02f}'])
+                    else:
+                        break
+                return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
+    return pd.DataFrame()
+
+def get_str(rex, text):
+    match_obj = re.search(rex, text)
+    if match_obj:
+        return str(match_obj.groups()[0])
+    return ''
+
+def get_float(rex, text):
+    match_obj = re.search(rex, text)
+    if match_obj:
+        value = match_obj.groups()[0]
+        if is_float(value):
+            return float(value)
+    return 0
 
 def get_excel_data(dataframe, info_map) -> str:
     if dataframe.size == 0:
@@ -153,24 +166,30 @@ def main():
         daily_server_only = st.checkbox('daily server only', value=True)
 
         with config_column_1:
-            DAILY_SERVER_LIST = ['DUT4016PTLH', 'DUT6047BMGFRD', 'ARL1', 'LNL-02', 'MTL-01', 'dg2alderlake', 'BMG-01']
-            server_list = DAILY_SERVER_LIST if daily_server_only else sorted(os.listdir(args.report_dir))
+            DAILY_SERVER_LIST = ['DUT4016PTLH', 'DUT6047BMGFRD', 'DUT133ARLH', 'DUT4450LNL', 'dg2alderlake', 'BMG-01']
+            server_list = DAILY_SERVER_LIST if daily_server_only else sorted(os.listdir(ROOT_DAILY_REPORT))
+            print(f'server_list: {server_list}')
             report_dir = os.path.join(ROOT_DAILY_REPORT, st.selectbox("Select Server", server_list))
+            print(f'report_dir: {report_dir}')
     else:
         report_dir = args.report_dir
     report_list = get_daily_report_list(report_dir)
+    print(f'report_list: {report_list}')
 
     # filter report list by number + purpose
     with config_column_2:
         number = st.number_input("Insert a number to display reports", min_value=1, max_value=len(report_list))
+        print(f'number: {number}')
     with config_column_3:
         filter_str = st.text_input(label='Filter:', value='daily')
-    list, info_map = get_daily_report_data(report_list, number, filter_str)
+    data_list, info_map = get_daily_report_data(report_list, number, filter_str)
 
     # parse reports
     df_all = pd.DataFrame()
-    for item in list:
+    for item in data_list:
+        print(f'item: {item}')
         df = get_dataframe_ccg_table(item, df_all.empty)
+        print(f'df: {df}')
         df_all = df if df_all.empty else df_all.join(df, how='left')
 
     # tab interface
