@@ -37,7 +37,7 @@ class TestStableDiffusion(TestTemplate):
 
                 dynamic = config.get("dynamic", None)
                 if dynamic != None:
-                    result_filename = convert_path(f'{args.output_dir}/daily.{cfg.NOW}.sd.{"dynamic" if dynamic else "static"}.png')
+                    result_filename = convert_path(f'{args.output_dir}/' + (cfg.RESULT_SD3_DYNAMIC_FILENAME if dynamic else cfg.RESULT_SD3_STATIC_FILENAME)
                     cmd = f'python {APP_PATH} -m {MODEL_PATH} {"--dynamic" if dynamic else ""} -d {args.device} --result_img {result_filename}'
                 elif APP_PATH.endswith('.py'):
                     cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device}'
