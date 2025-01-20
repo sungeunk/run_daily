@@ -168,18 +168,14 @@ def main():
         with config_column_1:
             DAILY_SERVER_LIST = ['DUT4016PTLH', 'DUT6047BMGFRD', 'DUT133ARLH', 'DUT4450LNL', 'dg2alderlake', 'BMG-01']
             server_list = DAILY_SERVER_LIST if daily_server_only else sorted(os.listdir(ROOT_DAILY_REPORT))
-            print(f'server_list: {server_list}')
             report_dir = os.path.join(ROOT_DAILY_REPORT, st.selectbox("Select Server", server_list))
-            print(f'report_dir: {report_dir}')
     else:
         report_dir = args.report_dir
     report_list = get_daily_report_list(report_dir)
-    print(f'report_list: {report_list}')
 
     # filter report list by number + purpose
     with config_column_2:
         number = st.number_input("Insert a number to display reports", min_value=1, max_value=len(report_list))
-        print(f'number: {number}')
     with config_column_3:
         filter_str = st.text_input(label='Filter:', value='daily')
     data_list, info_map = get_daily_report_data(report_list, number, filter_str)
@@ -187,9 +183,7 @@ def main():
     # parse reports
     df_all = pd.DataFrame()
     for item in data_list:
-        print(f'item: {item}')
         df = get_dataframe_ccg_table(item, df_all.empty)
-        print(f'df: {df}')
         df_all = df if df_all.empty else df_all.join(df, how='left')
 
     # tab interface
@@ -201,9 +195,9 @@ def main():
         # generate excel data
         # input: removed model_name/in_token/out_token columns
         excel_str = ''
-        if len(df_all.columns) == 4:
+        if df_all.columns[1] == 'in':
             excel_str = get_excel_data(df_all.iloc[:, 3:], info_map)
-        elif len(df_all.columns) == 6:
+        elif df_all.columns[1] == 'precision':
             excel_str = get_excel_data(df_all.iloc[:, 5:], info_map)
         st.text_area('Text for Excel', value=excel_str, label_visibility="visible")
 
@@ -223,7 +217,6 @@ def main():
     #     for items in df_all.itertuples():
     #         new_columns.append(f'{items[0]}_{items[1]}_{items[2]}_{items[3]}')
     #     # df_all.columns = new_columns
-    #     print(f'new_columns: {new_columns}')
 
 
     #     # st.dataframe(df_view)
