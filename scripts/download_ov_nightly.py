@@ -215,7 +215,7 @@ def download_openvino_packages(url, out_path):
     text = get_text_from_web(url)
     log.debug(f'root: {text}')
 
-    match_obj = re.search(f'inference-engine_Release-(\d+.\d+.\d+.\d+)-win64-{REQUIRED_LIST[0]}', text)
+    match_obj = re.search(fr'inference-engine_Release-(\d+.\d+.\d+.\d+)-win64-{REQUIRED_LIST[0]}', text)
     if not match_obj:
         raise Exception(f'could not parse the OV_VERSION from text: {text}')
 
@@ -229,7 +229,7 @@ def download_genai_packages(url, ov_dst_path):
     REQUIRED_LIST = required_genai_packages_list()
 
     text = get_text_from_web(url)
-    match_obj = re.search(f'OpenVINOGenAI-([\d.]+)-win64-{REQUIRED_LIST[0]}', text)
+    match_obj = re.search(fr'OpenVINOGenAI-([\d.]+)-win64-{REQUIRED_LIST[0]}', text)
     if not match_obj:
         raise Exception(f'could not parse the GENAI_VERSION from text: {text}')
 

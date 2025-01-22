@@ -45,57 +45,53 @@ class TestBenchmark(TestTemplate):
         return ret_dict
 
     def parse_output(args, output) -> list[dict]:
-        cfg = GlobalConfig()
         ret_list = []
-        in_token_size = 0
-        out_token_size = 0
-        input_text = ''
-        sentence_map = {}
         generated_text = None
+        prompt_id = 0
 
         for line in output.splitlines():
             if generated_text:
                 match_obj = re.search(f'\[ ([\S]+) \] ', line)
                 if match_obj != None:
-                    sentence_map[in_token_size] = generated_text.replace(input_text, '')
+                    ret_list[prompt_id][CmdItemKey.DataItemKey.generated_text] = generated_text
                     generated_text = None
                 else:
                     generated_text += line
                 continue
 
-            match_obj = re.search(f'\] Input token size: (\d+), Output size: (\d+)', line)
+            match_obj = re.search(r'prompt nums: (\d+)', line)
+            if match_obj != None:
+                for i in range(0, int(match_obj.groups()[0])):
+                    ret_list.append({})
+                continue
+
+            match_obj = re.search(r'\[\w(\d+)\] Input token size: (\d+), Output size: (\d+)', line)
             if match_obj != None:
                 values = match_obj.groups()
-                in_token_size = int(values[0])
-                out_token_size = int(values[1])
+                ret_list[int(values[0])][CmdItemKey.DataItemKey.in_token] = int(values[1])
+                ret_list[int(values[0])][CmdItemKey.DataItemKey.out_token] = int(values[2])
                 continue
 
             values = None
-            match_obj1 = re.search(f'\[{cfg.benchmark_iter_num}\]\[[A-Z0-9]+\] First token latency: (\d+.\d+) ms\/token, other tokens latency: (\d+.\d+) ms\/token', line)
-            match_obj2 = re.search(f'\[{cfg.benchmark_iter_num}\]\[[A-Z0-9]+\] First token latency: (\d+.\d+) ms\/token', line)
+            match_obj1 = re.search(r'\[\d+\]\[\w(\d+)\] First token latency: (\d+.\d+) ms\/token, other tokens latency: (\d+.\d+) ms\/token', line)
+            match_obj2 = re.search(r'\[\d+\]\[\w(\d+)\] First token latency: (\d+.\d+) ms\/token', line)
             if match_obj1 != None:
                 values = match_obj1.groups()
             elif match_obj2 != None:
                 values = match_obj2.groups()
 
             if values != None:
-                item = {}
-                item[CmdItemKey.DataItemKey.in_token] = in_token_size
-                item[CmdItemKey.DataItemKey.out_token] = out_token_size
-                item[CmdItemKey.DataItemKey.perf] = [float(values[0]), float(values[1])] if len(values) == 2 else [float(values[0])]
-                item[CmdItemKey.DataItemKey.generated_text] = sentence_map[in_token_size]
-                ret_list.append(item)
-                input_text = ''
+                new_perf = [float(values[1]), float(values[2])] if len(values) == 3 else [float(values[1])]
+                old_perf = ret_list[int(values[0])].get(CmdItemKey.DataItemKey.perf, None)
+                if old_perf == None or geometric_mean(new_perf) < geometric_mean(old_perf):
+                    ret_list[int(values[0])][CmdItemKey.DataItemKey.perf] = new_perf
                 continue
 
-            match_obj = re.search(f'\] Input text: ([\S ]+)', line)
+            match_obj = re.search(r'\[\w(\d+)\] Generated:([\S ]+)', line)
             if match_obj != None:
-                input_text = match_obj.groups()[0]
-                continue
-
-            match_obj = re.search(f'\] Generated:([\S ]+)', line)
-            if match_obj != None:
-                generated_text = match_obj.groups()[0]
+                values = match_obj.groups()
+                prompt_id = int(values[0])
+                generated_text = values[1]
                 continue
 
         return ret_list

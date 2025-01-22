@@ -426,7 +426,7 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     out.write(f'{system_info}\n\n')
 
     # generated text
-    result_ref_map = load_result_file(replace_ext(args.ref_report, "pickle"))
+    result_ref_map = load_result_file(replace_ext(args.ref_report, "pickle")) if args.ref_report else {}
     compare_result_item_map(out, print_compared_text, result_root, result_ref_map)
     out.write(f'\n\n')
 
