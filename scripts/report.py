@@ -314,7 +314,7 @@ def get_test_list(target:str=''):
         TestStableDiffusion,
         TestWhisperBase,
         TestBenchmarkapp,
-        # TestChatSample,
+        TestChatSample,
     ]
     target_list = target.split(',')
     test_list = []
