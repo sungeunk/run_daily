@@ -51,7 +51,7 @@ class TestBenchmark(TestTemplate):
 
         for line in output.splitlines():
             if generated_text:
-                match_obj = re.search(f'\[ ([\S]+) \] ', line)
+                match_obj = re.search(fr'\[ ([\S]+) \] ', line)
                 if match_obj != None:
                     ret_list[prompt_id][CmdItemKey.DataItemKey.generated_text] = generated_text
                     generated_text = None
@@ -109,11 +109,12 @@ class TestBenchmark(TestTemplate):
             for cmd_item in result_root.get(key_tuple, []):
                 take_time += cmd_item.get(CmdItemKey.process_time, 0)
 
-                for result_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1],
-                                          result_item[CmdItemKey.DataItemKey.in_token],
-                                          result_item[CmdItemKey.DataItemKey.out_token],
-                                          __get_inf(result_item, 0), __get_inf(result_item, 1)])
+                if cmd_item.get(CmdItemKey.return_code, -1) == 0:
+                    for result_item in cmd_item.get(CmdItemKey.data_list, []):
+                        raw_data_list.append([key_tuple[0], key_tuple[1],
+                                            result_item[CmdItemKey.DataItemKey.in_token],
+                                            result_item[CmdItemKey.DataItemKey.out_token],
+                                            __get_inf(result_item, 0), __get_inf(result_item, 1)])
 
         if len(raw_data_list):
             value_dict_1st = {}
