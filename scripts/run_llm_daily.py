@@ -206,7 +206,12 @@ def main():
 
     if args.test and args.this_report:
         result_root = load_result_file(replace_ext(args.this_report, "pickle"))
-        log.info(generate_report_str(args, result_root, 0))
+        report_str = generate_report_str(args, result_root, 0)
+        with open(args.this_report, 'w', encoding='utf-8') as fos:
+            fos.write(report_str)
+
+        backup_list = glob(replace_ext(args.this_report, "*"))
+        backup_files(args, backup_list)
         return 0
 
     if args.this_report and args.ref_report:
