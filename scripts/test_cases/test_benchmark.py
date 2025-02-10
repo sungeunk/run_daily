@@ -40,7 +40,8 @@ class TestBenchmark(TestTemplate):
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
                 PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/32_1024/{key_tuple[0]}.jsonl')
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -pf {PROMPT_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--genai" if args.genai else "" }'
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -pf {PROMPT_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"" if args.genai else "--optimum" }'
+                cmd += f' --load_config {convert_path("res/config_wa.json")} --disable_prompt_permutation'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
         return ret_dict
 

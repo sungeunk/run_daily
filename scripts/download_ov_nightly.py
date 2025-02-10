@@ -384,7 +384,9 @@ def get_url(commit_id):
         'releases/2024/5/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/commit/',
         'releases/2024/5/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/pre_commit/',
         'releases/2024/6/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/commit/',
-        'releases/2024/6/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/pre_commit/'
+        'releases/2024/6/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/pre_commit/',
+        'releases/2025/0/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/commit/',
+        'releases/2025/0/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/pre_commit/'
     }
 
     for key, url in url_list.items():
