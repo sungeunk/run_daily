@@ -194,7 +194,10 @@ def main():
 
     # config for test
     parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW03_llm-optimum_2025.0.0-17891')
-    parser.add_argument('--genai', help='enable genai option for llm benchmark', action='store_true')
+    parser.add_argument('--genai', help='[deprecated] enable genai option for llm benchmark', action='store_true')
+    parser.add_argument('--optimum', help='enable optimum option for llm benchmark', action='store_true')
+    parser.add_argument('--continuous_batch', help='enable continuous batch pipeline for llm benchmark', action='store_true')
+    parser.add_argument('--prompt_permutation', help='enable prompt_permutation for llm benchmark', action='store_true')
     parser.add_argument('--test', help='run tests with short config', action='store_true')
     parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=1800)
     parser.add_argument('--test_filter', help=f'test class name (delimiter: comma): {[test_class.__name__ for test_class in get_test_list()]}. empty string or all will run all tests', type=str, default='')
