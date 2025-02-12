@@ -128,198 +128,290 @@ def timeof_fmt(time_ns):
 #                                     clEnqueueMemFillINTEL,    468,     148809298,    0.51%,        317968,          1770,       7596562
 #                                      clEnqueueMemcpyINTEL,    537,      89615821,    0.31%,        166882,          1250,      17645729
 #  concatenation_gpu_simple_ref_2504481582612299751_0_0__sa,     16,        105722,    0.00%,          6607,          3229,         18645
-def cliloader_table(parsed_iter_list):
-    temp_map_1st = {}
-    temp_map_2nd = {}
-    total_time_1st = 0
-    total_time_2nd = 0
+def cliloader_table(parsed_iter_list_map, merge_2nd=True):
+    # 'infer_latency': (unit: ns)
+    # 'host_call_total_count': int
+    # 'host_call_total_time': (unit: ns)
+    # 'host_time_dict': dict
+    # 'host_time_table': tabulate str
+    # 'device_call_total_count': int
+    # 'device_call_total_exec_time': (unit: ns)
+    # 'device_time_dict': dict
+    # 'device_time_table': tabulate str
+    result = []
 
-    first_ts = 0
-    last_ts = 0
+    # print(f'parsed_iter_list_map[host]: {parsed_iter_list_map["host"]}')
+    
+    for infer_index in range(len(parsed_iter_list_map['host'])):
+        host_data_list = parsed_iter_list_map['host'][infer_index]
+        device_data_list = parsed_iter_list_map['device'][infer_index]
+        # begin_ts,a = device_data_list[0].get_ts()
+        # b, end_ts = device_data_list[-1].get_ts()
+        # infer_latency = (end_ts - begin_ts)   >>> need to replace the infer_latency from benchmark log
+        # assert(len(host_data_list) == len(device_data_list))
+        infer_count = len(device_data_list)
 
-    for data_list in parsed_iter_list[:1]:
-        begin_ts,a = data_list[0].get_ts()
-        b, end_ts = data_list[-1].get_ts()
-        print(f'1st: begin: {begin_ts} us ~ end: {end_ts} us / duration: {(end_ts - begin_ts)/1000000:.2f} ms')
+        for i in range(infer_count):
+            device_begin_ts, a = device_data_list[i][0].get_ts()
+            b, device_end_ts = device_data_list[i][-1].get_ts()
+            infer_latency_device = device_end_ts - device_begin_ts
 
-        for item in data_list:
+            host_time_dict = {}
+            host_call_total_count = 0
+            host_call_total_time = 0
+            for item in host_data_list[i]:
+                execution_time = item.get_execution_time()
+                host_call_total_time += execution_time
+                host_call_total_count += 1
+                if item.kernel in host_time_dict:
+                    host_time_dict[item.kernel].append(execution_time)
+                else:
+                    host_time_dict[item.kernel] = [execution_time]
+
+            prev_end_ts = 0
+            device_call_total_exec_delay_time = 0
+            device_call_total_queue_delay_time = 0
+            device_time_dict = {}
+            device_call_total_count = 0
+            device_call_total_exec_time = 0
+            for item in device_data_list[i]:
+                if prev_end_ts == 0:
+                    delay_time = 0
+                    queue_delay_time = 0
+                else:
+                    delay_time = item.start_ts - prev_end_ts
+                    queue_delay_time = item.queued_ts - prev_end_ts if item.queued_ts > prev_end_ts else 0
+                prev_end_ts = item.end_ts
+                device_call_total_exec_delay_time += delay_time
+                device_call_total_queue_delay_time += queue_delay_time
+                execution_time = item.get_execution_time()
+                device_call_total_exec_time += execution_time
+                device_call_total_count += 1
+                if item.kernel in device_time_dict:
+                    device_time_dict[item.kernel].append(execution_time)
+                else:
+                    device_time_dict[item.kernel] = [execution_time]
+
+            result.append({'infer_index': (infer_index, i),
+                           'infer_latency_device': infer_latency_device,
+                           'device_time_dict': device_time_dict,
+                           'device_call_total_count': device_call_total_count,
+                           'device_call_total_exec_time': device_call_total_exec_time,
+                           'device_call_total_exec_delay_time': device_call_total_exec_delay_time,
+                           'device_call_total_queue_delay_time': device_call_total_queue_delay_time,
+                           'host_time_dict': host_time_dict,
+                           'host_call_total_count': host_call_total_count,
+                           'host_call_total_time': host_call_total_time})
+
+    for infer_data in result:
+        host_table_data = []
+        host_time_dict = infer_data['host_time_dict']
+        for key in sorted(host_time_dict.keys()):
+            data_list = host_time_dict[key]
+            host_table_data.append([key,
+                               len(data_list),
+                               f'{sum(data_list)/1000:.0f}',
+                               f'{sum(data_list) / infer_data["host_call_total_time"] * 100:.2f}',
+                               f'{int(statistics.mean(data_list)/1000)}',
+                               f'{min(data_list)/1000:.0f}',
+                               f'{max(data_list)/1000:.0f}'])
+
+        host_table_data.append(['total', infer_data['host_call_total_count'], int(infer_data['host_call_total_time']/1000), '-', '-', '-', '-'])
+        headers = ['Function Name', 'Calls', 'Time (us)', 'Time (%)', 'Average (us)', 'Min (us)', 'Max (us)']
+        infer_data['host_time_table'] = tabulate(host_table_data, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
+
+        device_table_data = []
+        device_time_dict = infer_data['device_time_dict']
+        for key in sorted(device_time_dict.keys()):
+            data_list = device_time_dict[key]
+            device_table_data.append([key,
+                               len(data_list),
+                               f'{sum(data_list)/1000:.0f}',
+                               f'{sum(data_list) / infer_data["device_call_total_exec_time"] * 100:.2f}',
+                               f'{int(statistics.mean(data_list)/1000)}',
+                               f'{min(data_list)/1000:.0f}',
+                               f'{max(data_list)/1000:.0f}'])
+
+        device_table_data.append(['total', infer_data['device_call_total_count'], int(infer_data['device_call_total_exec_time']/1000), '-', '-', '-', '-'])
+        headers = ['Function Name', 'Calls', 'Time (us)', 'Time (%)', 'Average (us)', 'Min (us)', 'Max (us)']
+        infer_data['device_time_table'] = tabulate(device_table_data, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
+
+    return result
+
+def cliloader_device_tabulate(parsed_iter_list_map, merge_2nd=True):
+    def __merge_time(target_dict, device_data_list):
+        device_begin_ts, a = device_data_list[0].get_ts()
+        b, device_end_ts = device_data_list[-1].get_ts()
+        target_dict['infer_latency'] += (device_end_ts - device_begin_ts)
+
+        for item in device_data_list:
             execution_time = item.get_execution_time()
-            total_time_1st += execution_time
-            if item.kernel in temp_map_1st:
-                temp_map_1st[item.kernel].append(execution_time)
+            target_dict['device_call_total_count'] += 1
+            target_dict['device_call_total_exec_time'] += execution_time
+            if item.kernel in target_dict:
+                target_dict[item.kernel].append(execution_time)
             else:
-                temp_map_1st[item.kernel] = [execution_time]
+                target_dict[item.kernel] = [execution_time]
 
-    for data_list in parsed_iter_list[1:]:
-        begin_ts,a = data_list[0].get_ts()
-        b, end_ts = data_list[-1].get_ts()
-        print(f'2nd: begin: {begin_ts} us ~ end: {end_ts} us / duration: {(end_ts - begin_ts)/1000000:.2f} ms')
-        for item in data_list:
-            execution_time = item.get_execution_time()
-            total_time_2nd += execution_time
-            if item.kernel in temp_map_2nd:
-                temp_map_2nd[item.kernel].append(execution_time)
-            else:
-                temp_map_2nd[item.kernel] = [execution_time]
+    def __generate_tabulate(device_time_dict):
+        device_table_data = []
+        for key in sorted(device_time_dict.keys()):
+            if key in ['infer_latency', 'device_call_total_count', 'device_call_total_exec_time']:
+                continue
+            data_list = device_time_dict[key]
+            device_table_data.append([key,
+                               len(data_list),
+                               f'{sum(data_list)/1000:.0f}',
+                               f'{sum(data_list) / device_time_dict["device_call_total_exec_time"] * 100:.2f}',
+                               f'{int(statistics.mean(data_list)/1000)}',
+                               f'{min(data_list)/1000:.0f}',
+                               f'{max(data_list)/1000:.0f}'])
 
-    table_data_1st = []
-    table_data_2nd = []
-    for key in sorted(temp_map_1st.keys()):
-        data_list = temp_map_1st[key]
-        # print(f'begin: {data_list[0].queued_ts} us ~ end: {data_list[-1].end_ts} us / duration: {(data_list[-1].end_ts - data_list[0].queued_ts)/1000} ms')
-        calls = len(data_list)
-        average_t = statistics.mean(data_list)
-        min_t = min(data_list)
-        max_t = max(data_list)
-        time_portion = f'{sum(data_list) / total_time_1st * 100:.2f}'
-        table_data_1st.append([key, calls, sum(data_list), str(time_portion), int(average_t), min_t, max_t])
-    table_data_1st.append(['total', '-', total_time_1st, '-', '-', '-', '-'])
+        device_table_data.append(['total', device_time_dict['device_call_total_count'], int(device_time_dict['device_call_total_exec_time']/1000), '-', '-', '-', '-'])
+        headers = ['Function Name', 'Calls', 'Time (us)', 'Time (%)', 'Average (us)', 'Min (us)', 'Max (us)']
+        return tabulate(device_table_data, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
 
-    for key in sorted(temp_map_2nd.keys()):
-        data_list = temp_map_2nd[key]
-        # print(f'begin: {data_list[0].queued_ts} us ~ end: {data_list[-1].end_ts} us / duration: {(data_list[-1].end_ts - data_list[0].queued_ts)/1000} ms')
-        calls = len(data_list)
-        average_t = statistics.mean(data_list)
-        min_t = min(data_list)
-        max_t = max(data_list)
-        time_portion = f'{sum(data_list) / total_time_2nd * 100:.2f}'
-        table_data_2nd.append([key, calls, sum(data_list), str(time_portion), int(average_t), min_t, max_t])
-    table_data_2nd.append(['total', '-', total_time_2nd, '-', '-', '-', '-'])
+    for infer_index in range(len(parsed_iter_list_map['device'])):
+        device_data_list = parsed_iter_list_map['device'][infer_index]
+        infer_count = len(device_data_list)
 
-    headers = ['Function Name', 'Calls', 'Time (ns)', 'Time (%)', 'Average (ns)', 'Min (ns)', 'Max (ns)']
-    table_1st = tabulate(table_data_1st, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
-    table_2nd = tabulate(table_data_2nd, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
-    return table_1st, table_2nd
+        device_time_1st = {'device_call_total_count':0, 'device_call_total_exec_time':0, 'infer_latency':0}
+        device_time_2nd = {'device_call_total_count':0, 'device_call_total_exec_time':0, 'infer_latency':0}
+        for i in range(infer_count):
+            __merge_time(device_time_1st if i == 0 else device_time_2nd, device_data_list[i])
+        tab_1st = __generate_tabulate(device_time_1st)
+        tab_2nd = __generate_tabulate(device_time_2nd)
 
-def print_idle_time(parsed_list):
-    min_start_ts = 0
-    max_end_ts = 0
-    for item in sorted(parsed_list, key = lambda item: item.start_ts):
-        if min_start_ts == 0:
-            min_start_ts = item.start_ts
-        else:
-            min_start_ts = min(item.start_ts, min_start_ts)
+        title_str = f'warm-up' if infer_index == 0 else f'{infer_index - 1}'
+        print(f'[{title_str}]\n{tab_1st}\n\n')
+        print(f'[{title_str}]\n{tab_2nd}\n\n')
 
-        if max_end_ts == 0:
-            max_end_ts = item.end_ts
-        else:
-            max_end_ts = max(item.end_ts, max_end_ts)
-    print(f'total_diff: {timeof_fmt(max_end_ts - min_start_ts)}')
+def cliloader_raw_for_excel(filename, parsed_iter_list_map):
+    with open(filename, 'wt') as fos:
+        fos.write(f'infer_index,infer_num,kernel,queued_ts(ns),submit_ts(ns),start_ts(ns),end_ts(ns),execute(ms),exec_delay(ms)\n')
+
+        for infer_index in range(len(parsed_iter_list_map['host'])):
+            device_data_list = parsed_iter_list_map['device'][infer_index]
+
+            for i in range(len(device_data_list)):
+                prev_end_ts = device_data_list[i][0].end_ts
+                for item in device_data_list[i]:
+                    delay = item.start_ts - prev_end_ts if prev_end_ts < item.start_ts else 0
+                    prev_end_ts = item.end_ts
+                    fos.write(f'{infer_index},{i},{item.kernel},{item.queued_ts},{item.submit_ts},{item.start_ts},{item.end_ts},{(item.end_ts - item.start_ts)/1000000:03f},{delay/1000000:03f}\n')
 
 def parsing_cliloader_log(handle):
-    model_name = ''
-    ov_version = ''
-    ov_parsed_data_list = []
-    host_parsed_data_list = []
-    host_parsed_data_iter_list = []
-    device_parsed_data_list = []
-    device_parsed_data_iter_list = []
-    current_key = None
-    genai_result_map = {}
-    ov_time_map = {}  # key: (token_size, process_index) / content: ParsedData
-    host_time_map = {}  # key: (token_size, process_index) / content: ParsedData
-    device_time_map = {}  # key: (token_size, process_index) / content: ParsedData
-    start_to_parse_data = False
-    last_kernel_name = ''
+    class ParsingHeader:
+        def __init__(self, parsed_data):
+            self.parsed_data = parsed_data
 
-    # From pretrained time
-    # [ 19357 ms ] [ INFO ] [warm-up][P0] Input token size: 33, Output size: 2, Infer count: 2, Tokenization Time: 0.90ms, Detokenization Time: 0.31ms, Generation Time: 2.14s, Latency: 1070.43 ms/token
-    # [ 27654 ms ] [ INFO ] [warm-up][P1] Input token size: 1025, Output size: 2, Infer count: 2, Tokenization Time: 4.41ms, Detokenization Time: 0.53ms, Generation Time: 8.29s, Latency: 4145.27 ms/token
-    # [ 28616 ms ] [ INFO ] [1][P0] Input token size: 33, Output size: 2, Infer count: 2, Tokenization Time: 0.26ms, Detokenization Time: 0.12ms, Generation Time: 0.96s, Latency: 480.01 ms/token
-    # [ 35443 ms ] [ INFO ] [1][P1] Input token size: 1025, Output size: 2, Infer count: 2, Tokenization Time: 1.85ms, Detokenization Time: 0.55ms, Generation Time: 6.82s, Latency: 3411.95 ms/token
-    # [ 35920 ms ] [ INFO ] [2][P0] Input token size: 33, Output size: 2, Infer count: 2, Tokenization Time: 0.27ms, Detokenization Time: 0.12ms, Generation Time: 0.48s, Latency: 238.17 ms/token
+        def parse(self, line):
+            match_obj = re.search(r'model_type: ([a-zA-Z0-9-_.]+)', line)
+            if match_obj:
+                self.parsed_data['model_name'] = match_obj.groups()[0]
+                return False
 
-    # iter / prompt / 1st|2nd
+            match_obj = re.search(r'openvino runtime version: ([0-9a-z.\-\/\_]+)', line)
+            if match_obj:
+                self.parsed_data['ov_version'] = match_obj.groups()[0]
+                return False
 
+            match_obj = re.search(r'Pipeline initialization time: ([\d\.]+)s', line)
+            if match_obj:
+                self.parsed_data['init_time'] = match_obj.groups()[0]
+                return True
+
+            return False
+
+    class ParsingTime:
+        def __init__(self, parsed_data):
+            self.parsed_data = parsed_data
+            self.check_wait = False
+            self.host_parsed_data_list = []
+            self.host_parsed_data_list_all = []
+            self.device_parsed_data_list = []
+            self.device_parsed_data_list_all = []
+
+        def parse(self, line):
+            # Host Time for call 1: clEnqueueNDRangeKernel( concatenation_gpu_simple_ref_7709004105888173772_1_0__sa ) = 7900
+            match_obj = re.search(r'Host Time for call \d+: ([\w\(\)\_ ]+) = (\d+)', line)
+            if match_obj != None:
+                values = match_obj.groups()
+                self.host_parsed_data_list.append(ParsedData(values))
+
+                # need to check last the end of each inference call.
+                if values[0] == 'clWaitForEvents':
+                    self.check_wait = True
+
+                return False
+
+            # Device Timeline for clEnqueueMemcpyINTEL (enqueue 516) = 3060400582120 ns (queued), 3060401375520 ns (submit), 3060402504375 ns (start), 3060402508177 ns (end)
+            match_obj = re.search(r'Device Timeline for ([\w]+) \(enqueue \d+\) = (\d+) ns \(queued\), (\d+) ns \(submit\), (\d+) ns \(start\), (\d+) ns \(end\)', line)
+            if match_obj != None:
+                values = match_obj.groups()
+                self.device_parsed_data_list.append(ParsedData(values))
+
+                if self.check_wait:
+                    self.check_wait = False
+                    if values[0] == "clEnqueueMemcpyINTEL":
+                        # end of inferencing
+                        self.host_parsed_data_list_all.append(self.host_parsed_data_list)
+                        self.host_parsed_data_list = []
+                        self.device_parsed_data_list_all.append(self.device_parsed_data_list)
+                        self.device_parsed_data_list = []
+
+                return False
+
+            match_obj = re.search(r'\[([a-z0-9-]+)\]\[P([0-9]+)\] Input token size: ([0-9]+), Output size: \d+, Infer count: (\d+)', line)
+            if match_obj != None:
+                values = match_obj.groups()
+                in_token = int(values[2])
+                infer_count = int(values[3])
+                key = f'token_{in_token}'
+                if not key in self.parsed_data:
+                    self.parsed_data[key] = {}
+                    self.parsed_data[key]['host'] = []
+                    self.parsed_data[key]['device'] = []
+                self.parsed_data[key]['host'].append(self.host_parsed_data_list_all)
+                self.parsed_data[key]['device'].append(self.device_parsed_data_list_all)
+                # print(f'device_parsed_data_list_all: len: {len(self.device_parsed_data_list_all)}')
+                # print(f'infer_count: {infer_count}')
+                self.host_parsed_data_list_all = []
+                self.device_parsed_data_list_all = []
+                return False
+
+            return False
+
+    parsed_data = {}
+    parser_iter = iter([ ParsingHeader(parsed_data), ParsingTime(parsed_data) ])
+    parser = next(parser_iter)
     for line in handle:
-        match_obj = re.search(r'model_type: ([a-zA-Z0-9-_.]+)', line)
-        if match_obj:
-            model_name = match_obj.groups()[0]
-            continue
+        ret = parser.parse(line)
+        if ret:
+            parser = next(parser_iter)
 
-        match_obj = re.search(r'openvino runtime version: ([0-9a-z.\-\/\_]+)', line)
-        if match_obj:
-            ov_version = match_obj.groups()[0]
-            continue
+    print(f'model: {parsed_data["model_name"]}')
+    print(f'OpenVINO: {parsed_data["ov_version"]}')
 
-        match_obj = re.search(r'From pretrained time', line)
-        if match_obj:
-            start_to_parse_data = True
-            continue
+    print(f'{parsed_data.keys()}')
+    infer_result_keys = [ key for key in parsed_data.keys() if key.startswith('token')]
+    for key in infer_result_keys:
+        print(f'infer: {key}')
+        cliloader_device_tabulate(parsed_data[key])
+        # infer_result_list = cliloader_table(parsed_data[key])
+        # cliloader_raw_for_excel(f'cliloader_{key}.csv', parsed_data[key])
 
-        if not start_to_parse_data:
-            continue
-
-        match_obj = re.search(r'\[([a-z0-9-]+)\]\[P([0-9]+)\] Input token size: ([0-9]+),', line)
-        if match_obj != None:
-            values = match_obj.groups()
-            current_key = (values[0], values[2])
-            ov_time_map[current_key] = ov_parsed_data_list
-            host_time_map[current_key] = host_parsed_data_iter_list
-            device_time_map[current_key] = device_parsed_data_iter_list
-            ov_parsed_data_list = []
-            host_parsed_data_iter_list = []
-            device_parsed_data_iter_list = []
-            continue
-
-        # [network::execute] execute(402447) impl(402401)
-        match_obj = re.search(r' execute\(([0-9]+)\) impl\(([0-9]+)\)', line)
-        if match_obj != None:
-            values = match_obj.groups()
-            ov_parsed_data_list.append([values[0], values[1]])
-            continue
-
-        # Host Time for call 107: clReleaseEvent = 200
-        match_obj = re.search(r'Host Time for call [0-9]+: ([a-zA-Z0-9_]+) = ([0-9]+)', line)
-        if match_obj != None:
-            values = match_obj.groups()
-            host_parsed_data_list.append(ParsedData(values))
-            continue
-
-        match_obj = re.search(r'Device Timeline for ([a-zA-Z0-9_]+) \([a-z 0-9]+\) = ([0-9]+) ns \(queued\), ([0-9]+) ns \(submit\), ([0-9]+) ns \(start\), ([0-9]+) ns \(end\)', line)
-        if match_obj != None:
-            values = match_obj.groups()
-            # if len(device_parsed_data_list) == 0:
-            #     print(f'first line: {line}')
-
-            device_parsed_data_list.append(ParsedData(values))
-
-            kernel_name = values[0]
-            if last_kernel_name == 'gemm_kernel' and kernel_name == 'clEnqueueMemcpyINTEL':
-                # print(f'KLAIN check point ================================================')
-                # print(f'last line: {line}')
-                host_parsed_data_iter_list.append(host_parsed_data_list)
-                device_parsed_data_iter_list.append(device_parsed_data_list)
-                host_parsed_data_list = []
-                device_parsed_data_list = []
-            last_kernel_name = kernel_name
-            continue
-
-        match_obj = re.search(f'First token latency: (\d+.\d+) ms\/token, other tokens latency: (\d+.\d+) ms\/token', line)
-        if match_obj != None:
-            values = match_obj.groups()
-            genai_result_map[current_key] = f'1st: {values[0]} ms/token, other: {values[1]} ms/token'
-
-    # print(f'{genai_result_map.keys()}')
-    print(f'model: {model_name}')
-    print(f'OpenVINO: {ov_version}')
-    # for key in device_time_map.keys():
-    #     print(f'key: {key}, {genai_result_map[key]}')
-    # for key in ov_time_map.keys():
-    #     print(f'key: {key}\nov_time')
-    #     for items in ov_time_map[key]:
-    #         print(f'\t exec: {timeof_fmt(int(items[0]) * 1000)}, exec_impl: {timeof_fmt(int(items[1]) * 1000)}')
-    for key in host_time_map.keys():
-        table_1st, table_2nd = cliloader_table(host_time_map[key])
-        print(f'key: {key}')
-        print(f'host_time(1st):\n{table_1st}\n')
-        print(f'host_time(2nd):\n{table_2nd}\n')
-    for key in device_time_map.keys():
-        print(f'\n\nkey: {key}')
-        table_1st, table_2nd = cliloader_table(device_time_map[key])
-        print(f'key: {key}, {genai_result_map[key]}')
-        print(f'device_time(1st):\n{table_1st}\n')
-        print(f'device_time(2nd):\n{table_2nd}\n')
+        # total_raw_data_list = []
+        # for infer_result in infer_result_list:
+        #     total_raw_data_list.append([infer_result["infer_index"],
+        #                                 infer_result["infer_latency_device"]/1000000,
+        #                                 infer_result["device_call_total_exec_time"]/1000000,
+        #                                 infer_result["device_call_total_exec_delay_time"]/1000000,
+        #                                 infer_result["device_call_total_queue_delay_time"]/1000000,
+        #                                 (infer_result["device_call_total_exec_time"] + infer_result["device_call_total_exec_delay_time"] - infer_result["infer_latency_device"])/1000000])
+        # headers = ['infer_index', 'A.infer_latency(ms)', 'B.exec_time(ms)', 'C.exec_delay_time(ms)', 'D.queue_delay_time(ms)', 'B + C - A (ms)']
+        # table_str = tabulate(total_raw_data_list, tablefmt="github", headers=headers, stralign='right', numalign='right', floatfmt='.2f')
+        # print(table_str)
 
 
 def parsing_check_enqueue_count(handle):
@@ -356,6 +448,20 @@ def parsing_check_enqueue_count(handle):
     headers = ['iter_num', 'token', 'enqueue begin', 'enqueue end']
     table = tabulate(result, tablefmt="github", headers=headers, stralign='right', numalign='right')
     print(f'{table}')
+
+def check_mode_for_log(filepath):
+    pass
+    # CLIntercept (64-bit) is loading...
+    
+    # Control DumpDir is set to non-default value: c:/dev/sungeunk/run_daily/
+    # Control ReportToStderr is set to non-default value: true
+
+    # cliloader mode
+    # [required] Control DevicePerformanceTiming is set to non-default value: true
+    # [required] Control DevicePerformanceTimelineLogging is set to non-default value: true
+    # [optional]Control HostPerformanceTiming is set to non-default value: true
+
+    # ... loading complete.
 
 def main():
     parser = argparse.ArgumentParser(description="Run daily check for chatglm" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
