@@ -118,7 +118,7 @@ def set_global_config():
     cfg.PIP_FREEZE_FILENAME = f'{pre_daily_filename}.requirements.txt'
     cfg.RESULT_SD3_DYNAMIC_FILENAME = f'{pre_daily_filename}.sd.dynamic.png'
     cfg.RESULT_SD3_STATIC_FILENAME = f'{pre_daily_filename}.sd.static.png'
-    cfg.BACKUP_FILENAME_LIST = [cfg.RAW_FILENAME, cfg.RESULT_SD3_DYNAMIC_FILENAME, cfg.RESULT_SD3_STATIC_FILENAME, cfg.RESULT_PICKLE_FILENAME]
+    cfg.BACKUP_FILENAME_LIST = [cfg.RAW_FILENAME, cfg.RESULT_SD3_DYNAMIC_FILENAME, cfg.RESULT_SD3_STATIC_FILENAME, cfg.RESULT_PICKLE_FILENAME, cfg.PIP_FREEZE_FILENAME]
     cfg.BACKUP_SERVER = 'http://dg2raptorlake.ikor.intel.com'
     cfg.MODEL_DATE = ''
     cfg.out_token_length = 256
