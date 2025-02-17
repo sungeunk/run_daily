@@ -454,12 +454,17 @@ def main():
 
     parser = argparse.ArgumentParser(description="download ov nightly" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output', help='openvino package stored directory', type=Path, default=os.path.join(*[PWD, 'openvino_nightly']))
+    parser.add_argument('--manifest', help='print manifest', type=Path, default=None)
     parser.add_argument('-d', '--download_url', help=help_download_url, type=str, default=None)
     parser.add_argument('-c', '--commit_id', help='commit id for openvino', type=str, default=None)
     parser.add_argument('--keep_old', help='keep old pkg files/directories', action='store_true')
     parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
     parser.add_argument('--no_proxy', help='try to download pkgs with no_proxy', action='store_true')
     args = parser.parse_args()
+
+    if args.manifest != None:
+        log.info('\n' + generate_manifest(args.manifest))
+        return 0
 
     os.makedirs(args.output, exist_ok=True)
 
