@@ -37,9 +37,9 @@ if IS_WINDOWS:
     UBUNTU_VER = ''
 else:
     output = subprocess.check_output(['lsb_release', '-r'], text=True)
-    match_obj = re.search(r'Release:[ \t]+(\d+.\d+)', output)
+    match_obj = re.search(r'Release:[ \t]+(\d+).(\d+)', output)
     if match_obj != None:
-        UBUNTU_VER = match_obj.groups()[0].strip()
+        UBUNTU_VER = f'{match_obj.groups()[0]}_{match_obj.groups()[1]}'
 
 def check_filepath(path):
     try:
@@ -215,26 +215,35 @@ def download_openvino_packages(url, out_path):
     text = get_text_from_web(url)
     log.debug(f'root: {text}')
 
-    match_obj = re.search(fr'inference-engine_Release-(\d+.\d+.\d+.\d+)-win64-{REQUIRED_LIST[0]}', text)
+    if IS_WINDOWS:
+        #                        inference-engine_Release-2025.1.0.18201-win64-benchmark_app.zip
+        match_obj = re.search(fr'inference-engine_Release-(\d+.\d+.\d+.\d+)-win64-{REQUIRED_LIST[0]}', text)
+    else:
+        #                        inference-engine-2025.1.0.18206-Linux-benchmark_app.zip
+        match_obj = re.search(fr'inference-engine-(\d+.\d+.\d+.\d+)-Linux-{REQUIRED_LIST[0]}', text)
     if not match_obj:
         raise Exception(f'could not parse the OV_VERSION from text: {text}')
 
     OV_VERSION = match_obj.groups()[0]
     new_out_path = os.path.join(*[out_path, f'{OV_VERSION}_{COMMIT_ID[0:8]}'])
     os.makedirs(new_out_path, exist_ok=True)
-    list = [ f'{url}/inference-engine_Release-{OV_VERSION}-win64-{target_filename}' for target_filename in REQUIRED_LIST ]
+    if IS_WINDOWS:
+        list = [ f'{url}/inference-engine_Release-{OV_VERSION}-win64-{target_filename}' for target_filename in REQUIRED_LIST ]
+    else:
+        list = [ f'{url}/inference-engine-{OV_VERSION}-Linux-{target_filename}' for target_filename in REQUIRED_LIST ]
     return asyncio.run(async_download_files(list, new_out_path)), new_out_path
 
 def download_genai_packages(url, ov_dst_path):
     REQUIRED_LIST = required_genai_packages_list()
 
     text = get_text_from_web(url)
-    match_obj = re.search(fr'OpenVINOGenAI-([\d.]+)-win64-{REQUIRED_LIST[0]}', text)
+    os_name = 'win64' if IS_WINDOWS else 'Linux'
+    match_obj = re.search(fr'OpenVINOGenAI-([\d.]+)-{os_name}-{REQUIRED_LIST[0]}', text)
     if not match_obj:
         raise Exception(f'could not parse the GENAI_VERSION from text: {text}')
 
     GENAI_VERSION = match_obj.groups()[0]
-    list = [ f'{url}/OpenVINOGenAI-{GENAI_VERSION}-win64-{target_filename}' for target_filename in REQUIRED_LIST ]
+    list = [ f'{url}/OpenVINOGenAI-{GENAI_VERSION}-{os_name}-{target_filename}' for target_filename in REQUIRED_LIST ]
     return asyncio.run(async_download_files(list, ov_dst_path))
 
 def decompress(compressed_filepath, store_path, delete_zip=False):
