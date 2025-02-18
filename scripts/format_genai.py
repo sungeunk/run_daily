@@ -10,33 +10,30 @@ from enum import Enum
 from pathlib import Path
 from tabulate import tabulate
 
+def get_float(value):
+    try:
+        return float(value)
+    except:
+        return values
+
 def parsing_log(handle, args):
     ret = []
     model_name = ''
     ov_version = ''
     temp_item = []
-    ts_list = []
-    ts_all = []
+    dict_data = {}
 
     for line in handle:
         if args.verbose:
             print(f'{line}', end =' ')
 
-        if not ov_version:
-            match_obj = re.search(r'openvino runtime version: ([a-zA-Z0-9-_./]+)', line)
+        match_obj = re.search(r'([\d.-]+)\\([\w.-]+)\\', line)
+        if match_obj:
+            model_name = match_obj.groups()[1]
+
+            match_obj = re.search(fr'openvino runtime version: ([\w\d\-\_\.\/]+)', line)
             if match_obj:
                 ov_version = match_obj.groups()[0]
-                continue
-
-        # print(f'{line}', end =" ")
-        match_obj = re.search(r'model_type: ([a-zA-Z0-9-_.]+)', line)
-        if match_obj:
-            model_name = match_obj.groups()[0]
-            continue
-
-        match_obj = re.search(r'SyncInferRequest::infer end:  begin - end = (\d+) us', line)
-        if match_obj:
-            ts_list.append(float(match_obj.groups()[0])/1000)    # convert from us to ms
             continue
 
         # [ INFO ] [warm-up][P1] Input token size: 1024, Output size: 192, Infer count: 192, Tokenization Time: 0.51ms, Detokenization Time: 0.83ms, Generation Time: 4.46s, Latency: 23.23 ms/token
@@ -60,25 +57,36 @@ def parsing_log(handle, args):
         #  [ INFO ] [1][P0] First token latency: 1048.52 ms/token, other tokens latency: 117.78 ms/token, len of tokens: 128 * 1
         # "[1] First token latency: 195.68 ms/token, other tokens latency: 120.94 ms/token, len of tokens: 128 * 1"
         match_obj = re.search(r'First token latency: (\d+.\d+) ms\/token, other tokens latency: ([\d.NA]+)', line)
-        # match_obj = re.search(r'First token latency: (\d+.\d+) ms\/token, ', line)
         if match_obj:
             values = match_obj.groups()
-            try:
-                other_latency = float(values[1])
-            except:
-                other_latency = values[1]
-            ret.append([model_name, temp_item[0], temp_item[2], temp_item[3], temp_item[4], float(values[0]), other_latency, temp_item[5], temp_item[6], float(temp_item[7])*1000, temp_item[8]])
-            ts_all.append(ts_list)
-            ts_list = []
+            ret.append([model_name, temp_item[0], temp_item[2], temp_item[3], temp_item[4], get_float(values[0]), get_float(values[1]), temp_item[5], temp_item[6], float(temp_item[7])*1000, temp_item[8]])
+
+            key = (model_name, temp_item[2])
+            if not key in dict_data.keys():
+                dict_data[key] = [[get_float(values[0]), get_float(values[1])]]
+            else:
+                dict_data[key].append([get_float(values[0]), get_float(values[1])])
             continue
 
-    headers = ['model', 'iteration', 'token size', 'out size', 'inf num', '1st inf(ms)', '2nd inf(ms)', 'token(ms)', 'detoken(ms)', 'generation(ms)', 'latency(ms)/token']
-    table = tabulate(ret, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
-    print(f'OV Version: {ov_version}')
-    print(f'{table}')
-    df = pd.DataFrame(ts_all).transpose()
-    table1 = tabulate(df, tablefmt="github", floatfmt='.2f', stralign='right', numalign='right')
-    print(f'\nraw inf time (xy transposed data)\n{table1}')
+    raw_data_list = []
+    print(f'model,token,exec,latench(ms)')
+    for key, data_list in dict_data.items():
+        prev_geomean = 100000
+        prev_data = []
+        for data in data_list:
+            geomean = statistics.geometric_mean(data)
+            if prev_geomean > geomean:
+                prev_geomean = geomean
+                prev_data = data
+        raw_data_list.append([key[0], key[1], '1st', prev_data[0]])
+        raw_data_list.append([key[0], key[1], '2nd', prev_data[1]])
+        print(f'{key[0]},{key[1]},1st,{prev_data[0]:.2f}')
+        print(f'{key[0]},{key[1]},2nd,{prev_data[1]:.2f}')
+
+    # headers = ['model', 'iteration', 'token size', 'out size', 'inf num', '1st inf(ms)', '2nd inf(ms)', 'token(ms)', 'detoken(ms)', 'generation(ms)', 'latency(ms)/token']
+    # table = tabulate(ret, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
+    # print(f'OV Version: {ov_version}')
+    # print(f'{table}')
 
 
 # Device Timeline for sdpa_opt_single_token_1941726075318499197_0_0__sa (enqueue 16373) = 1578431119375 ns (queued), 1578431119427 ns (submit), 1578431119479 ns (start), 1578431210624 ns (end)
@@ -212,7 +220,7 @@ def cliloader_table(parsed_iter_list_map, merge_2nd=True):
                                len(data_list),
                                f'{sum(data_list)/1000:.0f}',
                                f'{sum(data_list) / infer_data["host_call_total_time"] * 100:.2f}',
-                               f'{int(statistics.mean(data_list)/1000)}',
+                               f'{int(statistics.geometric_mean(data_list)/1000)}',
                                f'{min(data_list)/1000:.0f}',
                                f'{max(data_list)/1000:.0f}'])
 
@@ -228,7 +236,7 @@ def cliloader_table(parsed_iter_list_map, merge_2nd=True):
                                len(data_list),
                                f'{sum(data_list)/1000:.0f}',
                                f'{sum(data_list) / infer_data["device_call_total_exec_time"] * 100:.2f}',
-                               f'{int(statistics.mean(data_list)/1000)}',
+                               f'{int(statistics.geometric_mean(data_list)/1000)}',
                                f'{min(data_list)/1000:.0f}',
                                f'{max(data_list)/1000:.0f}'])
 
@@ -263,7 +271,7 @@ def cliloader_device_tabulate(parsed_iter_list_map, merge_2nd=True):
                                len(data_list),
                                f'{sum(data_list)/1000:.0f}',
                                f'{sum(data_list) / device_time_dict["device_call_total_exec_time"] * 100:.2f}',
-                               f'{int(statistics.mean(data_list)/1000)}',
+                               f'{int(statistics.geometric_mean(data_list)/1000)}',
                                f'{min(data_list)/1000:.0f}',
                                f'{max(data_list)/1000:.0f}'])
 
