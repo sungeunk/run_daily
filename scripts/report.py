@@ -269,11 +269,30 @@ def calculate_score(ref, target):
     except:
         return 0
 
+def __get_data_list(parent_list, index):
+    if len(parent_list) > index:
+        return parent_list[index].get(CmdItemKey.data_list, [])
+    else:
+        return []
+
+def __get_data_item(parent_list, index):
+    if len(parent_list) > index:
+        return parent_list[index]
+    else:
+        return None
+
 def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
-    for key_tuple, cmd_item_list in this_result_root.items():
-        for cmd_item in cmd_item_list:
-            for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                callback(fos, key_tuple, data_item, None)
+    for this_key_tuple, this_cmd_item_list in this_result_root.items():
+        ref_cmd_item_list = ref_map.get(this_key_tuple, [])
+        if len(ref_cmd_item_list) == 0:
+            print(f'no ref: {this_key_tuple}')
+
+        for y in range(0, max(len(this_cmd_item_list), len(ref_cmd_item_list))):
+            this_data_list = __get_data_list(this_cmd_item_list, y)
+            ref_data_list = __get_data_list(ref_cmd_item_list, y)
+
+            for x in range(0, max(len(this_data_list), len(ref_data_list))):
+                callback(fos, this_key_tuple, __get_data_item(this_data_list, x), __get_data_item(ref_data_list, x))
 
 def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
     LIMIT_TEXT_LENGTH = 256
