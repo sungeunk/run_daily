@@ -220,6 +220,12 @@ def main():
     if args.this_report and args.ref_report:
         result_root_this = load_result_file(replace_ext(args.this_report, "pickle"))
         result_root_ref  = load_result_file(replace_ext(args.ref_report, "pickle"))
+        generated_text_table = []
+        compare_result_item_map(generated_text_table, generate_compared_text_summary, result_root_this, result_root_ref)
+        if len(generated_text_table):
+            tabulate_str = tabulate(generated_text_table, tablefmt="github", headers=['model', 'precision', 'in_token', 'iou'])
+            sys.stdout.write(f'[ Error table for generated text ]\n')
+            sys.stdout.write(tabulate_str + '\n\n')
         compare_result_item_map(sys.stdout, print_compared_text, result_root_this, result_root_ref)
     else:
         # Run test

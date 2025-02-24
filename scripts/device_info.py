@@ -6,7 +6,6 @@ import platform
 import pyopencl
 import re
 import subprocess
-import wmi
 
 from tabulate import tabulate
 
@@ -16,6 +15,8 @@ from tabulate import tabulate
 # Global variable
 ################################################
 IS_WINDOWS = platform.system() == 'Windows'
+if IS_WINDOWS:
+    import wmi
 
 ################################################
 # Utils

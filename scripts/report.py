@@ -294,7 +294,7 @@ def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
             for x in range(0, max(len(this_data_list), len(ref_data_list))):
                 callback(fos, this_key_tuple, __get_data_item(this_data_list, x), __get_data_item(ref_data_list, x))
 
-# tabulate_data: [key, token, iou]
+# tabulate_data: [model, precision, token, iou]
 def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dict, ref_item:dict):
     this_text = this_item.get(CmdItemKey.DataItemKey.generated_text, '')
     if len(this_text) == 0:
@@ -308,7 +308,7 @@ def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dic
     iou = calculate_score(this_text, ref_text)
 
     if iou < 0.2:
-        tabulate_data.append(key_tuple, in_token, iou)
+        tabulate_data.append([key_tuple[0], key_tuple[1], in_token, iou])
 
 def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
     LIMIT_TEXT_LENGTH = 256
@@ -457,7 +457,7 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     generated_text_table = []
     compare_result_item_map(generated_text_table, generate_compared_text_summary, result_root, result_ref_map)
     if len(generated_text_table):
-        tabulate_str = tabulate(generated_text_table, tablefmt="github", headers=['key', 'in_token', 'iou'])
+        tabulate_str = tabulate(generated_text_table, tablefmt="github", headers=['model', 'precision', 'in_token', 'iou'])
         out.write(f'[ Error table for generated text ]\n')
         out.write(tabulate_str + '\n\n')
 
