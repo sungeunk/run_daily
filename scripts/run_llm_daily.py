@@ -186,7 +186,7 @@ def main():
     parser.add_argument('--description', help='add description for report', type=str, default='LLM')
     parser.add_argument('--mail', help='sending mail recipient list. Mail recipients can be separated by comma.', type=str, default='')
     parser.add_argument('--this_report', help='target report to compare performance', type=Path, default=None)
-    parser.add_argument('--ref_report', help='reference report to compare performance', type=Path, default=None)
+    parser.add_argument('--ref_report', help='reference report to compare performance', type=Path, default=convert_path(f'{cfg.PWD}/res/daily.20250224_0104.2025.1.0-18257-f77ef0f25b4.report'))
 
     parser.add_argument('-cd', '--cache_dir', help='cache directory', type=Path, default=convert_path(f'{cfg.PWD}/llm-cache'))
     parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'c:/dev/models'))
