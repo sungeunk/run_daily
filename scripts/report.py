@@ -294,6 +294,22 @@ def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
             for x in range(0, max(len(this_data_list), len(ref_data_list))):
                 callback(fos, this_key_tuple, __get_data_item(this_data_list, x), __get_data_item(ref_data_list, x))
 
+# tabulate_data: [key, token, iou]
+def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dict, ref_item:dict):
+    this_text = this_item.get(CmdItemKey.DataItemKey.generated_text, '')
+    if len(this_text) == 0:
+        return
+
+    in_token = this_item.get(CmdItemKey.DataItemKey.in_token, 0)
+    if ref_item == None:
+        return
+
+    ref_text = ref_item.get(CmdItemKey.DataItemKey.generated_text, '')
+    iou = calculate_score(this_text, ref_text)
+
+    if iou < 0.2:
+        tabulate_data.append(key_tuple, in_token, iou)
+
 def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
     LIMIT_TEXT_LENGTH = 256
     this_text = this_item.get(CmdItemKey.DataItemKey.generated_text, '')
@@ -436,6 +452,15 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     if len(error_str) > 0:
         out.write(f'{error_str}\n\n')
 
+    # Error table for generated text
+    result_ref_map = load_result_file(replace_ext(args.ref_report, "pickle")) if args.ref_report else {}
+    generated_text_table = []
+    compare_result_item_map(generated_text_table, generate_compared_text_summary, result_root, result_ref_map)
+    if len(generated_text_table):
+        tabulate_str = tabulate(generated_text_table, tablefmt="github", headers=['key', 'in_token', 'iou'])
+        out.write(f'[ Error table for generated text ]\n')
+        out.write(tabulate_str + '\n\n')
+
     if len(ccg_tabulate) > 0:
         out.write(ccg_tabulate + '\n\n')
     if len(csv_tabulate) > 0:
@@ -449,8 +474,7 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     out.write(f'{versions_table}\n\n')
     out.write(f'{system_info}\n\n')
 
-    # generated text
-    result_ref_map = load_result_file(replace_ext(args.ref_report, "pickle")) if args.ref_report else {}
+    # Print all generated text
     compare_result_item_map(out, print_compared_text, result_root, result_ref_map)
     out.write(f'\n\n')
 
