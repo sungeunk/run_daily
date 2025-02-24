@@ -6,6 +6,7 @@ import platform
 import pyopencl
 import re
 import subprocess
+import wmi
 
 from tabulate import tabulate
 
@@ -50,38 +51,26 @@ def get_lines(cmd):
 
     return lines if len(lines) > 0 else None
 
-def get_ip_address(interface):
-    try:
-        addrs = netifaces.ifaddresses(interface)
-        ip_info = {}
-        if netifaces.AF_INET in addrs:  # Check for IPv4 address
-            ip_info['IPv4'] = addrs[netifaces.AF_INET][0]['addr']
-        if netifaces.AF_INET6 in addrs:  # Check for IPv6 address
-            ip_info['IPv6'] = addrs[netifaces.AF_INET6][0]['addr']
-        return ip_info
-    except ValueError:
-        print("Interface not found or doesn't have an IP address.")
-        return {}
-
-def get_external_ip_address():
-    INTERNAL_IP = ['192', '127']
-    for interface in netifaces.interfaces():
-        ip_address = get_ip_address(interface)
-        if 'IPv4' in ip_address:
-            for exclude_ip in INTERNAL_IP:
-                if ip_address["IPv4"].split('.')[0] == exclude_ip:
-                    continue
-                return ip_address["IPv4"]
-    return None
-
-def get_system_info(args):
+def get_system_info():
     info_table = []
     if IS_WINDOWS:
-        for line in get_lines('wmic os get Name,CSName /format:list'):
-            match_obj = re.search(r'([a-zA-Z]+)=([0-9a-zA-Z() \-]+)', line)
-            if match_obj != None:
-                info_line = [f'{match_obj.group(1)}', f'{match_obj.group(2)}']
-                info_table.append(info_line)
+        c = wmi.WMI()
+
+        os = c.Win32_OperatingSystem()[0]
+        info_table.append([f'CSName', f'{os.CSName}'])
+        info_table.append([f'Caption', f'{os.Caption}'])
+        info_table.append([f'Version', f'{os.Version}'])
+
+        bios = c.Win32_BIOS()[0]
+        info_table.append([f'bios.ReleaseDate', f'{bios.ReleaseDate}'])
+        info_table.append([f'bios.SMBIOSBIOSVersion', f'{bios.SMBIOSBIOSVersion}'])
+
+        memory = c.Win32_PhysicalMemory()
+        size = 0
+        for mem in memory:
+            size += int(mem.Capacity)
+        info_table.append([f'host.memory size', f'{size/1024/1024/1024} GB'])
+        info_table.append([f'host.memory speed', f'{memory[0].ConfiguredClockSpeed} MHz'])
     else:
         for line in get_lines('lsb_release -d'):
             match_obj = re.search(r'[a-zA-Z ]+[: 	]+([0-9a-zA-Z. ]+)', line)
@@ -93,10 +82,6 @@ def get_system_info(args):
             info_line = ['Kernel Version', line]
             info_table.append(info_line)
 
-    ip_address = get_external_ip_address()
-    if ip_address != None:
-        info_table.append(['IP', ip_address])
-
     if len(info_table) > 0:
         info_tabulate = tabulate(info_table, headers=['property', 'value'],
                                 tablefmt="github", floatfmt='.3f', stralign='left', numalign='right')
@@ -106,11 +91,15 @@ def get_system_info(args):
 def get_cpu_info():
     info_table = []
     if IS_WINDOWS:
-        for line in get_lines('wmic cpu get name,MaxClockSpeed,NumberOfEnabledCore,NumberOfLogicalProcessors,SystemName /format:list'):
-            match_obj = re.search(r'([a-zA-Z]+)=([0-9a-zA-Z() \-]+)', line)
-            if match_obj != None:
-                info_line = [f'{match_obj.group(1)}', f'{match_obj.group(2)}']
-                info_table.append(info_line)
+        c = wmi.WMI() 
+
+        cpu = c.Win32_Processor()[0]
+        info_table.append([f'Name', f'{cpu.Name}'])
+        info_table.append([f'Description', f'{cpu.Description}'])
+        info_table.append([f'NumberOfCores', f'{cpu.NumberOfCores}'])
+        info_table.append([f'NumberOfEnabledCore', f'{cpu.NumberOfEnabledCore}'])
+        info_table.append([f'NumberOfLogicalProcessors', f'{cpu.NumberOfLogicalProcessors}'])
+        info_table.append([f'MaxClockSpeed', f'{cpu.MaxClockSpeed}'])
     else:
         for line in get_lines('lscpu'):
             match_obj = re.search(r'([a-zA-Z() ]+):([0-9a-zA-Z() ]+)', line)
@@ -173,6 +162,14 @@ def get_gpu_info(args):
             match_obj = re.search(r'DEV_([0-9a-zA-Z]+)', line)
             if match_obj != None:
                 dev_dic[dev_name] = match_obj.group(1)
+
+        # c = wmi.WMI() 
+        # videos = c.Win32_VideoController()
+        # for video in videos:
+        #     print(f'video.Name: {video.Name}')
+        #     print(f'video.DriverDate: {video.DriverDate}')
+        #     print(f'video.DriverVersion: {video.DriverVersion}')
+        #     print(f'video.InfSection: {video.InfSection}')
     else:
         # (venv) sungeunk@dg2raptorlake:~/repo/libraries.ai.videoanalyticssuite.gpu-tools$ clinfo -l
         # Platform #0: Intel(R) OpenCL Graphics
@@ -237,7 +234,7 @@ def main():
     parser.add_argument('--get_all', help='query all information', action='store_true')
     args = parser.parse_args()
 
-    get_system_info(args)
+    get_system_info()
     print('')
     get_cpu_info()
     print('')
