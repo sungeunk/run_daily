@@ -6,26 +6,29 @@ from pathlib import Path
 from tqdm.asyncio import tqdm
 
 IS_WINDOWS = platform.system() == 'Windows'
-SERVER_ROOT = 'http://ov-share-05.sclab.intel.com/cv_bench_cache'
-MODEL_COMMIT = 'WW02_llm-optimum_2025.0.0-17771'
-MODEL_LIST = [
-    'baichuan2-7b-chat',
-    'chatglm3-6b',
-    'gemma-7b-it',
-    'glm-4-9b-chat',
-    'llama-2-7b-chat-hf',
-    'llama-3-8b',
-    'minicpm-1b-sft',
-    'mistral-7b-v0.1',
-    'phi-2',
-    'phi-3-mini-4k-instruct',
-    'qwen-7b-chat',
-    'qwen2-7b',
-]
-MODEL_PRECISION_LIST = [
-    'pytorch/ov/OV_FP16-4BIT_DEFAULT',
-]
-DOWNLOAD_URL_LIST = [ f'{SERVER_ROOT}/{MODEL_COMMIT}/{model}/{pre}/' for model in MODEL_LIST for pre in MODEL_PRECISION_LIST ]
+
+def generate_download_url_list(args):
+    SERVER_ROOT = 'http://ov-share-05.sclab.intel.com/cv_bench_cache'
+    MODEL_COMMIT = args.model_commit
+    MODEL_LIST = [
+        'baichuan2-7b-chat',
+        'chatglm3-6b',
+        'gemma-7b-it',
+        'glm-4-9b-chat',
+        'llama-2-7b-chat-hf',
+        'llama-3-8b',
+        'minicpm-1b-sft',
+        'mistral-7b-v0.1',
+        'phi-2',
+        'phi-3-mini-4k-instruct',
+        'qwen-7b-chat',
+        'qwen2-7b',
+    ]
+    MODEL_PRECISION_LIST = [
+        'pytorch/ov/OV_FP16-4BIT_DEFAULT',
+    ]
+    DOWNLOAD_URL_LIST = [ f'{SERVER_ROOT}/{MODEL_COMMIT}/{model}/{pre}/' for model in MODEL_LIST for pre in MODEL_PRECISION_LIST ]
+    return DOWNLOAD_URL_LIST
 
 def convert_cmd_for_popen(cmd):
     return cmd.split() if IS_WINDOWS else cmd
@@ -53,9 +56,11 @@ async def async_download_files(url_list, output):
 def main():
     parser = argparse.ArgumentParser(description="download models" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output', help='output directory', type=Path, default='c:\dev\models' if IS_WINDOWS else '/var/www/html/models')
+    parser.add_argument('--model_commit', help='model commit name at http://ov-share-05.sclab.intel.com/cv_bench_cache/. ex) WW08_llm-optimum_2025.1.0-18224', type=Path, default=None)
     args = parser.parse_args()
 
-    asyncio.run(async_download_files(DOWNLOAD_URL_LIST, args.output))
+    download_url_list = generate_download_url_list(args)
+    asyncio.run(async_download_files(download_url_list, args.output))
 
 if __name__ == "__main__":
     main()
