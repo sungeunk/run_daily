@@ -44,7 +44,7 @@ class TestBenchmark(TestTemplate):
                 if not args.prompt_permutation:
                     cmd += f' --disable_prompt_permutation'
                 if not args.continuous_batch:
-                    cmd += f' --load_config {convert_path("res/config_wa.json")}'
+                    cmd += f' --use_cb --load_config {convert_path("res/config_wa.json")}'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
         return ret_dict
 
