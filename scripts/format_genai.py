@@ -27,9 +27,10 @@ def parsing_log(handle, args):
         if args.verbose:
             print(f'{line}', end =' ')
 
-        match_obj = re.search(r'([\d.-]+)\\([\w.-]+)\\', line)
+        match_obj = re.search(r'([\d.-]+)[\\\/]([\w\.\-]+)[\\\/]pytorch[\\\/]ov[\\\/]([\w\.\-]+)', line)
         if match_obj:
             model_name = match_obj.groups()[1]
+            model_precision = match_obj.groups()[2]
 
             match_obj = re.search(fr'openvino runtime version: ([\w\d\-\_\.\/]+)', line)
             if match_obj:
@@ -61,15 +62,15 @@ def parsing_log(handle, args):
             values = match_obj.groups()
             ret.append([model_name, temp_item[0], temp_item[2], temp_item[3], temp_item[4], get_float(values[0]), get_float(values[1]), temp_item[5], temp_item[6], float(temp_item[7])*1000, temp_item[8]])
 
-            key = (model_name, temp_item[2])
+            key = (model_name, model_precision, temp_item[2])
             if not key in dict_data.keys():
                 dict_data[key] = [[get_float(values[0]), get_float(values[1])]]
             else:
                 dict_data[key].append([get_float(values[0]), get_float(values[1])])
             continue
 
-    raw_data_list = []
-    print(f'model,token,exec,latench(ms)')
+    # raw_data_list = []
+    print(f'model,model_precision,token,exec,latench(ms)')
     for key, data_list in dict_data.items():
         prev_geomean = 100000
         prev_data = []
@@ -78,10 +79,10 @@ def parsing_log(handle, args):
             if prev_geomean > geomean:
                 prev_geomean = geomean
                 prev_data = data
-        raw_data_list.append([key[0], key[1], '1st', prev_data[0]])
-        raw_data_list.append([key[0], key[1], '2nd', prev_data[1]])
-        print(f'{key[0]},{key[1]},1st,{prev_data[0]:.2f}')
-        print(f'{key[0]},{key[1]},2nd,{prev_data[1]:.2f}')
+        # raw_data_list.append([key[0], key[1], key[2], '1st', prev_data[0]])
+        # raw_data_list.append([key[0], key[1], key[2], '2nd', prev_data[1]])
+        print(f'{key[0]},{key[1]},{key[2]},1st,{prev_data[0]:.2f}')
+        print(f'{key[0]},{key[1]},{key[2]},2nd,{prev_data[1]:.2f}')
 
     # headers = ['model', 'iteration', 'token size', 'out size', 'inf num', '1st inf(ms)', '2nd inf(ms)', 'token(ms)', 'detoken(ms)', 'generation(ms)', 'latency(ms)/token']
     # table = tabulate(ret, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')

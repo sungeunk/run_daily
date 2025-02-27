@@ -15,6 +15,7 @@ import tqdm.asyncio as tqdm_asyncio
 import yaml
 
 from bs4 import BeautifulSoup
+from common_utils import *
 from dateutil.parser import parse
 from git import Repo, RemoteProgress
 from glob import glob
@@ -249,9 +250,7 @@ def download_genai_packages(url, ov_dst_path):
 def decompress(compressed_filepath, store_path, delete_zip=False):
     root, ext = os.path.splitext(compressed_filepath)
     if ext == '.zip':
-        import zipfile
-        with zipfile.ZipFile(compressed_filepath, 'r') as file:
-            file.extractall(store_path)
+        os.system(f'unzip -o -q {compressed_filepath}')
     elif ext == '.tgz':
         import tarfile
         with tarfile.open(compressed_filepath) as file:
@@ -460,6 +459,7 @@ def main():
     parser.add_argument('--keep_old', help='keep old pkg files/directories', action='store_true')
     parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
     parser.add_argument('--no_proxy', help='try to download pkgs with no_proxy', action='store_true')
+    parser.add_argument('-i', '--install', help='install openvino package', type=Path, default=None)
     args = parser.parse_args()
 
     if args.manifest != None:
@@ -467,6 +467,15 @@ def main():
         return 0
 
     os.makedirs(args.output, exist_ok=True)
+
+    if args.install:
+        if os.path.isdir(args.install):
+            os.chdir(args.install)
+            for file in glob('*.zip') + glob('*.tgz'):
+                decompress(file, args.output)
+        else:
+            install_openvino(args.install, args.output)
+        return 0
 
     # WA: replace 'https' to 'http'
     if args.download_url:
