@@ -43,9 +43,7 @@ class TestBenchmark(TestTemplate):
                 cmd = f'python {APP_PATH} -m {MODEL_PATH} -pf {PROMPT_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--optimum" if args.optimum else "" }'
                 if not args.prompt_permutation:
                     cmd += f' --disable_prompt_permutation'
-                if args.continuous_batch:
-                    cmd += f' --use_cb'
-                else:
+                if not args.continuous_batch:
                     cmd += f' --load_config {convert_path("res/config_wa.json")}'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
         return ret_dict
