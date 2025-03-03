@@ -292,7 +292,10 @@ def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
             ref_data_list = __get_data_list(ref_cmd_item_list, y)
 
             for x in range(0, max(len(this_data_list), len(ref_data_list))):
-                callback(fos, this_key_tuple, __get_data_item(this_data_list, x), __get_data_item(ref_data_list, x))
+                this_item = __get_data_item(this_data_list, x)
+                ref_item = __get_data_item(ref_data_list, x)
+                if this_item != None:
+                    callback(fos, this_key_tuple, this_item, ref_item)
 
 # tabulate_data: [model, precision, token, iou]
 def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dict, ref_item:dict):
