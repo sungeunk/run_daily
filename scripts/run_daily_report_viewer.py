@@ -102,11 +102,10 @@ def get_dataframe_ccg_table(filename, need_column=False):
                 return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
     return pd.DataFrame()
 
-def get_excel_data(dataframe, report_df) -> str:
+def get_excel_data(dataframe, report_df):
     if dataframe.size == 0:
-        return ''
+        return None, ''
     df = dataframe.iloc[:, 5:]
-    st.write(df)
 
     table_str = '\n\n'
     commit_line = ''
@@ -126,7 +125,7 @@ def get_excel_data(dataframe, report_df) -> str:
         for i in range(0, len(item)):
             table_str += f'{item[i]}\t'
         table_str = table_str[:-1] + '\n'
-    return table_str
+    return df, table_str
 
 def settings():
     pd.set_option('display.float_format', lambda x: '%.3f' % x)
@@ -157,7 +156,7 @@ def main():
         else:
             report_filtered_df = report_df
 
-    report_selection_list = st.dataframe(data=report_filtered_df, key='choosed_report_df', on_select='rerun', selection_mode='multi-row')
+    report_selection_list = st.dataframe(data=report_filtered_df, key='choosed_report_df', on_select='rerun', selection_mode='multi-row', width=4000)
     report_filtered_selection_df = report_filtered_df.iloc[report_selection_list['selection']['rows']]
 
     # tab interface
@@ -170,8 +169,9 @@ def main():
 
         # generate excel data
         # input: removed model_name/in_token/out_token columns
-        excel_str = get_excel_data(ccg_table_df_all, report_df)
+        excel_df, excel_str = get_excel_data(ccg_table_df_all, report_df)
         st.text_area('Text for Excel', value=excel_str, label_visibility="visible")
+        st.write(excel_df)
 
 
 if __name__ == "__main__":
