@@ -42,15 +42,18 @@ def add_unit_for_value(key, value):
 
 def get_lines(cmd):
     lines = []
-    cp = subprocess.run(cmd.split(), capture_output=True, encoding='utf-8')
-    for line in cp.stdout.splitlines():
-        line = line.rstrip()
-        if line == '':
-            continue
+    try:
+        cp = subprocess.run(cmd.split(), capture_output=True, encoding='utf-8')
+        for line in cp.stdout.splitlines():
+            line = line.rstrip()
+            if line == '':
+                continue
 
-        lines.append(line)
+            lines.append(line)
+    except:
+        pass
 
-    return lines if len(lines) > 0 else None
+    return lines
 
 def get_system_info():
     info_table = []
