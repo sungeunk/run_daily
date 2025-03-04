@@ -250,7 +250,12 @@ def download_genai_packages(url, ov_dst_path):
 def decompress(compressed_filepath, store_path, delete_zip=False):
     root, ext = os.path.splitext(compressed_filepath)
     if ext == '.zip':
-        os.system(f'unzip -o -q {compressed_filepath}')
+        if IS_WINDOWS:
+            import zipfile
+            with zipfile.ZipFile(compressed_filepath, 'r') as file:
+                file.extractall(store_path)
+        else:
+            os.system(f'unzip -o -q {compressed_filepath}')
     elif ext == '.tgz':
         import tarfile
         with tarfile.open(compressed_filepath) as file:
