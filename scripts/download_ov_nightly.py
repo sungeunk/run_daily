@@ -11,6 +11,7 @@ import re
 import requests
 import shutil
 import subprocess
+import sys
 import tqdm.asyncio as tqdm_asyncio
 import yaml
 
@@ -298,22 +299,6 @@ def get_directory(json_obj, directory):
 
     return json_obj
 
-class TargetOS(enum.Enum):
-    AUTO = 'auto'
-    WINDOWS = 'windows'
-    UBUNTU_20 = 'ubuntu20'
-    UBUNTU_22 = 'ubuntu22'
-
-    def __str__(self):
-        return self.name
-
-    @staticmethod
-    def from_string(s):
-        try:
-            return TargetOS[s]
-        except KeyError:
-            raise ValueError()
-
 def get_private_cpack_url():
     if IS_WINDOWS:
         return 'private_windows_vs2022_release/cpack'
@@ -465,6 +450,7 @@ def main():
     parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
     parser.add_argument('--no_proxy', help='try to download pkgs with no_proxy', action='store_true')
     parser.add_argument('-i', '--install', help='install openvino package', type=Path, default=None)
+    parser.add_argument('--latest_commit', help='query latest master commit', action='store_true')
     args = parser.parse_args()
 
     if args.manifest != None:
@@ -490,10 +476,12 @@ def main():
     if args.no_proxy:
         os.environ['no_proxy'] = 'localhost,intel.com,192.168.0.0/16,172.16.0.0/12,127.0.0.0/8,10,0.0.0/8'
 
+    retcode = -1
     try:
         if args.download_url and (args.download_url.endswith('.zip') or args.download_url.endswith('.tgz')):
             ov_zip_filepath = download_file(args.download_url, args.output)
             install_openvino(ov_zip_filepath, args.output)
+            retcode = 0
         else:
             if args.download_url:
                 target_url_list = [ args.download_url ]
@@ -503,10 +491,16 @@ def main():
                 target_url_list = get_list_of_openvino_master(args)
 
             for target_url in target_url_list:
-                log.info(f'download pkgs from {target_url}')
+                log.info(f'try to download pkgs from {target_url}')
                 try:
                     if not check_required_packages(target_url):
+                        log.info(f'-> no required package in {target_url}')
                         continue
+
+                    if args.latest_commit:
+                        log.info(f'->    required package in {target_url}')
+                        return 0
+
                     log.info(f'- download OpenVINO packages')
                     openvino_zip_file_list, new_out_path = download_openvino_packages(target_url, args.output)
                     log.info(f'- download GenAI packages')
@@ -519,12 +513,13 @@ def main():
                     save_ov_version(args, get_ov_version(target_url))
                     manifest_filepath = save_manifest(target_url, new_out_path)
                     log.info(f'{generate_manifest(manifest_filepath)}')
+                    retcode = 0
                     break
                 except Exception as e:
                     log.warning(f'{e}')
     except Exception as e:
         log.error(f'{e}')
-        return
+        sys.exit(-1)
 
     # clean up old pkgs(zip/directory)
     if not args.keep_old:
@@ -543,6 +538,7 @@ def main():
             log.info(f'removed: {file}')
             shutil.rmtree(file, ignore_errors=True)
 
+    sys.exit(retcode)
 
 
 if __name__ == "__main__":
