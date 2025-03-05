@@ -249,6 +249,9 @@ def download_genai_packages(url, ov_dst_path):
     return asyncio.run(async_download_files(list, ov_dst_path))
 
 def decompress(compressed_filepath, store_path, delete_zip=False):
+    old_path = os.curdir
+    os.chdir(store_path)
+
     root, ext = os.path.splitext(compressed_filepath)
     if ext == '.zip':
         if IS_WINDOWS:
@@ -264,6 +267,8 @@ def decompress(compressed_filepath, store_path, delete_zip=False):
 
     if delete_zip:
         os.remove(compressed_filepath)
+
+    os.chdir(old_path)
 
     return os.path.join(*[store_path, os.path.basename(root)]), ext
 
