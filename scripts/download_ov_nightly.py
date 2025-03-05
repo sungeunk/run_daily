@@ -351,6 +351,7 @@ def get_list_of_openvino_master(args):
     master_commit_list.sort(key = lambda x : x[1], reverse=True)
 
     old_ov_version = load_ov_version(args)
+    exist_ov = len(old_ov_version) > 0
     latest_commit_list = get_latest_commit_list_from_openvino()
     ret_list = []
     for commit in master_commit_list[:40]:
@@ -361,7 +362,7 @@ def get_list_of_openvino_master(args):
         if check_ov_version(args, url):
             ret_list.append(url)
         else:
-            log.warning(f'Exist ov version: {old_ov_version}. old version({get_ov_version(url)}) in {url}')
+            log.warning(f'Exist ov version: {old_ov_version}. version is ({get_ov_version(url)}) in {url}')
         if len(ret_list) >= 10:
             break
 
@@ -371,7 +372,7 @@ def get_list_of_openvino_master(args):
     else:
         for url in ret_list:
             log.info(f'\t{url}')
-    return ret_list
+    return ret_list, exist_ov
 
 def get_url(commit_id):
     url_list = {
@@ -488,7 +489,9 @@ def main():
             elif args.commit_id:
                 target_url_list = [ get_url(args.commit_id) ]
             else:
-                target_url_list = get_list_of_openvino_master(args)
+                target_url_list, exist_ov = get_list_of_openvino_master(args)
+                if exist_ov:
+                    return 0
 
             for target_url in target_url_list:
                 log.info(f'try to download pkgs from {target_url}')
