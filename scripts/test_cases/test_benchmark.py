@@ -91,7 +91,7 @@ class TestBenchmark(TestTemplate):
                     ret_list[int(values[0])][CmdItemKey.DataItemKey.perf] = new_perf
                 continue
 
-            match_obj = re.search(r'\[\w(\d+)\] Generated:([\S ]+)', line)
+            match_obj = re.search(r'\[warm-up\]\[\w(\d+)\] Generated:([\S ]+)', line)
             if match_obj != None:
                 values = match_obj.groups()
                 prompt_id = int(values[0])
