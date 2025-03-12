@@ -496,7 +496,7 @@ def main():
             else:
                 target_url_list, exist_ov = get_list_of_openvino_master(args)
                 if exist_ov:
-                    return 0
+                    retcode = 0
 
             for target_url in target_url_list:
                 log.info(f'try to download pkgs from {target_url}')
