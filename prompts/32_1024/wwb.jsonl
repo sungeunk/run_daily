@@ -1,0 +1,5 @@
+{"token_size": "31", "type": "complex_instruction", "language": "EN", "prompt": "Who is Mark Twain?","source": "manual"}
+{"token_size": "32", "type": "complex_instruction", "language": "EN", "prompt": "Who is William Shakespeare?","source": "manual"}
+{"token_size": "33", "type": "complex_instruction", "language": "EN", "prompt": "What is C++?","source": "manual"}
+{"token_size": "34", "type": "complex_instruction", "language": "EN", "prompt": "Who is the most famous writer?","source": "manual"}
+{"token_size": "35", "type": "complex_instruction", "language": "EN", "prompt": "What color will you get when you mix blue and yellow?","source": "manual"}
