@@ -16,10 +16,11 @@ def generate_download_url_list(args):
         'gemma-7b-it',
         'glm-4-9b-chat',
         'llama-2-7b-chat-hf',
-        'llama-3-8b',
+        'llama-3.1-8b-instruct', # old: 'llama-3-8b',
         'minicpm-1b-sft',
+        'minicpm-v-2_6',
         'mistral-7b-v0.1',
-        'phi-2',
+        'phi-3.5-mini-instruct', # old: 'phi-2',
         'phi-3-mini-4k-instruct',
         'qwen-7b-chat',
         'qwen2-7b',
@@ -56,7 +57,7 @@ async def async_download_files(url_list, output):
 def main():
     parser = argparse.ArgumentParser(description="download models" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output', help='output directory', type=Path, default='c:\dev\models' if IS_WINDOWS else '/var/www/html/models')
-    parser.add_argument('--model_commit', help='model commit name at http://ov-share-05.sclab.intel.com/cv_bench_cache/. ex) WW08_llm-optimum_2025.1.0-18224', type=Path, default=None)
+    parser.add_argument('--model_commit', help='model commit name at http://ov-share-05.sclab.intel.com/cv_bench_cache/. ex) WW08_llm-optimum_2025.1.0-18224', type=str, default='WW15_llm-optimum_2025.2.0-18690')
     args = parser.parse_args()
 
     download_url_list = generate_download_url_list(args)

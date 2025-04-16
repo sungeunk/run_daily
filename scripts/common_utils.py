@@ -87,7 +87,7 @@ def compare_class_name(klass, target):
 # WA: At subprocess.popen(cmd, ...), the cmd should be string on ubuntu or be string array on windows.
 #
 def convert_cmd_for_popen(cmd: str) -> str:
-    return cmd.split() if is_windows() else cmd
+    return cmd.split() # if is_windows() else cmd
 
 def convert_path(path):
     if is_windows():

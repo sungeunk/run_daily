@@ -1,30 +1,37 @@
-import aiohttp
-import argparse
-import asyncio
-import datetime
-import enum
-import json
-import logging as log
-import os
-import platform
-import re
-import requests
-import shutil
-import subprocess
-import sys
-import tqdm.asyncio as tqdm_asyncio
-import yaml
 
-from bs4 import BeautifulSoup
-from common_utils import *
-from dateutil.parser import parse
-from git import Repo, RemoteProgress
-from glob import glob
-from operator import itemgetter
-from packaging.version import Version
-from pathlib import Path
-from tabulate import tabulate
-from tqdm import tqdm
+try:
+    import aiohttp
+    import argparse
+    import asyncio
+    import datetime
+    import enum
+    import json
+    import logging as log
+    import os
+    import platform
+    import re
+    import requests
+    import shutil
+    import subprocess
+    import sys
+    import tqdm.asyncio as tqdm_asyncio
+    import yaml
+
+    from bs4 import BeautifulSoup
+    from common_utils import *
+    from dateutil.parser import parse
+    from git import Repo, RemoteProgress
+    from glob import glob
+    from operator import itemgetter
+    from packaging.version import Version
+    from pathlib import Path
+    from tabulate import tabulate
+    from tqdm import tqdm
+except ImportError:
+    print(f'Please install these modules: pip install aiohttp requests tqdm pyyaml bs4 python-dateutil gitpython packaging tabulate')
+    sys.exit(-1)
+
+# pip install aiohttp requests tqdm pyyaml bs4 python-dateutil gitpython packaging tabulate
 
 
 ################################################
