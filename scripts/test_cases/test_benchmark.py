@@ -8,7 +8,14 @@ from statistics import geometric_mean
 from common_utils import *
 from .test_template import *
 
+
+BENCHMARK_MODE = 'BENCHMARK_MODE'
+BENCHMARK_MODE_LLM = 'LLM'
+BENCHMARK_MODE_VLM = 'VLM'
+BENCHMARK_MODE_DEFAULT = BENCHMARK_MODE_LLM
+
 class TestBenchmark(TestTemplate):
+
     CONFIG_MAP = {
         (ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
@@ -22,6 +29,7 @@ class TestBenchmark(TestTemplate):
         (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT): [{BENCHMARK_MODE:BENCHMARK_MODE_VLM, 'prompt': 'What is on this image?', 'media': convert_path("res/cat-448x448.png")}],
     }
 
     def __get_configs():
@@ -39,12 +47,19 @@ class TestBenchmark(TestTemplate):
 
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/32_1024/{key_tuple[0]}.jsonl')
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -pf {PROMPT_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--optimum" if args.optimum else "" }'
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--optimum" if args.optimum else "" }'
                 if not args.prompt_permutation:
                     cmd += f' --disable_prompt_permutation'
                 if not args.continuous_batch:
                     cmd += f' --load_config {convert_path("res/config_wa.json")}'
+
+                TEST_MODE = config.get(BENCHMARK_MODE, BENCHMARK_MODE_DEFAULT)
+                if TEST_MODE == BENCHMARK_MODE_LLM:
+                    PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/32_1024/{key_tuple[0]}.jsonl')
+                    cmd += f' -pf {PROMPT_PATH}'
+                elif TEST_MODE == BENCHMARK_MODE_VLM:
+                    cmd += f' -p "{config["prompt"]}" --media {config["media"]}'
+
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
         return ret_dict
 
@@ -121,17 +136,29 @@ class TestBenchmark(TestTemplate):
                                             __get_inf(result_item, 0), __get_inf(result_item, 1)])
 
         if len(raw_data_list):
-            value_dict_1st = {}
-            value_dict_2nd = {}
-            value_dict_1st[32]   = [ float(raw_data[4]) for raw_data in raw_data_list if len(raw_data) == 6 and raw_data[2] == 32 and is_float(raw_data[4]) ]
-            value_dict_1st[1024] = [ float(raw_data[4]) for raw_data in raw_data_list if len(raw_data) == 6 and raw_data[2] == 1024 and is_float(raw_data[4]) ]
-            value_dict_2nd[32]   = [ float(raw_data[5]) for raw_data in raw_data_list if len(raw_data) == 6 and raw_data[2] == 32 and is_float(raw_data[5]) ]
-            value_dict_2nd[1024] = [ float(raw_data[5]) for raw_data in raw_data_list if len(raw_data) == 6 and raw_data[2] == 1024 and is_float(raw_data[5]) ]
+            SHORT_TOKEN_ID = 0
+            LONG_TOKEN_ID = 1
+            value_dict_1st = {SHORT_TOKEN_ID:[], LONG_TOKEN_ID:[]}
+            value_dict_2nd = {SHORT_TOKEN_ID:[], LONG_TOKEN_ID:[]}
+
+            for raw_data in raw_data_list:
+                print(f'raw_data: {raw_data}, is_float([raw_data[4]]): {is_float(raw_data[4])}, is_float([raw_data[5]]): {is_float(raw_data[5])}')
+                if len(raw_data) != 6:
+                    continue
+
+                token_id = LONG_TOKEN_ID if int(raw_data[2]) > 100 else SHORT_TOKEN_ID
+                if is_float(raw_data[4]):
+                    value_dict_1st[token_id].append(float(raw_data[4]))
+                if is_float(raw_data[5]):
+                    value_dict_2nd[token_id].append(float(raw_data[5]))
+
+            def __get_geomean(data):
+                return geometric_mean(data) if len(data) > 0 else 0
 
             raw_data_list.append(['','','','','-','-'])
-            raw_data_list.append(['Success count', '', '', '', len(value_dict_1st[32]) + len(value_dict_1st[1024]), len(value_dict_2nd[32]) + len(value_dict_2nd[1024])])
-            raw_data_list.append(['geomean (token:  32)', '', '', '', f'{geometric_mean(value_dict_1st[32]):.02f}', f'{geometric_mean(value_dict_2nd[32]):.02f}'])
-            raw_data_list.append(['geomean (token:1024)', '', '', '', f'{geometric_mean(value_dict_1st[1024]):.02f}', f'{geometric_mean(value_dict_2nd[1024]):.02f}'])
+            raw_data_list.append(['Success count', '', '', '', len(value_dict_1st[SHORT_TOKEN_ID]) + len(value_dict_1st[LONG_TOKEN_ID]), len(value_dict_2nd[SHORT_TOKEN_ID]) + len(value_dict_2nd[LONG_TOKEN_ID])])
+            raw_data_list.append(['geomean (token:short)', '', '', '', f'{__get_geomean(value_dict_1st[SHORT_TOKEN_ID]):.02f}', f'{__get_geomean(value_dict_2nd[SHORT_TOKEN_ID]):.02f}'])
+            raw_data_list.append(['geomean (token:long)',  '', '', '', f'{__get_geomean(value_dict_1st[LONG_TOKEN_ID]):.02f}',  f'{__get_geomean(value_dict_2nd[LONG_TOKEN_ID]):.02f}'])
 
             headers = ['model', 'precision', 'in token', 'out token', '1st inf', '2nd inf']
             tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='right')
