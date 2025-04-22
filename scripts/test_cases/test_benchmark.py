@@ -28,7 +28,7 @@ class TestBenchmark(TestTemplate):
         (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT): [{BENCHMARK_MODE:BENCHMARK_MODE_VLM, 'prompt': 'What is on this image?', 'media': convert_path("res/cat-448x448.png")}],
     }
 

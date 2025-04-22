@@ -66,7 +66,6 @@ class ModelName():
     phi_3_mini_4k_instruct = 'phi-3-mini-4k-instruct'
     gemma_7b_it = 'gemma-7b-it'
     qwen_7b_chat = 'qwen-7b-chat'
-    qwen2_7b = 'qwen2-7b'
 
 class ModelConfig():
     UNKNOWN = ''

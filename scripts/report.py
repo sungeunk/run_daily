@@ -111,8 +111,8 @@ def generate_ccg_table(result_root):
     table.append(['Stable-Diffusion3 (bs=1, FP16, 1024x1024, 28steps)', '', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
 
     MODEL_CONFIG = [
-        [(ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'qwen2-7b INT4 DEFAULT', 1024],
-        [(ModelName.phi_2, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Phi-2 INT4 DEFAULT', 1024],
+        [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'qwen2-7b INT4 DEFAULT', 1024],
+        [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'phi-3.5-mini INT4 DEFAULT', 1024],
         [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'minicpm-1b-sft INT4 DEFAULT', 1024],
     ]
     for config in MODEL_CONFIG:
@@ -208,7 +208,7 @@ def generate_csv_raw_data(result_root) -> list:
         [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_qwen],
-        [(ModelName.qwen2_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
         [('SD 1.5', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
         [('SD 1.5', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
