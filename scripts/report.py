@@ -198,7 +198,7 @@ def generate_csv_raw_data(result_root) -> list:
     MODEL_REPORT_CONFIG = [
         [(ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [("glm-4-9b-chat-hf", ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('llama-3.1-8b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],

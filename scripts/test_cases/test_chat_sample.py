@@ -7,7 +7,7 @@ from .test_template import *
 
 class TestChatSample(TestTemplate):
     CONFIG_MAP = {
-        (ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{'app_path': 'openvino.genai/samples/python/text_generation/chat_sample.py'}],
+        ("glm-4-9b-chat-hf", ModelConfig.OV_FP16_4BIT_DEFAULT): [{'app_path': 'openvino.genai/samples/python/text_generation/chat_sample.py'}],
     }
 
     def __get_configs():

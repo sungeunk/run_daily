@@ -14,7 +14,7 @@ def generate_download_url_list(args):
         'baichuan2-7b-chat',
         'chatglm3-6b',
         'gemma-7b-it',
-        'glm-4-9b-chat',
+        'glm-4-9b-chat-hf',
         'llama-2-7b-chat-hf',
         'llama-3.1-8b-instruct', # old: 'llama-3-8b',
         'minicpm-1b-sft',
@@ -23,7 +23,7 @@ def generate_download_url_list(args):
         'phi-3.5-mini-instruct', # old: 'phi-2',
         'phi-3-mini-4k-instruct',
         'qwen-7b-chat',
-        'qwen2-7b',
+        'qwen2-7b-instruct',     # old: 'qwen2-7b',
     ]
     MODEL_PRECISION_LIST = [
         'pytorch/ov/OV_FP16-4BIT_DEFAULT',
@@ -47,8 +47,6 @@ async def async_download_files(url_list, output):
                 process = await asyncio.create_subprocess_shell(wget_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             stdout, stderr = await process.communicate()
             print(f'done: {wget_cmd}')
-            print(f'stdout: {stdout}')
-            print(f'stderr: {stderr}')
 
     await tqdm.gather(
         *[async_download_file(url, output) for url in url_list]

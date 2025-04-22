@@ -60,7 +60,6 @@ class CmdItemKey:
 class ModelName():
     baichuan2_7b_chat = 'baichuan2-7b-chat'
     chatglm3_6b = 'chatglm3-6b'
-    glm_4_9b_chat = 'glm-4-9b-chat'
     llama_2_7b_chat_hf = 'llama-2-7b-chat-hf'
     minicpm_1b_sft = 'minicpm-1b-sft'
     mistral_7b = 'mistral-7b-v0.1'

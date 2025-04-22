@@ -19,7 +19,7 @@ class TestBenchmark(TestTemplate):
     CONFIG_MAP = {
         (ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.glm_4_9b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ("glm-4-9b-chat-hf", ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('llama-3.1-8b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
