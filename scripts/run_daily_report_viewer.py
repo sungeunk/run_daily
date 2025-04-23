@@ -138,10 +138,13 @@ def main():
     parser.add_argument('-i', '--report_dir', help=f'daily reports stored directory (for debugging. default path: {ROOT_DAILY_REPORT})', type=str, default=None)
     args = parser.parse_args()
 
-    config_column_1, config_column_2 = st.columns(2)
+    config_column_1, config_column_2, config_column_3 = st.columns(spec=[0.1, 0.2, 0.7], vertical_alignment="bottom")
     with config_column_1:
+        daily_list_on = st.checkbox("daily", value=True)
+
+    with config_column_2:
         if args.report_dir == None:
-            server_selection = st.selectbox("Select Server", sorted(os.listdir(ROOT_DAILY_REPORT)))
+            server_selection = st.selectbox("Select Server", ['MININT-3MIUM4N', 'MTL-01', 'DUT6047BMGFRD', 'DUT133ARLH', 'LNL-02', 'dg2alderlake'] if daily_list_on else sorted(os.listdir(ROOT_DAILY_REPORT)))
             report_dir = os.path.join(ROOT_DAILY_REPORT, server_selection)
         else:
             report_dir = args.report_dir
@@ -149,8 +152,8 @@ def main():
     report_df = get_daily_report_dataframe(report_dir)
 
     # filter report list by purpose
-    with config_column_2:
-        filter_str = st.text_input(label='Filter:', value='daily')
+    with config_column_3:
+        filter_str = st.text_input(label='Filter:', value='daily_CB')
         if len(filter_str):
             report_filtered_df = report_df[report_df['purpose'].str.contains(filter_str)]
         else:
