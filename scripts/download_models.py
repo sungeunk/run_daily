@@ -55,7 +55,7 @@ async def async_download_files(url_list, output):
 def main():
     parser = argparse.ArgumentParser(description="download models" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-o', '--output', help='output directory', type=Path, default='c:\dev\models' if IS_WINDOWS else '/var/www/html/models')
-    parser.add_argument('--model_commit', help='model commit name at http://ov-share-05.sclab.intel.com/cv_bench_cache/. ex) WW08_llm-optimum_2025.1.0-18224', type=str, default='WW15_llm-optimum_2025.2.0-18690')
+    parser.add_argument('--model_commit', help='model commit name at http://ov-share-05.sclab.intel.com/cv_bench_cache/. ex) WW14_llm-optimum_2025.2.0-18615', type=str, default='WW14_llm-optimum_2025.2.0-18615')
     args = parser.parse_args()
 
     download_url_list = generate_download_url_list(args)
