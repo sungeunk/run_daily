@@ -98,7 +98,7 @@ class TestMeasuredUsageCpp(TestTemplate):
                     raw_data_list.append([index, result_item.get(CmdItemKey.DataItemKey.in_token, 0), result_item.get(CmdItemKey.DataItemKey.out_token, 0),
                                         __get_inf(result_item, 0), __get_inf(result_item, 1),
                                         cmd_item.get(CmdItemKey.peak_cpu_usage_percent, 0),
-                                        cmd_item.get(CmdItemKey.peak_mem_usage_size, 0),
+                                        sizeof_fmt(cmd_item.get(CmdItemKey.peak_mem_usage_size, 0)),
                                         cmd_item.get(CmdItemKey.peak_mem_usage_percent, 0)])
                     index += 1
 

@@ -64,7 +64,7 @@ class CmdHelper():
             cpu_usage_percent, mem_usage_size, mem_usage_percent = self.tracker.stop()
             self.cmd_item[CmdItemKey.peak_cpu_usage_percent] = cpu_usage_percent
             self.cmd_item[CmdItemKey.peak_mem_usage_percent] = mem_usage_percent
-            self.cmd_item[CmdItemKey.peak_mem_usage_size] = sizeof_fmt(mem_usage_size)
+            self.cmd_item[CmdItemKey.peak_mem_usage_size] = mem_usage_size  #sizeof_fmt(mem_usage_size)
 
         self.cmd_item[CmdItemKey.process_time] = time.time() - self.test_start_time
 

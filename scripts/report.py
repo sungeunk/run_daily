@@ -164,13 +164,16 @@ def generate_csv_raw_data(result_root) -> list:
         while len(raw_data_list) < 2: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
-    def raw_data_for_qwen(key_tuple):
+    def raw_data_for_measure_usage(key_tuple):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
+                peak_mem_usage_size = sizestr_to_num(cmd_item[CmdItemKey.peak_mem_usage_size])
+                peak_mem_usage_percent = cmd_item[CmdItemKey.peak_mem_usage_percent]
+
                 for result_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '1st', __get_inf(result_item, 0)])
-                    raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '2nd', __get_inf(result_item, 1)])
+                    raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], 'memory size', peak_mem_usage_size])
+                    raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], 'memory percent', peak_mem_usage_percent])
 
         while len(raw_data_list) < 16: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
@@ -207,7 +210,7 @@ def generate_csv_raw_data(result_root) -> list:
         [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_qwen],
+        [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_measure_usage],
         [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
         [('SD 1.5', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
@@ -228,25 +231,37 @@ def generate_csv_raw_data(result_root) -> list:
         table.extend(raw_data_func(key_tuple))
     return table
 
-def generate_csv_table(result_root) -> tuple[str, int, int]:
+def generate_csv_table(result_root) -> tuple[list, str, int, int]:
     table = generate_csv_raw_data(result_root)
 
-    value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) ]
-    success_count = len(value_list)
+    # formating table for report
+    success_count = 0
+    value_list = []
+    for item in table:
+        if len(item) == 6:
+            if item[0] == 'qwen_usage' and item[4] == 'memory percent':
+                item[5] = f'{item[5]:.2f}'
+                success_count += 1
+            elif item[0] == 'qwen_usage' and item[4] == 'memory size':
+                item[5] = sizeof_fmt(item[5])
+                success_count += 1
+            elif is_float(item[5]):
+                value_list.append(float(item[5]))
+                success_count += 1
+
     geomean = 0
     if len(value_list):
         geomean = geometric_mean(value_list)
 
     def add_table_for_llm(table, token_size, exec):
         __value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) and raw_list[2] == token_size and raw_list[4] == exec ]
-        __success_count = len(value_list)
         if len(__value_list):
             __geomean = geometric_mean(__value_list)
             table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', f'{float(__geomean):.2f}'])
         else:
             table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', 0])
 
-    table.append(['', '', '', '', '', '-'])
+    table.append(['', '', '', '', '', ''])
     table.append(['Success count', '', '', '', '', success_count])
     table.append(['geomean', '', '', '', '', f'{float(geomean):.2f}'])
     add_table_for_llm(table, 32, '2nd')
@@ -255,7 +270,7 @@ def generate_csv_table(result_root) -> tuple[str, int, int]:
     add_table_for_llm(table, 1024, '1st')
 
     tabulate_str = tabulate(table, tablefmt="github", headers=['model', 'precision', 'in', 'out', 'exec', 'latency(ms)'], floatfmt='.2f', stralign='right', numalign='right')
-    return f'[Result] csv table\n' + tabulate_str, geomean, success_count
+    return table, f'[Result] csv table\n' + tabulate_str, geomean, success_count
 
 def calculate_score(ref, target):
     if len(ref) == 0 or len(target) == 0:
@@ -434,7 +449,7 @@ def generate_error_table(result_root) -> str:
 def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     out = StringIO()
     ccg_tabulate = ''#generate_ccg_table(result_root)
-    csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
+    table, csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
     summary_tabulate = generate_summary(args, PROCESS_TIME)
     versions_table = generate_versions()
 
@@ -442,7 +457,7 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     # System info
     #
     APP = os.path.join('scripts', 'device_info.py')
-    system_info, returncode = call_cmd(args, f'python {APP}', shell=True, verbose=False)
+    system_info, returncode = call_cmd(args, f'python {APP}', shell=False, verbose=False)
 
     #
     # Generate Report
@@ -495,5 +510,5 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     return out.getvalue()
 
 def generate_mail_title_suffix(result_root:dict):
-    csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
+    table, csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
     return f'({float(csv_geomean):.2f}/{csv_success_cnt})'

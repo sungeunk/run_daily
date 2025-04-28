@@ -5,6 +5,7 @@ from io import StringIO
 import logging as log
 import os
 import platform
+import re
 import subprocess
 import time
 
@@ -88,7 +89,7 @@ def compare_class_name(klass, target):
 #
 def convert_cmd_for_popen(cmd: str) -> str:
     # return cmd.split() # if is_windows() else cmd
-    return cmd
+    return cmd if is_windows() else cmd.split()
 
 def convert_path(path):
     if is_windows():
@@ -116,6 +117,12 @@ def is_float(value):
     except Exception as e:
         return False
 
+def is_str(value):
+    try:
+        return isinstance(str(value), str)
+    except Exception as e:
+        return False
+
 def is_windows() -> bool:
     return platform.system() == 'Windows'
 
@@ -125,11 +132,23 @@ def replace_ext(filepath, new_ext):
     return filepath_str[0:index] + '.' + new_ext
 
 def sizeof_fmt(num):
+    if not is_float(num):
+        return num
     for unit in ("", "KB", "MB", "GB", "TB"):
         if abs(num) < 1024.0:
             return f"{num:3.1f} {unit}"
         num /= 1024.0
     raise Exception(f'Out of bound!!! size({num})')
+
+def sizestr_to_num(str):
+    if not is_str(str):
+        return float(str)
+    value_dict = {"KB":1024, "MB":1024*1024, "GB":1024*1024*1024, "TB":1024*1024*1024*1024}
+    match_obj = re.search(r'([\d.]+) ([\w]+)', str)
+    if match_obj:
+        values = match_obj.groups()
+        return float(values[0]) * value_dict.get(values[1], 1)
+    return float(str)
 
 def send_mail(report_path, recipients, title, suffix_title=''):
     MAIL_TITLE = f'[{platform.node()}/{GlobalConfig().NOW}] {title} {suffix_title}'

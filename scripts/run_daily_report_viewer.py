@@ -5,7 +5,8 @@ import pandas as pd
 import re
 import streamlit as st
 
-from common_utils import is_float
+from common_utils import *
+from report import *
 from datetime import datetime
 from glob import glob
 from pathlib import Path
@@ -65,42 +66,24 @@ def get_daily_report_dataframe(directory):
     df.sort_index(inplace=True, ascending=False)
     return df
 
-def get_dataframe_ccg_table(filename, need_column=False):
+def get_dataframe_ccg_table_from_pickle(filename, need_column=False):
     match_obj = re.search(f'([\_0-9]+)\.(\d+\.\d\.\d)-(\d+-[a-z0-9]+)', filename)
     daily_date = match_obj.groups()[0]
 
-    table = []
+    result_root = load_result_file(replace_ext(filename, "pickle"))
+    table, tabulate_str, a, b = generate_csv_table(result_root)
+    for item in table:
+        if len(item) == 6:
+            if item[0] == 'qwen_usage' and item[4] == 'memory percent':
+                item[5] = f'{sizestr_to_num(item[5]):.2f}'
+            elif item[0] == 'qwen_usage' and item[4] == 'memory size':
+                item[5] = f'{sizestr_to_num(item[5]) / (1024*1024*1024):.2f}'
 
-    with open(filename, 'r', encoding='utf8') as fis:
-        while True:
-            # readline will return empty str when it is EOF.
-            line = fis.readline()
-            if line == '': break
+    dataframe = pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date], data=table)
+    if not need_column:
+        dataframe = dataframe.iloc[:, 5:]
 
-            match_obj = re.search(f'\| +model +\| +precision +\| +in +\| +out +\| +exec +\| +latency\(ms\) +\|', line)
-            if match_obj:
-                for line in fis.readlines():
-                    words = line.split(sep='|')
-                    # '|      baichuan2-7b-chat | OV_FP16-4BIT_DEFAULT |   32 |   256 |      1st |         28.76 |'
-                    if len(words) == 8:
-                        model_name = get_str(r'([\w\d\(\)\/\-\_\.\= ]+)', words[1].strip())
-                        if model_name.startswith('-'):
-                            continue
-
-                        model_precision = get_str(r'([\w\d\-\_]+)', words[2].strip())
-                        in_token = get_str(r'(\d+)', words[3])
-                        out_token = get_str(r'(\d+)', words[4])
-                        exec = get_str(r'([\w\d\:\/ ]+)', words[5].strip())
-                        latency = get_float(r'([\d+\.]+)', words[6])
-
-                        if need_column:
-                            table.append([model_name, model_precision, in_token, out_token, exec, f'{latency:.02f}'])
-                        else:
-                            table.append([f'{latency:.02f}'])
-                    else:
-                        break
-                return pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date] if need_column else [daily_date], data=table)
-    return pd.DataFrame()
+    return dataframe
 
 def get_excel_data(dataframe, report_df):
     if dataframe.size == 0:
@@ -135,7 +118,7 @@ def main():
     settings()
 
     parser = argparse.ArgumentParser(description="daily report viewer" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-i', '--report_dir', help=f'daily reports stored directory (for debugging. default path: {ROOT_DAILY_REPORT})', type=str, default=None)
+    parser.add_argument('-i', '--report_dir', help=f'daily reports stored directory (for debugging. default path: {ROOT_DAILY_REPORT})', type=str, default=ROOT_DAILY_REPORT)
     args = parser.parse_args()
 
     config_column_1, config_column_2, config_column_3 = st.columns(spec=[0.1, 0.2, 0.7], vertical_alignment="bottom")
@@ -143,12 +126,8 @@ def main():
         daily_list_on = st.checkbox("daily", value=True)
 
     with config_column_2:
-        if args.report_dir == None:
-            server_selection = st.selectbox("Select Server", ['MININT-3MIUM4N', 'MTL-01', 'DUT6047BMGFRD', 'DUT133ARLH', 'LNL-02', 'dg2alderlake'] if daily_list_on else sorted(os.listdir(ROOT_DAILY_REPORT)))
-            report_dir = os.path.join(ROOT_DAILY_REPORT, server_selection)
-        else:
-            report_dir = args.report_dir
-            st.write(os.path.basename(report_dir))
+        server_selection = st.selectbox("Select Server", ['DUT4005PTLH', 'MTL-01', 'DUT6047BMGFRD', 'DUT133ARLH', 'LNL-02', 'dg2alderlake'] if daily_list_on else sorted(os.listdir(args.report_dir)))
+        report_dir = os.path.join(args.report_dir, server_selection)
     report_df = get_daily_report_dataframe(report_dir)
 
     # filter report list by purpose
@@ -167,7 +146,7 @@ def main():
     with view_tab_1:
         ccg_table_df_all = pd.DataFrame()
         for index, row in report_filtered_selection_df.iterrows():
-            ccg_table_df = get_dataframe_ccg_table(os.path.join(*[report_dir, row['filename']]), ccg_table_df_all.empty)
+            ccg_table_df = get_dataframe_ccg_table_from_pickle(os.path.join(*[report_dir, row['filename']]), ccg_table_df_all.empty)
             ccg_table_df_all = ccg_table_df if ccg_table_df_all.empty else ccg_table_df_all.join(ccg_table_df, how='left')
 
         # generate excel data
