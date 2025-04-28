@@ -297,10 +297,25 @@ def __get_data_item(parent_list, index):
         return None
 
 def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
+    SKIP_KEY_LIST = [
+        'qwen_usage',
+        'SD 1.5',
+        'SD 2.1',
+        'Stable-Diffusion LCM',
+        'Stable Diffusion XL',
+        'SD 3.0 Dynamic',
+        'SD 3.0 Static',
+        'Whisper base',
+        'Resnet50',
+    ]
+
     for this_key_tuple, this_cmd_item_list in this_result_root.items():
+        if this_key_tuple[0] in SKIP_KEY_LIST:
+            continue
+
         ref_cmd_item_list = ref_map.get(this_key_tuple, [])
         if len(ref_cmd_item_list) == 0:
-            print(f'no ref: {this_key_tuple}')
+            continue
 
         for y in range(0, max(len(this_cmd_item_list), len(ref_cmd_item_list))):
             this_data_list = __get_data_list(this_cmd_item_list, y)
@@ -326,7 +341,7 @@ def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dic
     iou = calculate_score(this_text, ref_text)
 
     if iou < 0.2:
-        tabulate_data.append([key_tuple[0], key_tuple[1], in_token, iou])
+        tabulate_data.append([key_tuple[0], key_tuple[1], in_token, f'{iou:.2f}'])
 
 def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
     LIMIT_TEXT_LENGTH = 256
@@ -349,15 +364,11 @@ def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
     ref_text = ref_text if len(ref_text) < LIMIT_TEXT_LENGTH else ref_text[0:LIMIT_TEXT_LENGTH]
     ref_text = ref_text.replace("<s>", "_s_")
 
-    sts_str = ('OK' if iou > 0.5 else 'DIFF') if iou > 0 else 'ERR'
-
-    fos.write(f'[TEXT][{key_tuple}][{in_token}][{sts_str}][iou:{iou:0.2f}]\n')
-    if iou == 1:
+    sts_str = ('OK' if iou > 0.2 else 'DIFF') if iou > 0 else 'ERR'
+    if iou <= 0.2 :
+        fos.write(f'[TEXT][{key_tuple}][{in_token}][{sts_str}][iou:{iou:0.2f}]\n')
         fos.write(f'\t[this] {this_text}\n')
-    else:
-        fos.write(f'\t[this] {this_text}\n')
-        fos.write(f'\t[ref ] {ref_text}\n')
-    fos.write(f'\n')
+        fos.write(f'\t[ref ] {ref_text}\n\n')
 
 def get_test_list(target:str=''):
     if target == '':
