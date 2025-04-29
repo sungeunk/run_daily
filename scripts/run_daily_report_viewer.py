@@ -71,15 +71,15 @@ def get_dataframe_ccg_table_from_pickle(filename, need_column=False):
     daily_date = match_obj.groups()[0]
 
     result_root = load_result_file(replace_ext(filename, "pickle"))
-    table, tabulate_str, a, b = generate_csv_table(result_root)
-    for item in table:
+    csv_table = generate_csv_table(result_root, False)
+    for item in csv_table:
         if len(item) == 6:
             if item[0] == 'qwen_usage' and item[4] == 'memory percent':
-                item[5] = f'{sizestr_to_num(item[5]):.2f}'
+                item[5] = f'{float(item[5]):.2f}'
             elif item[0] == 'qwen_usage' and item[4] == 'memory size':
-                item[5] = f'{sizestr_to_num(item[5]) / (1024*1024*1024):.2f}'
+                item[5] = f'{float(item[5]) / (1024*1024*1024):.2f}'
 
-    dataframe = pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date], data=table)
+    dataframe = pd.DataFrame(columns=['model', 'precision', 'in', 'out', 'execution', daily_date], data=csv_table)
     if not need_column:
         dataframe = dataframe.iloc[:, 5:]
 

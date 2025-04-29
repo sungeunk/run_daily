@@ -48,91 +48,6 @@ def pass_value(value:float):
     return value
 def fps_to_ms(value:float):
     return 1000 / value
-def ms_to_sec(value:float):
-    return value / 1000
-
-def generate_ccg_table(result_root):
-    def __get_inf(item:dict, index, convert=pass_value):
-        try:
-            return f'{convert(float(item[CmdItemKey.DataItemKey.perf][index])):.2f}'
-        except:
-            return 'N/A'
-
-    def find_result_item(result_root, key_tuple, cb_cmd_item=None, cb_result_item=None):
-        try:
-            for cmd_item in result_root.get(key_tuple, []):
-                if cb_cmd_item == None or cb_cmd_item(cmd_item):
-                    for result_item in cmd_item[CmdItemKey.data_list]:
-                        if cb_result_item == None or cb_result_item(result_item):
-                            return result_item
-        except Exception as e:
-            log.error(f'find_result_item: {key_tuple}: {e}')
-        return {}
-
-    table = []
-
-    result_item = find_result_item(result_root, ('Resnet50', ModelConfig.INT8, TestBenchmarkapp), lambda item: item.get(CmdItemKey.test_config, {}).get('batch', 0) == 1)
-    table.append(['Resnet50 INT8 bs=1', 'fps', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
-    result_item = find_result_item(result_root, ('Resnet50', ModelConfig.INT8, TestBenchmarkapp), lambda item: item.get(CmdItemKey.test_config, {}).get('batch', 0) == 64)
-    table.append(['Resnet50 INT8 bs=64', 'fps', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
-
-    result_item = find_result_item(result_root, ('SD 1.5', ModelConfig.INT8, TestStableDiffusion))
-    table.append(['SD 1.5 INT8', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('SD 1.5', ModelConfig.FP16, TestStableDiffusion))
-    table.append(['SD 1.5 FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.INT8, TestStableDiffusion))
-    table.append(['SD 2.1 INT8', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('SD 2.1', ModelConfig.FP16, TestStableDiffusion))
-    table.append(['SD 2.1 FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('Stable Diffusion XL', ModelConfig.FP16, TestStableDiffusion))
-    table.append(['Stable Diffusion XL FP16', 'second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-    result_item = find_result_item(result_root, ('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion))
-    table.append(['Stable-Diffusion LCM FP16', 'static, second per image (s)', __get_inf(result_item, 0, ms_to_sec), __get_inf(result_item, 0)])
-
-    MODEL_CONFIG = [
-        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama2-7b INT4 DEFAULT', 1024],
-        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama2-7b INT4 DEFAULT', 32],
-        [(ModelName.llama_3_8b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'llama3-8b INT4 DEFAULT', 1024],
-        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'chatGLM3-6b INT4 DEFAULT', 1024],
-        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'chatGLM3-6b INT4 DEFAULT', 32],
-        [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Qwen-7b INT4 DEFAULT', 1024],
-        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Phi-3-mini INT4 DEFAULT', 1024],
-        [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'Gemma-7B INT4 DEFAULT', 1024],
-        [(ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'mistral-7B INT4 DEFAULT', 1024],
-    ]
-    for config in MODEL_CONFIG:
-        result_item = find_result_item(result_root, config[0], None, lambda item: item.get(CmdItemKey.DataItemKey.in_token, 0) == config[2])
-        table.append([config[1], f'{config[2]}/{result_item.get(CmdItemKey.DataItemKey.out_token)}, 1st token latency (ms)', __get_inf(result_item, 0), __get_inf(result_item, 0)])
-        table.append([config[1], f'{config[2]}/{result_item.get(CmdItemKey.DataItemKey.out_token)}, 2nd token avg (ms)', __get_inf(result_item, 0), __get_inf(result_item, 0)])
-
-    result_item = find_result_item(result_root, ('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase))
-    table.append(['Whisper base', 'tokens/second', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
-    result_item = {}
-    table.append(['Stable-Diffusion3 (bs=1, FP16, 1024x1024, 28steps)', '', __get_inf(result_item, 0), __get_inf(result_item, 0, fps_to_ms)])
-
-    MODEL_CONFIG = [
-        [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'qwen2-7b INT4 DEFAULT', 1024],
-        [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'phi-3.5-mini INT4 DEFAULT', 1024],
-        [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), 'minicpm-1b-sft INT4 DEFAULT', 1024],
-    ]
-    for config in MODEL_CONFIG:
-        result_item = find_result_item(result_root, config[0], None, lambda item: item.get(CmdItemKey.DataItemKey.in_token, 0) == config[2])
-        table.append([config[1], f'{config[2]}/{result_item.get(CmdItemKey.DataItemKey.out_token)}, 1st token latency (ms)', __get_inf(result_item, 0), __get_inf(result_item, 0)])
-        table.append([config[1], f'{config[2]}/{result_item.get(CmdItemKey.DataItemKey.out_token)}, 2nd token avg (ms)', __get_inf(result_item, 0), __get_inf(result_item, 0)])
-
-    value_list = [ float(raw_list[3]) for raw_list in table if len(raw_list) == 4 and is_float(raw_list[3]) ]
-    success_count = len(value_list)
-    geomean = 0
-    if len(value_list):
-        geomean = geometric_mean(value_list)
-
-    table.append([])
-    table.append(['Success count', '', '', success_count])
-    table.append(['geomean', '', '', f'{float(geomean):.2f}'])
-
-    table_str = tabulate(table, tablefmt="github", stralign='right',
-                        headers=['KPI Model', 'description', 'value', 'ms'], floatfmt=['', '', '.2f', '.2f'])
-    return f'[Result] ccg table\n{table_str}'
 
 def generate_csv_raw_data(result_root) -> list:
     def __get_inf(item:dict, index, convert=pass_value):
@@ -142,7 +57,7 @@ def generate_csv_raw_data(result_root) -> list:
             return ''
 
     # raw_data format: [ model_name, model_precision, in_token, out_token, latency(ms) ]
-    def raw_data_for_benchmark(key_tuple):
+    def raw_data_for_benchmark(key_tuple, args={}):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
@@ -150,7 +65,7 @@ def generate_csv_raw_data(result_root) -> list:
                     raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '1st', __get_inf(result_item, 0)])
                     raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], '2nd', __get_inf(result_item, 1)])
 
-        while len(raw_data_list) < 4: raw_data_list.append([key_tuple[0], key_tuple[1]])
+        while len(raw_data_list) < args.get('data_num', 4): raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
     def raw_data_for_benchmarkapp(key_tuple):
@@ -210,8 +125,9 @@ def generate_csv_raw_data(result_root) -> list:
         [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_measure_usage],
         [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark, {'data_num':2}],
+        [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_measure_usage],
         [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
         [('SD 1.5', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
         [('SD 1.5', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
@@ -228,30 +144,41 @@ def generate_csv_raw_data(result_root) -> list:
     for config in MODEL_REPORT_CONFIG:
         key_tuple = config[0]
         raw_data_func = config[1]
-        table.extend(raw_data_func(key_tuple))
+
+        print(f'config: {config}, {len(config)}')
+
+        if len(config) == 3:
+            table.extend(raw_data_func(key_tuple, config[2]))
+        else:
+            table.extend(raw_data_func(key_tuple))
     return table
 
-def generate_csv_table(result_root) -> tuple[list, str, int, int]:
-    table = generate_csv_raw_data(result_root)
-
-    # formating table for report
+# input: raw_data_table  << get from generate_csv_raw_data()
+# return (geomean, success_count)
+def get_static_info_from_raw_data(raw_data_table) -> tuple[int, int]:
     success_count = 0
     value_list = []
-    for item in table:
-        if len(item) == 6:
-            if item[0] == 'qwen_usage' and item[4] == 'memory percent':
-                item[5] = f'{item[5]:.2f} %'
-                success_count += 1
-            elif item[0] == 'qwen_usage' and item[4] == 'memory size':
-                item[5] = sizeof_fmt(item[5])
-                success_count += 1
-            elif is_float(item[5]):
+    for item in raw_data_table:
+        if len(item) == 6 and is_float(item[5]):
+            success_count += 1
+            if item[0] != 'qwen_usage':
                 value_list.append(float(item[5]))
-                success_count += 1
 
-    geomean = 0
-    if len(value_list):
-        geomean = geometric_mean(value_list)
+    geomean = geometric_mean(value_list) if len(value_list) else 0
+    return geomean, success_count
+
+def generate_csv_table(result_root, format_number = True) -> list:
+    csv_table = generate_csv_raw_data(result_root)
+    geomean, success_count = get_static_info_from_raw_data(csv_table)
+
+    # formating table for report
+    if format_number:
+        for item in csv_table:
+            if len(item) == 6 and item[0] == 'qwen_usage':
+                if item[4] == 'memory percent':
+                    item[5] = f'{item[5]:.2f} %'
+                elif item[4] == 'memory size':
+                    item[5] = sizeof_fmt(item[5])
 
     def add_table_for_llm(table, token_size, exec):
         __value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) and raw_list[2] == token_size and raw_list[4] == exec ]
@@ -261,16 +188,19 @@ def generate_csv_table(result_root) -> tuple[list, str, int, int]:
         else:
             table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', 0])
 
-    table.append(['', '', '', '', '', ''])
-    table.append(['Success count', '', '', '', '', success_count])
-    table.append(['geomean', '', '', '', '', f'{float(geomean):.2f}'])
-    add_table_for_llm(table, 32, '2nd')
-    add_table_for_llm(table, 32, '1st')
-    add_table_for_llm(table, 1024, '2nd')
-    add_table_for_llm(table, 1024, '1st')
+    csv_table.append(['', '', '', '', '', ''])
+    csv_table.append(['Success count', '', '', '', '', success_count])
+    csv_table.append(['geomean', '', '', '', '', f'{float(geomean):.2f}'])
+    add_table_for_llm(csv_table, 32, '2nd')
+    add_table_for_llm(csv_table, 32, '1st')
+    add_table_for_llm(csv_table, 1024, '2nd')
+    add_table_for_llm(csv_table, 1024, '1st')
 
-    tabulate_str = tabulate(table, tablefmt="github", headers=['model', 'precision', 'in', 'out', 'exec', 'latency(ms)'], floatfmt='.2f', stralign='right', numalign='right')
-    return table, f'[Result] csv table\n' + tabulate_str, geomean, success_count
+    return csv_table
+
+def generate_csv_tabulate_str(csv_table):
+    tabulate_str = tabulate(csv_table, tablefmt="github", headers=['model', 'precision', 'in', 'out', 'exec', 'latency(ms)'], floatfmt='.2f', stralign='right', numalign='right')
+    return f'[Result] csv table\n' + tabulate_str
 
 def calculate_score(ref, target):
     if len(ref) == 0 or len(target) == 0:
@@ -459,8 +389,8 @@ def generate_error_table(result_root) -> str:
 
 def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     out = StringIO()
-    ccg_tabulate = ''#generate_ccg_table(result_root)
-    table, csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
+    csv_table = generate_csv_table(result_root)
+    csv_tabulate_str = generate_csv_tabulate_str(csv_table)
     summary_tabulate = generate_summary(args, PROCESS_TIME)
     versions_table = generate_versions()
 
@@ -490,10 +420,8 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
         out.write(f'[ Error table for generated text ]\n')
         out.write(tabulate_str + '\n\n')
 
-    if len(ccg_tabulate) > 0:
-        out.write(ccg_tabulate + '\n\n')
-    if len(csv_tabulate) > 0:
-        out.write(csv_tabulate + '\n\n')
+    if len(csv_tabulate_str) > 0:
+        out.write(csv_tabulate_str + '\n\n')
 
     test_report_str = generate_report_for_each_test(result_root)
     if len(test_report_str) > 0:
@@ -521,5 +449,6 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     return out.getvalue()
 
 def generate_mail_title_suffix(result_root:dict):
-    table, csv_tabulate, csv_geomean, csv_success_cnt = generate_csv_table(result_root)
-    return f'({float(csv_geomean):.2f}/{csv_success_cnt})'
+    csv_table = generate_csv_raw_data(result_root)
+    geomean, success_count = get_static_info_from_raw_data(csv_table)
+    return f'({float(geomean):.2f}/{success_count})'
