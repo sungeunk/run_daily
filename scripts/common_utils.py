@@ -141,14 +141,14 @@ def sizeof_fmt(num):
     raise Exception(f'Out of bound!!! size({num})')
 
 def sizestr_to_num(str):
-    if not is_str(str):
+    if is_float(str):
         return float(str)
     value_dict = {"KB":1024, "MB":1024*1024, "GB":1024*1024*1024, "TB":1024*1024*1024*1024}
     match_obj = re.search(r'([\d.]+) ([\w]+)', str)
     if match_obj:
         values = match_obj.groups()
         return float(values[0]) * value_dict.get(values[1], 1)
-    return float(str)
+    return float(0)
 
 def send_mail(report_path, recipients, title, suffix_title=''):
     MAIL_TITLE = f'[{platform.node()}/{GlobalConfig().NOW}] {title} {suffix_title}'

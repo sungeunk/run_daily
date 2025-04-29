@@ -142,7 +142,6 @@ class TestBenchmark(TestTemplate):
             value_dict_2nd = {SHORT_TOKEN_ID:[], LONG_TOKEN_ID:[]}
 
             for raw_data in raw_data_list:
-                print(f'raw_data: {raw_data}, is_float([raw_data[4]]): {is_float(raw_data[4])}, is_float([raw_data[5]]): {is_float(raw_data[5])}')
                 if len(raw_data) != 6:
                     continue
 
