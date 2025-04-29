@@ -240,7 +240,7 @@ def generate_csv_table(result_root) -> tuple[list, str, int, int]:
     for item in table:
         if len(item) == 6:
             if item[0] == 'qwen_usage' and item[4] == 'memory percent':
-                item[5] = f'{item[5]:.2f}'
+                item[5] = f'{item[5]:.2f} %'
                 success_count += 1
             elif item[0] == 'qwen_usage' and item[4] == 'memory size':
                 item[5] = sizeof_fmt(item[5])
