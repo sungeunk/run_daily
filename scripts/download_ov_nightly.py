@@ -4,8 +4,6 @@ try:
     import argparse
     import asyncio
     import datetime
-    import enum
-    import json
     import logging as log
     import os
     import platform
@@ -18,11 +16,9 @@ try:
     import yaml
 
     from bs4 import BeautifulSoup
-    from common_utils import *
     from dateutil.parser import parse
     from git import Repo, RemoteProgress
     from glob import glob
-    from operator import itemgetter
     from packaging.version import Version
     from pathlib import Path
     from tabulate import tabulate
@@ -31,7 +27,7 @@ except ImportError:
     print(f'Please install these modules: pip install aiohttp requests tqdm pyyaml bs4 python-dateutil gitpython packaging tabulate')
     sys.exit(-1)
 
-# pip install aiohttp requests tqdm pyyaml bs4 python-dateutil gitpython packaging tabulate
+from common_utils import *
 
 
 ################################################
@@ -390,14 +386,16 @@ def get_url(commit_id):
     url_list = {
         'master/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit/',
         'master/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/pre_commit/',
-        'releases/2024/4/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/commit/',
-        'releases/2024/4/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/pre_commit/',
-        'releases/2024/5/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/commit/',
-        'releases/2024/5/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/pre_commit/',
-        'releases/2024/6/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/commit/',
-        'releases/2024/6/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/pre_commit/',
+        'releases/2025/2/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/2/commit/',
+        'releases/2025/1/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/1/commit/',
         'releases/2025/0/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/commit/',
-        'releases/2025/0/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/pre_commit/'
+        # 'releases/2024/4/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/commit/',
+        # 'releases/2024/4/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/pre_commit/',
+        # 'releases/2024/5/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/commit/',
+        # 'releases/2024/5/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/pre_commit/',
+        # 'releases/2024/6/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/commit/',
+        # 'releases/2024/6/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/pre_commit/',
+        # 'releases/2025/0/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/pre_commit/'
     }
 
     for key, url in url_list.items():

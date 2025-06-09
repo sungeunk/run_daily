@@ -15,7 +15,7 @@ from pathlib import Path
 
 # check openvino version
 try:
-    from openvino.runtime import get_version
+    from openvino import get_version
 except:
     logging.warning('could not load openvino.runtime package.')
     def get_version():
@@ -194,7 +194,7 @@ def main():
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
 
     # config for test
-    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW14_llm-optimum_2025.2.0-18615')
+    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW23_llm-optimum_2025.2.0-19136-RC3')
     parser.add_argument('--genai', help='[deprecated] enable genai option for llm benchmark', action='store_true')
     parser.add_argument('--optimum', help='enable optimum option for llm benchmark', action='store_true')
     parser.add_argument('--continuous_batch', help='enable continuous batch pipeline for llm benchmark', action='store_true')
