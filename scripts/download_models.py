@@ -10,6 +10,8 @@ IS_WINDOWS = platform.system() == 'Windows'
 def generate_download_url_list(args):
     SERVER_ROOT = 'http://ov-share-05.sclab.intel.com/cv_bench_cache'
     MODEL_COMMIT = args.model_commit
+
+    # models
     MODEL_LIST = [
         'baichuan2-7b-chat',
         'chatglm3-6b',
@@ -29,7 +31,22 @@ def generate_download_url_list(args):
         'pytorch/ov/OV_FP16-4BIT_DEFAULT',
     ]
     DOWNLOAD_URL_LIST = [ f'{SERVER_ROOT}/{MODEL_COMMIT}/{model}/{pre}/' for model in MODEL_LIST for pre in MODEL_PRECISION_LIST ]
-    return DOWNLOAD_URL_LIST
+
+
+    # stable-diffusion models
+    SD_MODEL_LIST = [
+        'stable-diffusion-v1-5',
+        'stable-diffusion-v2-1',
+        'stable-diffusion-3.5-large-turbo',
+        'stable-diffusion-xl-1.0-inpainting-0.1',
+        'lcm-dreamshaper-v7',
+    ]
+    SD_MODEL_PRECISION_LIST = [
+        'pytorch/ov/FP16',
+    ]
+    SD_DOWNLOAD_URL_LIST = [ f'{SERVER_ROOT}/{MODEL_COMMIT}/{model}/{pre}/' for model in SD_MODEL_LIST for pre in SD_MODEL_PRECISION_LIST ]
+
+    return DOWNLOAD_URL_LIST + SD_DOWNLOAD_URL_LIST
 
 def convert_cmd_for_popen(cmd):
     return cmd.split() if IS_WINDOWS else cmd
