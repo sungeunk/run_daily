@@ -95,7 +95,6 @@ propcache==0.2.0
 protobuf==5.29.0rc2
 psutil==6.1.0
 pure_eval==0.2.3
-pywin32==308
 py-cpuinfo==9.0.0
 pyarrow==18.0.0
 pycparser==2.22
@@ -147,7 +146,6 @@ tzdata==2024.2
 urllib3==2.2.3
 wcwidth==0.2.13
 widgetsnbextension==4.0.13
-WMI==1.5.1
 wrapt==1.17.0rc1
 xxhash==3.5.0
 yarl==1.17.2
