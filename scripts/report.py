@@ -20,7 +20,7 @@ from test_cases.test_benchmark import TestBenchmark
 from test_cases.test_benchmark_app import TestBenchmarkapp
 from test_cases.test_chat_sample import TestChatSample
 from test_cases.test_measured_usage_cpp import TestMeasuredUsageCpp
-from test_cases.test_stable_diffusion import TestStableDiffusion
+from test_cases.test_stable_diffusion_genai import TestStableDiffusionGenai
 from test_cases.test_whisper_base import TestWhisperBase
 
 
@@ -48,6 +48,8 @@ def pass_value(value:float):
     return value
 def fps_to_ms(value:float):
     return 1000 / value
+def sec_to_ms(value:float):
+    return value * 1000
 
 def generate_csv_raw_data(result_root) -> list:
     def __get_inf(item:dict, index, convert=pass_value):
@@ -98,8 +100,9 @@ def generate_csv_raw_data(result_root) -> list:
         for cmd_item in result_root.get(key_tuple, []):
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
                 for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'pipeline', __get_inf(data_item, 0)])
+                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
 
+        print(f'raw_data_list: {raw_data_list}')
         while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
@@ -129,15 +132,11 @@ def generate_csv_raw_data(result_root) -> list:
         [('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark, {'data_num':2}],
         [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_measure_usage],
         [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
-        [('SD 1.5', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('SD 1.5', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('SD 2.1', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('SD 2.1', ModelConfig.INT8, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('Stable Diffusion XL', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('Stable-Diffusion LCM', ModelConfig.FP16, TestStableDiffusion), raw_data_for_stablediffusion],
         [('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase), raw_data_for_whisperbase],
-        [('SD 3.0 Dynamic', ModelConfig.MIXED, TestStableDiffusion), raw_data_for_stablediffusion],
-        [('SD 3.0 Static', ModelConfig.MIXED, TestStableDiffusion), raw_data_for_stablediffusion],
+        [('stable-diffusion-v1-5', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
+        [('stable-diffusion-v2-1', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
+        [('stable-diffusion-3.5-large-turbo', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
+        [('lcm-dreamshaper-v7', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
     ]
 
     table = []
@@ -229,13 +228,11 @@ def __get_data_item(parent_list, index):
 def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
     SKIP_KEY_LIST = [
         'qwen_usage',
-        'SD 1.5',
-        'SD 2.1',
-        'Stable-Diffusion LCM',
-        'Stable Diffusion XL',
-        'SD 3.0 Dynamic',
-        'SD 3.0 Static',
         'Whisper base',
+        'stable-diffusion-v1-5',
+        'stable-diffusion-v2-1',
+        'stable-diffusion-3.5-large-turbo',
+        'lcm-dreamshaper-v7',
         'Resnet50',
     ]
 
@@ -310,7 +307,8 @@ def get_test_list(target:str=''):
     all_test_list = [
         TestBenchmark,
         TestMeasuredUsageCpp,
-        TestStableDiffusion,
+        # TestStableDiffusion,
+        TestStableDiffusionGenai,
         TestWhisperBase,
         TestBenchmarkapp,
         TestChatSample,
