@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,dml_llm_bench,model,input,output,Timeout
+TI-4608498 - DirectML LLM Benchmark | Llama v3.2 1B | int4 | (32-32),Llama v3.2 1B,int4,directml,32-32,dml_llm_bench,llama_v3.2-1B-instruct,32,32,1800
+TI-4608498 - DirectML LLM Benchmark | Llama v3.2 1B | int4 | (256-256),Llama v3.2 1B,int4,directml,256-256,dml_llm_bench,llama_v3.2-1B-instruct,256,256,1800
+TI-4608498 - DirectML LLM Benchmark | Llama v3.2 1B | int4 | (1024-128),Llama v3.2 1B,int4,directml,1024-128,dml_llm_bench,llama_v3.2-1B-instruct,1024,128,1800
+TI-4608498 - DirectML LLM Benchmark | Llama v3.2 1B | int4 | (2048-256),Llama v3.2 1B,int4,directml,2048-256,dml_llm_bench,llama_v3.2-1B-instruct,2048,256,1800

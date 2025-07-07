@@ -1,0 +1,17 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,base_sd,framework,model,height,width,iteration,Timeout
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (256x256),Stable Diffusion XL,fp16,openvino,256x256,base_sd,openvino-nightly,xl,256,256,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (256x512),Stable Diffusion XL,fp16,openvino,256x512,base_sd,openvino-nightly,xl,256,512,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (256x768),Stable Diffusion XL,fp16,openvino,256x768,base_sd,openvino-nightly,xl,256,768,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (256x1024),Stable Diffusion XL,fp16,openvino,256x1024,base_sd,openvino-nightly,xl,256,1024,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (512x256),Stable Diffusion XL,fp16,openvino,512x256,base_sd,openvino-nightly,xl,512,256,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (512x512),Stable Diffusion XL,fp16,openvino,512x512,base_sd,openvino-nightly,xl,512,512,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (512x768),Stable Diffusion XL,fp16,openvino,512x768,base_sd,openvino-nightly,xl,512,768,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (512x1024),Stable Diffusion XL,fp16,openvino,512x1024,base_sd,openvino-nightly,xl,512,1024,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (768x256),Stable Diffusion XL,fp16,openvino,768x256,base_sd,openvino-nightly,xl,768,256,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (768x512),Stable Diffusion XL,fp16,openvino,768x512,base_sd,openvino-nightly,xl,768,512,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (768x768),Stable Diffusion XL,fp16,openvino,768x768,base_sd,openvino-nightly,xl,768,768,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (768x1024),Stable Diffusion XL,fp16,openvino,768x1024,base_sd,openvino-nightly,xl,768,1024,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (1024x256),Stable Diffusion XL,fp16,openvino,1024x256,base_sd,openvino-nightly,xl,1024,256,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (1024x512),Stable Diffusion XL,fp16,openvino,1024x512,base_sd,openvino-nightly,xl,1024,512,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (1024x768),Stable Diffusion XL,fp16,openvino,1024x768,base_sd,openvino-nightly,xl,1024,768,4,1800
+TI-4254036 - OpenVINO Nightly SD Benchmark | Stable Diffusion XL | (1024x1024),Stable Diffusion XL,fp16,openvino,1024x1024,base_sd,openvino-nightly,xl,1024,1024,4,1800

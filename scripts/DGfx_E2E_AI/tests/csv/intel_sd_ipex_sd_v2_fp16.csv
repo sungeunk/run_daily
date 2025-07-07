@@ -1,0 +1,17 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,base_sd,framework,model,height,width,iteration,Timeout
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (256x256),Stable Diffusion v2.0,fp16,ipex,256x256,base_sd,ipex,v2.0,256,256,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (256x512),Stable Diffusion v2.0,fp16,ipex,256x512,base_sd,ipex,v2.0,256,512,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (256x768),Stable Diffusion v2.0,fp16,ipex,256x768,base_sd,ipex,v2.0,256,768,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (256x1024),Stable Diffusion v2.0,fp16,ipex,256x1024,base_sd,ipex,v2.0,256,1024,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (512x256),Stable Diffusion v2.0,fp16,ipex,512x256,base_sd,ipex,v2.0,512,256,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (512x512),Stable Diffusion v2.0,fp16,ipex,512x512,base_sd,ipex,v2.0,512,512,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (512x768),Stable Diffusion v2.0,fp16,ipex,512x768,base_sd,ipex,v2.0,512,768,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (512x1024),Stable Diffusion v2.0,fp16,ipex,512x1024,base_sd,ipex,v2.0,512,1024,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (768x256),Stable Diffusion v2.0,fp16,ipex,768x256,base_sd,ipex,v2.0,768,256,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (768x512),Stable Diffusion v2.0,fp16,ipex,768x512,base_sd,ipex,v2.0,768,512,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (768x768),Stable Diffusion v2.0,fp16,ipex,768x768,base_sd,ipex,v2.0,768,768,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (768x1024),Stable Diffusion v2.0,fp16,ipex,768x1024,base_sd,ipex,v2.0,768,1024,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (1024x256),Stable Diffusion v2.0,fp16,ipex,1024x256,base_sd,ipex,v2.0,1024,256,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (1024x512),Stable Diffusion v2.0,fp16,ipex,1024x512,base_sd,ipex,v2.0,1024,512,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (1024x768),Stable Diffusion v2.0,fp16,ipex,1024x768,base_sd,ipex,v2.0,1024,768,4,1800
+TI-4254026 - IPEX SD Benchmark | Stable Diffusion v2.0 | (1024x1024),Stable Diffusion v2.0,fp16,ipex,1024x1024,base_sd,ipex,v2.0,1024,1024,4,1800

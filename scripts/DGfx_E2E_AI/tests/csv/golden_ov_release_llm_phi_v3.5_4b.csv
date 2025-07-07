@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino,llm,model,Timeout
+OpenVINO Release LLM Golden | Phi v3.5 3.8B,Phi v3.5 3.8B,int4,openvino,int4_sym_gs128,golden,openvino,llm,phi_v3.5_4b,3600

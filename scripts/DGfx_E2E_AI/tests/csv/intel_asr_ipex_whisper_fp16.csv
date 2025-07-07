@@ -1,0 +1,7 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,asr,framework,model,Timeout
+TI-4608496 - IPEX ASR Benchmark | Whisper Tiny | fp16 | (30 seconds),Whisper Tiny,fp16,ipex,30 seconds,asr,ipex,whisper_tiny,1800
+TI-4394069 - IPEX ASR Benchmark | Whisper Small | fp16 | (30 seconds),Whisper Small,fp16,ipex,30 seconds,asr,ipex,whisper_small,1800
+TI-4254041 - IPEX ASR Benchmark | Whisper Base | fp16 | (30 seconds),Whisper Base,fp16,ipex,30 seconds,asr,ipex,whisper_base,1800
+TI-4254039 - IPEX ASR Benchmark | Whisper Medium | fp16 | (30 seconds),Whisper Medium,fp16,ipex,30 seconds,asr,ipex,whisper_medium,1800
+TI-4164016 - IPEX ASR Benchmark | Whisper Large v3 | fp16 | (30 seconds),Whisper Large v3,fp16,ipex,30 seconds,asr,ipex,whisper_large_v3,1800
+TI-4394070 - IPEX ASR Benchmark | Paraformer Large | fp16 | (30 seconds),Paraformer Large,fp16,ipex,30 seconds,asr,ipex,paraformer_large,1800

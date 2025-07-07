@@ -1,0 +1,3 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,asr,framework,model,Timeout
+TI-4164015 - OpenVINO Nightly ASR Benchmark | Whisper Large v3 | fp16 | (30 seconds),Whisper Large v3,fp16,openvino-nightly,30 seconds,asr,openvino-nightly,whisper_large_v3,1800
+TI-4394071 - OpenVINO Nightly ASR Benchmark | Paraformer | fp16 | (30 seconds),Paraformer,fp16,openvino-nightly,30 seconds,asr,openvino-nightly,paraformer_zh,1800

@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Deepseek R1 0528 Qwen v3.0 8B,Deepseek R1 0528 Qwen v3.0 8B,int4,openvino-nightly,int4_sym_gs128,openvino-nightly,openvino,llm,ds_r1_0528_qwen_v3.0_8b,3600

@@ -1,0 +1,7 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,asr,framework,model,Timeout
+TI-4608497 - OpenVINO Release ASR Benchmark | Whisper Tiny | fp16 | (30 seconds),Whisper Tiny,fp16,openvino,30 seconds,asr,openvino,whisper_tiny,1800
+TI-4394068 - OpenVINO Release ASR Benchmark | Whisper Small | fp16 | (30 seconds),Whisper Small,fp16,openvino,30 seconds,asr,openvino,whisper_small,1800
+TI-4254040 - OpenVINO Release ASR Benchmark | Whisper Base | fp16 | (30 seconds),Whisper Base,fp16,openvino,30 seconds,asr,openvino,whisper_base,1800
+TI-4254038 - OpenVINO Release ASR Benchmark | Whisper Medium | fp16 | (30 seconds),Whisper Medium,fp16,openvino,30 seconds,asr,openvino,whisper_medium,1800
+TI-4164015 - OpenVINO Release ASR Benchmark | Whisper Large v3 | fp16 | (30 seconds),Whisper Large v3,fp16,openvino,30 seconds,asr,openvino,whisper_large_v3,1800
+TI-4394071 - OpenVINO Release ASR Benchmark | Paraformer | fp16 | (30 seconds),Paraformer,fp16,openvino,30 seconds,asr,openvino,paraformer_zh,1800

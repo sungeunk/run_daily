@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,device,iteration,Timeout
+TI-4394060 - OpenVINO Release LLM Benchmark | Mistral v0.2 7B | int4 | (32-32),Mistral v0.2 7B,int4,openvino,32-32,ov_llm_bench,mistral_v0.2_7b,32,32,GPU,4,1800
+TI-4394060 - OpenVINO Release LLM Benchmark | Mistral v0.2 7B | int4 | (256-256),Mistral v0.2 7B,int4,openvino,256-256,ov_llm_bench,mistral_v0.2_7b,256,256,GPU,4,1800
+TI-4394060 - OpenVINO Release LLM Benchmark | Mistral v0.2 7B | int4 | (1024-128),Mistral v0.2 7B,int4,openvino,1024-128,ov_llm_bench,mistral_v0.2_7b,1024,128,GPU,4,1800
+TI-4394060 - OpenVINO Release LLM Benchmark | Mistral v0.2 7B | int4 | (2048-256),Mistral v0.2 7B,int4,openvino,2048-256,ov_llm_bench,mistral_v0.2_7b,2048,256,GPU,4,1800

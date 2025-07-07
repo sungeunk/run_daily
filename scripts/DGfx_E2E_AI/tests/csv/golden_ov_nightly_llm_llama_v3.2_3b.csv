@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Llama v3.2 3B,Llama v3.2 3B,int4,openvino-nightly,int4_sym_gs128,golden,openvino-nightly,llm,llama_v3.2_3b,3600

@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino,llm,model,Timeout
+OpenVINO Release LLM Golden | Llama v3.0 8B,Llama v3.0 8B,int4,openvino,int4_sym_gs128,golden,openvino,llm,llama_v3.0_8b,3600

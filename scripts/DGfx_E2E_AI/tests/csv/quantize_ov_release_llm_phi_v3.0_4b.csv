@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino,llm,model,Timeout
+OpenVINO Release LLM Quantization | Phi v3.0 3.8B,Phi v3.0 3.8B,int4,openvino,int4_sym_gs128,quantize,openvino,llm,phi_v3.0_4b,1800

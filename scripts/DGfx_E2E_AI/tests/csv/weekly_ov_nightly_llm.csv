@@ -1,0 +1,27 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,device,iteration,nightly,Timeout
+TI-4537956 - OpenVINO Nightly LLM Benchmark | Llama v3.2 3B (1024-128),Llama v3.2 3B,int4,openvino-nightly,1024-128,ov_llm_bench,llama_v3.2_3b,1024,128,GPU,4,nightly,1800
+TI-4537955 - OpenVINO Nightly LLM Benchmark | Llama v3.2 1B (1024-128),Llama v3.2 1B,int4,openvino-nightly,1024-128,ov_llm_bench,llama_v3.2_1b,1024,128,GPU,4,nightly,1800
+TI-4394057 - OpenVINO Nightly LLM Benchmark | Llama v3.1 8B (1024-128),Llama v3.1 8B,int4,openvino-nightly,1024-128,ov_llm_bench,llama_v3.1_8b,1024,128,GPU,4,nightly,1800
+TI-4190256 - OpenVINO Nightly LLM Benchmark | Llama v3.0 8B (1024-128),Llama v3.0 8B,int4,openvino-nightly,1024-128,ov_llm_bench,llama_v3.0_8b,1024,128,GPU,4,nightly,1800
+TI-4144440 - OpenVINO Nightly LLM Benchmark | Llama v2.0 7B (1024-128),Llama v2.0 7B,int4,openvino-nightly,1024-128,ov_llm_bench,llama_v2.0_7b,1024,128,GPU,4,nightly,1800
+TI-4254022 - OpenVINO Nightly LLM Benchmark | Qwen v2.0 7B (1024-128),Qwen v2.0 7B,int4,openvino-nightly,1024-128,ov_llm_bench,qwen_v2.0_7b,1024,128,GPU,4,nightly,1800
+TI-4707938 - OpenVINO Nightly LLM Benchmark | Qwen v3.0 8B (1024-128),Qwen v3.0 8B,int4,openvino-nightly,1024-128,ov_llm_bench,qwen_v3.0_8b,1024,128,GPU,4,nightly,1800
+TI-4708002 - OpenVINO Nightly LLM Benchmark | Qwen v3.0 0.6B (1024-128),Qwen v3.0 0.6B,int4,openvino-nightly,1024-128,ov_llm_bench,qwen_v3.0_0.6b,1024,128,GPU,4,nightly,1800
+TI-4163178 - OpenVINO Nightly LLM Benchmark | Mistral v0.1 7B (1024-128),Mistral v0.1 7B,int4,openvino-nightly,1024-128,ov_llm_bench,mistral_v0.1_7b,1024,128,GPU,4,nightly,1800
+TI-4394060 - OpenVINO Nightly LLM Benchmark | Mistral v0.2 7B (1024-128),Mistral v0.2 7B,int4,openvino-nightly,1024-128,ov_llm_bench,mistral_v0.2_7b,1024,128,GPU,4,nightly,1800
+TI-4163179 - OpenVINO Nightly LLM Benchmark | Phi v2.0 2.7B (1024-128),Phi v2.0 2.7B,int4,openvino-nightly,1024-128,ov_llm_bench,phi_v2.0_3b,1024,128,GPU,4,nightly,1800
+TI-4284429 - OpenVINO Nightly LLM Benchmark | Phi v3.0 3.8B (1024-128),Phi v3.0 3.8B,int4,openvino-nightly,1024-128,ov_llm_bench,phi_v3.0_4b,1024,128,GPU,4,nightly,1800
+TI-4394066 - OpenVINO Nightly LLM Benchmark | Phi v3.5 3.8B (1024-128),Phi v3.5 3.8B,int4,openvino-nightly,1024-128,ov_llm_bench,phi_v3.5_4b,1024,128,GPU,4,nightly,1800
+TI-4537957 - OpenVINO Nightly LLM Benchmark | Phi v4.0 3.8B (1024-128),Phi v4.0 3.8B,int4,openvino-nightly,1024-128,ov_llm_bench,phi_v4.0_4b,1024,128,GPU,4,nightly,1800
+TI-4163181 - OpenVINO Nightly LLM Benchmark | Gemma v1.0 7B (1024-128),Gemma v1.0 7B,int4,openvino-nightly,1024-128,ov_llm_bench,gemma_v1.0_7b,1024,128,GPU,4,nightly,1800
+TI-4164046 - OpenVINO Nightly LLM Benchmark | ChatGLM v3.0 6B (1024-128),ChatGLM v3.0 6B,int4,openvino-nightly,1024-128,ov_llm_bench,chatglm_v3.0_6b,1024,128,GPU,4,nightly,1800
+TI-4394063 - OpenVINO Nightly LLM Benchmark | MiniCPM 1B (1024-128),MiniCPM 1B,int4,openvino-nightly,1024-128,ov_llm_bench,minicpm_v1.0_1b,1024,128,GPU,4,nightly,1800
+TI-4703650 - OpenVINO Nightly LLM Benchmark | Deepseek R1 Distill Qwen 1.5B (1024-128),Deepseek R1 Distill Qwen 1.5B,int4,openvino-nightly,1024-128,ov_llm_bench,ds_r1_d_qwen_1.5b,1024,128,GPU,4,nightly,1800
+TI-4703653 - OpenVINO Nightly LLM Benchmark | Deepseek R1 Distill Llama 8B (1024-128),Deepseek R1 Distill Llama 8B,int4,openvino-nightly,1024-128,ov_llm_bench,ds_r1_d_llama_8b,1024,128,GPU,4,nightly,1800
+TI-4703651 - OpenVINO Nightly LLM Benchmark | Deepseek R1 Distill Qwen 7B (1024-128),Deepseek R1 Distill Qwen 7B,int4,openvino-nightly,1024-128,ov_llm_bench,ds_r1_d_qwen_7b,1024,128,GPU,4,nightly,1800
+TI-4703652 - OpenVINO Nightly LLM Benchmark | Deepseek R1 Distill Qwen 14B (1024-2048),Deepseek R1 Distill Qwen 14B,int4,openvino-nightly,1024-128,ov_llm_bench,ds_r1_d_qwen_14b,1024,2048,GPU,4,nightly,1800
+TI-4708004 - OpenVINO Nightly LLM Benchmark | Deepseek R1 0528 Qwen v3.0 8B (1024-2048),Deepseek R1 0528 Qwen v3.0 8B,int4,openvino-nightly,1024-128,ov_llm_bench,ds_r1_0528_qwen_8b,1024,2048,GPU,4,nightly,1800
+TI-4703654 - OpenVINO Nightly LLM Benchmark | GLM-Edge 4B (1024-128),GLM-Edge 4B,int4,openvino-nightly,1024-128,ov_llm_bench,glm_edge_4b,1024,128,GPU,4,nightly,1800
+TI-4703655 - OpenVINO Nightly LLM Benchmark | Qwen v2.5 1.5B (1024-128),Qwen v2.5 1.5B,int4,openvino-nightly,1024-128,ov_llm_bench,qwen_v2.5_1.5b,1024,128,GPU,4,nightly,1800
+TI-4703656 - OpenVINO Nightly LLM Benchmark | Qwen v2.5 7B (1024-128),Qwen v2.5 7B,int4,openvino-nightly,1024-128,ov_llm_bench,qwen_v2.5_7b,1024,128,GPU,4,nightly,1800
+TI-4703657 - OpenVINO Nightly LLM Benchmark | Zamba v2.0 2.7B (1024-128),Zamba v2.0 2.7B,int4,openvino-nightly,1024-128,ov_llm_bench,zamba_v2.0_2.7b,1024,128,GPU,4,nightly,1800

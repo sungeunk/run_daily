@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino,llm,model,Timeout
+OpenVINO Release LLM Quantization | GLM-Edge 4B,GLM-Edge 4B,int4,openvino,int4_sym_gs128,quantize,openvino,llm,glm_edge_4b,1800

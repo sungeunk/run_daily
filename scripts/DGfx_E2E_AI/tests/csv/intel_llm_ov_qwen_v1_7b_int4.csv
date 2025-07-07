@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,Timeout
+OpenVINO Release LLM Benchmark | Qwen v1.0 7B | int4 | (32-32),Qwen v1.0 7B,int4,openvino,32-32,ov_llm_bench,qwen-1.0,32,32,1800
+OpenVINO Release LLM Benchmark | Qwen v1.0 7B | int4 | (256-256),Qwen v1.0 7B,int4,openvino,256-256,ov_llm_bench,qwen-1.0,256,256,1800
+OpenVINO Release LLM Benchmark | Qwen v1.0 7B | int4 | (1024-128),Qwen v1.0 7B,int4,openvino,1024-128,ov_llm_bench,qwen-1.0,1024,128,1800
+OpenVINO Release LLM Benchmark | Qwen v1.0 7B | int4 | (2048-256),Qwen v1.0 7B,int4,openvino,2048-256,ov_llm_bench,qwen-1.0,2048,256,1800

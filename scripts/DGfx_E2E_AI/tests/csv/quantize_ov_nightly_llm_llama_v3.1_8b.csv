@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Quantization | Llama v3.1 8B,Llama v3.1 8B,int4,openvino-nightly,int4_sym_gs128,quantize,openvino-nightly,llm,llama_v3.1_8b,1800

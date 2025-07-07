@@ -1,0 +1,4 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,base_sd,framework,model,height,width,iteration,Timeout
+TI-4037945 - DirectML SD Benchmark | Stable Diffusion v1.5 | (512x512),Stable Diffusion v1.5,fp16,directml,512x512,base_sd,directml,v1.5,512,512,4,1800
+TI-4063859 - DirectML SD Benchmark | Stable Diffusion v2.0 | (512x512),Stable Diffusion v2.0,fp16,directml,512x512,base_sd,directml,v2.0,512,512,4,1800
+TI-4052167 - DirectML SD Benchmark | Stable Diffusion XL | (768x768),Stable Diffusion XL,fp16,directml,768x768,base_sd,directml,xl,768,768,4,1800

@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,dml_llm_bench,model,input,output,Timeout
+TI-4394062 - DirectML LLM Benchmark | Qwen v2.0 7B | int4 | (32-32),Qwen v2.0 7B,int4,directml,32-32,dml_llm_bench,qwen_v2,32,32,1800
+TI-4394062 - DirectML LLM Benchmark | Qwen v2.0 7B | int4 | (256-256),Qwen v2.0 7B,int4,directml,256-256,dml_llm_bench,qwen_v2,256,256,1800
+TI-4394062 - DirectML LLM Benchmark | Qwen v2.0 7B | int4 | (1024-128),Qwen v2.0 7B,int4,directml,1024-128,dml_llm_bench,qwen_v2,1024,128,1800
+TI-4394062 - DirectML LLM Benchmark | Qwen v2.0 7B | int4 | (2048-256),Qwen v2.0 7B,int4,directml,2048-256,dml_llm_bench,qwen_v2,2048,256,1800

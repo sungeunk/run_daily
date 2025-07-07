@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Deepseek R1 Distilled Qwen 1.5B,Deepseek R1 Distilled Qwen 1.5B,int4,openvino-nightly,int4_sym_gs128,golden,openvino-nightly,llm,ds_r1_d_qwen_1.5b,3600

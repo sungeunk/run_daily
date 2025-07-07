@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino,llm,model,Timeout
+OpenVINO Release LLM Quantization | Qwen v3.0 8B,Qwen v3.0 8B,int4,openvino,int4_sym_gs128,quantize,openvino,llm,qwen_v3.0_8b,1800

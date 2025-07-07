@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,dml_llm_bench,model,input,output,Timeout
+TI-4163200 - DirectML LLM Benchmark | Gemma v1.0 7B | int4 | (32-32),Gemma v1.0 7B,int4,directml,32-32,dml_llm_bench,gemma_v1,32,32,1800
+TI-4163200 - DirectML LLM Benchmark | Gemma v1.0 7B | int4 | (256-256),Gemma v1.0 7B,int4,directml,256-256,dml_llm_bench,gemma_v1,256,256,1800
+TI-4163200 - DirectML LLM Benchmark | Gemma v1.0 7B | int4 | (1024-128),Gemma v1.0 7B,int4,directml,1024-128,dml_llm_bench,gemma_v1,1024,128,1800
+TI-4163200 - DirectML LLM Benchmark | Gemma v1.0 7B | int4 | (2048-256),Gemma v1.0 7B,int4,directml,2048-256,dml_llm_bench,gemma_v1,2048,256,1800

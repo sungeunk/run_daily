@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ipex_llm_bmg,model,input,output,Timeout
+TI-4164028 - IPEX LLM Benchmark | Llama v2.0 7B | int4 | (32-32),Llama v2.0 7B,int4,ipex,32-32,ipex_llm_bmg,llama_v2.0_7b,32,32,1800
+TI-4164028 - IPEX LLM Benchmark | Llama v2.0 7B | int4 | (256-256),Llama v2.0 7B,int4,ipex,256-256,ipex_llm_bmg,llama_v2.0_7b,256,256,1800
+TI-4164028 - IPEX LLM Benchmark | Llama v2.0 7B | int4 | (1024-128),Llama v2.0 7B,int4,ipex,1024-128,ipex_llm_bmg,llama_v2.0_7b,1024,128,1800
+TI-4164028 - IPEX LLM Benchmark | Llama v2.0 7B | int4 | (2048-256),Llama v2.0 7B,int4,ipex,2048-256,ipex_llm_bmg,llama_v2.0_7b,2048,256,1800

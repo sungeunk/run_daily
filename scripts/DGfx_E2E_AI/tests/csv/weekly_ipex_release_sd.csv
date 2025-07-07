@@ -1,0 +1,10 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,base_sd,framework,model,height,width,iteration,Timeout
+TI-4254031 - IPEX Release SD Benchmark | Stable Diffusion LCM | (512x512),Stable Diffusion LCM,fp16,ipex,512x512,base_sd,ipex,lcm,512,512,4,1800
+TI-4254025 - IPEX Release SD Benchmark | Stable Diffusion v1.5 | (512x512),Stable Diffusion v1.5,fp16,ipex,512x512,base_sd,ipex,v1.5,512,512,4,1800
+TI-4254026 - IPEX Release SD Benchmark | Stable Diffusion v2.0 | (512x512),Stable Diffusion v2.0,fp16,ipex,512x512,base_sd,ipex,v2.0,512,512,4,1800
+TI-4254027 - IPEX Release SD Benchmark | Stable Diffusion v2.1 | (512x512),Stable Diffusion v2.1,fp16,ipex,512x512,base_sd,ipex,v2.1,512,512,4,1800
+TI-4254028 - IPEX Release SD Benchmark | Stable Diffusion XL | (768x768),Stable Diffusion XL,fp16,ipex,768x768,base_sd,ipex,xl,768,768,4,1800
+TI-4254032 - IPEX Release SD Benchmark | Stable Diffusion v3.0 | (512x512),Stable Diffusion v3.0,fp16,ipex,512x512,base_sd,ipex,v3.0,512,512,4,1800
+TI-4608526 - IPEX Release SD Benchmark | Stable Diffusion Flux.1 Schnell | (768x768),Stable Diffusion Flux.1 Schnell,fp16,ipex,768x768,base_sd,ipex,flux.1_schnell,768,768,4,1800
+TI-4254029 - IPEX Release SD Benchmark | Stable Diffusion Turbo | (512x512),Stable Diffusion Turbo,fp16,ipex,512x512,base_sd,ipex,turbo,512,512,4,1800
+TI-4254030 - IPEX Release SD Benchmark | Stable Diffusion XL Turbo | (768x768),Stable Diffusion XL Turbo,fp16,ipex,768x768,base_sd,ipex,xl_turbo,768,768,4,1800

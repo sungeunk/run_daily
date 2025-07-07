@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,computer_vision,workload,framework,iteration,Timeout
+TI-4164035 - OpenVINO Release CV Benchmark | ResNet50 | fp16 | (FPS),ResNet50,fp16,openvino,FPS,computer_vision,resnet50,openvino,4,1800

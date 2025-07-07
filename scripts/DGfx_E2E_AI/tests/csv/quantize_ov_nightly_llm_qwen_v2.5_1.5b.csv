@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Quantization | Qwen v2.5 1.5B,Qwen v2.5 1.5B,int4,openvino-nightly,int4_sym_gs128,quantize,openvino-nightly,llm,qwen_v2.5_1.5b,1800

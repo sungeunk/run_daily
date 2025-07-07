@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Gemma v1.0 7B,Gemma v1.0 7B,int4,openvino-nightly,int4_sym_gs128,golden,openvino-nightly,llm,gemma_v1.0_7b,3600

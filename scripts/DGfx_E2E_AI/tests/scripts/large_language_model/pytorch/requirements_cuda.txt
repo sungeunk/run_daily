@@ -1,0 +1,17 @@
+--index-url https://download.pytorch.org/whl/cu118
+--extra-index-url https://pypi.org/simple
+torch
+torchvision
+torchaudio 
+diffusers
+accelerate
+bitsandbytes
+protobuf
+sentencepiece
+omegaconf
+pandas
+transformers
+numpy==1.26.4
+tiktoken
+einops
+transformers_stream_generator

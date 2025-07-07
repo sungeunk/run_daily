@@ -1,0 +1,19 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ipex_llm_bmg,model,input,output,Timeout
+TI-4164028 - IPEX LLM Benchmark | Llama v2.0 7B | int4 | (1024-128),Llama v2.0 7B,int4,ipex,1024-128,ipex_llm_bmg,llama_v2.0_7b,1024,128,1800
+TI-4190255 - IPEX LLM Benchmark | Llama v3.0 8B | int4 | (1024-128),Llama v3.0 8B,int4,ipex,1024-128,ipex_llm_bmg,llama_v3.0_8b,1024,128,1800
+TI-4394058 - IPEX LLM Benchmark | Llama v3.1 8B | int4 | (1024-128),Llama v3.1 8B,int4,ipex,1024-128,ipex_llm_bmg,llama_v3.1_8b,1024,128,1800
+TI-4453552 - IPEX LLM Benchmark | Llama v3.2 1B | int4 | (1024-128),Llama v3.2 1B,int4,ipex,1024-128,ipex_llm_bmg,llama_v3.2_1b,1024,128,1800
+TI-4453553 - IPEX LLM Benchmark | Llama v3.2 3B | int4 | (1024-128),Llama v3.2 3B,int4,ipex,1024-128,ipex_llm_bmg,llama_v3.2_3b,1024,128,1800
+TI-4453567 - IPEX LLM Benchmark | Deepseek R1 Distilled Llama 8B | int4 | (1024-128),Deepseek R1 Distilled Llama 8B,int4,ipex,1024-128,ipex_llm_bmg,deepseek_llama_8b,1024,128,1800
+TI-4453568 - IPEX LLM Benchmark | Deepseek R1 Distilled Qwen 1.5B | int4 | (1024-128),Deepseek R1 Distilled Qwen 1.5B,int4,ipex,1024-128,ipex_llm_bmg,deepseek_qwen_1.5b,1024,128,1800
+TI-4453569 - IPEX LLM Benchmark | Deepseek R1 Distilled Qwen 7B | int4 | (1024-128),Deepseek R1 Distilled Qwen 7B,int4,ipex,1024-128,ipex_llm_bmg,deepseek_qwen_7b,1024,128,1800
+TI-4453570 - IPEX LLM Benchmark | Deepseek R1 Distilled Qwen 14B | int4 | (1024-128),Deepseek R1 Distilled Qwen 14B,int4,ipex,1024-128,ipex_llm_bmg,deepseek_qwen_14b,1024,128,1800
+TI-4164030 - IPEX LLM Benchmark | Mistral v0.1 7B | int4 | (1024-128),Mistral v0.1 7B,int4,ipex,1024-128,ipex_llm_bmg,mistral_v0.1_7b,1024,128,1800
+TI-4394061 - IPEX LLM Benchmark | Mistral v0.2 7B | int4 | (1024-128),Mistral v0.2 7B,int4,ipex,1024-128,ipex_llm_bmg,mistral_v0.2_7b,1024,128,1800
+TI-4254024 - IPEX LLM Benchmark | Qwen v2.0 7B | int4 | (1024-128),Qwen v2.0 7B,int4,ipex,1024-128,ipex_llm_bmg,qwen_v2.0_7b,1024,128,1800
+TI-4164031 - IPEX LLM Benchmark | Phi v2.0 2.7B | int4 | (1024-128),Phi v2.0 2.7B,int4,ipex,1024-128,ipex_llm_bmg,phi_v2.0_3b,1024,128,1800
+TI-4284428 - IPEX LLM Benchmark | Phi v3.0 3.8B | int4 | (1024-128),Phi v3.0 3.8B,int4,ipex,1024-128,ipex_llm_bmg,phi_v3.0_4b,1024,128,1800
+TI-4394065 - IPEX LLM Benchmark | Phi v3.5 3.8B | int4 | (1024-128),Phi v3.5 3.8B,int4,ipex,1024-128,ipex_llm_bmg,phi_v3.5_4b,1024,128,1800
+TI-4453566 - IPEX LLM Benchmark | Phi v4.0 3.8B | int4 | (1024-128),Phi v4.0 3.8B,int4,ipex,1024-128,ipex_llm_bmg,phi_v4.0_4b,1024,128,1800
+TI-4164047 - IPEX LLM Benchmark | ChatGLM v3.0 6B | int4 | (1024-128),ChatGLM v3.0 6B,int4,ipex,1024-128,ipex_llm_bmg,chatglm_v3.0_6b,1024,128,1800
+TI-4394064 - IPEX LLM Benchmark | Mini CPM 1B | int4 | (1024-128),Mini CPM 1B,int4,ipex,1024-128,ipex_llm_bmg,minicpm_v1.0_1b,1024,128,1800

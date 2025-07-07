@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,dml_llm_bench,model,input,output,Timeout
+TI-4284427 - DirectML LLM Benchmark | Phi v3.0 3.8B | int4 | (32-32),Phi v3.0 3.8B,int4,directml,32-32,dml_llm_bench,phi_v3,32,32,1800
+TI-4284427 - DirectML LLM Benchmark | Phi v3.0 3.8B | int4 | (256-256),Phi v3.0 3.8B,int4,directml,256-256,dml_llm_bench,phi_v3,256,256,1800
+TI-4284427 - DirectML LLM Benchmark | Phi v3.0 3.8B | int4 | (1024-128),Phi v3.0 3.8B,int4,directml,1024-128,dml_llm_bench,phi_v3,1024,128,1800
+TI-4284427 - DirectML LLM Benchmark | Phi v3.0 3.8B | int4 | (2048-256),Phi v3.0 3.8B,int4,directml,2048-256,dml_llm_bench,phi_v3,2048,256,1800

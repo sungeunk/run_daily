@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,device,iteration,nightly,Timeout
+TI-4537955 - OpenVINO Nightly LLM Benchmark | Llama v3.2 1B | int4 | (32-32),Llama v3.2 1B,int4,openvino-nightly,32-32,ov_llm_bench,llama_v3.2_1b,32,32,GPU,4,nightly,1800
+TI-4537955 - OpenVINO Nightly LLM Benchmark | Llama v3.2 1B | int4 | (256-256),Llama v3.2 1B,int4,openvino-nightly,256-256,ov_llm_bench,llama_v3.2_1b,256,256,GPU,4,nightly,1800
+TI-4537955 - OpenVINO Nightly LLM Benchmark | Llama v3.2 1B | int4 | (1024-128),Llama v3.2 1B,int4,openvino-nightly,1024-128,ov_llm_bench,llama_v3.2_1b,1024,128,GPU,4,nightly,1800
+TI-4537955 - OpenVINO Nightly LLM Benchmark | Llama v3.2 1B | int4 | (2048-256),Llama v3.2 1B,int4,openvino-nightly,2048-256,ov_llm_bench,llama_v3.2_1b,2048,256,GPU,4,nightly,1800

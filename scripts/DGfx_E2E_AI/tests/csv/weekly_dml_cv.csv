@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,computer_vision,workload,framework,iteration,Timeout
+TI-4164034 - DirectML CV Benchmark | ResNet50 | fp16 | (FPS),ResNet50,fp16,directml,FPS,computer_vision,resnet50,directml,4,1800

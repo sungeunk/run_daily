@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino,llm,model,Timeout
+OpenVINO Release LLM Quantization | Zamba v2.0 2.7B,Zamba v2.0 2.7B,int4,openvino,int4_sym_gs128,quantize,openvino,llm,zamba_v2.0_2.7b,1800

@@ -1,0 +1,3 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,dml_llm_bench,model,input,output,Timeout
+DirectML LLM Benchmark| Llama v3.2 3B (32-32),Llama v3.2 3B,int4,directml,32-32,dml_llm_bench,llama_v3.2-3B-instruct,32,32,1800
+DirectML LLM Benchmark| Llama v3.2 3B (256-256),Llama v3.2 3B,int4,directml,256-256,dml_llm_bench,llama_v3.2-3B-instruct,256,256,1800

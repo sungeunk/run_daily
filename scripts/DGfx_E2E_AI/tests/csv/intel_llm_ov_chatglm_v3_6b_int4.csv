@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,device,iteration,Timeout
+TI-4164046 - OpenVINO Release LLM Benchmark | ChatGLM v3.0 6B | int4 | (32-32),ChatGLM v3.0 6B,int4,openvino,32-32,ov_llm_bench,chatglm_v3.0_6b,32,32,GPU,4,1800
+TI-4164046 - OpenVINO Release LLM Benchmark | ChatGLM v3.0 6B | int4 | (256-256),ChatGLM v3.0 6B,int4,openvino,256-256,ov_llm_bench,chatglm_v3.0_6b,256,256,GPU,4,1800
+TI-4164046 - OpenVINO Release LLM Benchmark | ChatGLM v3.0 6B | int4 | (1024-128),ChatGLM v3.0 6B,int4,openvino,1024-128,ov_llm_bench,chatglm_v3.0_6b,1024,128,GPU,4,1800
+TI-4164046 - OpenVINO Release LLM Benchmark | ChatGLM v3.0 6B | int4 | (2048-256),ChatGLM v3.0 6B,int4,openvino,2048-256,ov_llm_bench,chatglm_v3.0_6b,2048,256,GPU,4,1800

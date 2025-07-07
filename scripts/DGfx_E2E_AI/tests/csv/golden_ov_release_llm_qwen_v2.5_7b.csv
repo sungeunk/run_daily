@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino,llm,model,Timeout
+OpenVINO Release LLM Golden | Qwen v2.5 7B,Qwen v2.5 7B,int4,openvino,int4_sym_gs128,golden,openvino,llm,qwen_v2.5_7b,3600

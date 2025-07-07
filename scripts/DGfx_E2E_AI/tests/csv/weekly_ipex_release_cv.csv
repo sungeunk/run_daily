@@ -1,0 +1,4 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,computer_vision,workload,framework,iteration,Timeout
+TI-4164035 - IPEX CV Benchmark | ResNet50 | fp16 | (FPS),ResNet50,fp16,ipex,FPS,computer_vision,resnet50,ipex,4,1800
+TI-4164044 - IPEX CV Benchmark | Openpose | fp16 | (FPS),Openpose,fp16,ipex,FPS,computer_vision,openpose,ipex,4,1800
+TI-4164038 - IPEX CV Benchmark | CLIP | fp16 | (FPS),CLIP,fp16,ipex,FPS,computer_vision,clip,ipex,4,1800

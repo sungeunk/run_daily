@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Quantization | Phi v4.0 3.8B,Phi v4.0 3.8B,int4,openvino-nightly,int4_sym_gs128,quantize,openvino-nightly,llm,phi_v4.0_4b,1800

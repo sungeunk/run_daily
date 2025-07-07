@@ -1,0 +1,9 @@
+# --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+# ipex-llm[xpu] --pre
+diffusers
+transformers
+accelerate
+# onednn==2024.0.0
+# mkl-dpcpp==2024.0.0
+# dpcpp-cpp-rt==2024.0.2
+# numpy==1.26.4

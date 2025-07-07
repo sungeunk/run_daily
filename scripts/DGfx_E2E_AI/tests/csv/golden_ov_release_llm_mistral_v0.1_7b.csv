@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino,llm,model,Timeout
+OpenVINO Release LLM Golden | Mistral v0.1 7B,Mistral v0.1 7B,int4,openvino,int4_sym_gs128,golden,openvino,llm,mistral_v0.1_7b,3600

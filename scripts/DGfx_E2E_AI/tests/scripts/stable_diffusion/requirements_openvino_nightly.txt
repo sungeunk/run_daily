@@ -1,0 +1,6 @@
+openvino-nightly
+optimum[openvino]
+diffusers
+transformers
+accelerate
+numpy==1.26.4

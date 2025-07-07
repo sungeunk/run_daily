@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,device,iteration,Timeout
+TI-4394066 - OpenVINO Release LLM Benchmark | Phi v3.5 3.8B | int4 | (32-32),Phi v3.5 3.8B,int4,openvino,32-32,ov_llm_bench,phi_v3.5_4b,32,32,GPU,4,1800
+TI-4394066 - OpenVINO Release LLM Benchmark | Phi v3.5 3.8B | int4 | (256-256),Phi v3.5 3.8B,int4,openvino,256-256,ov_llm_bench,phi_v3.5_4b,256,256,GPU,4,1800
+TI-4394066 - OpenVINO Release LLM Benchmark | Phi v3.5 3.8B | int4 | (1024-128),Phi v3.5 3.8B,int4,openvino,1024-128,ov_llm_bench,phi_v3.5_4b,1024,128,GPU,4,1800
+TI-4394066 - OpenVINO Release LLM Benchmark | Phi v3.5 3.8B | int4 | (2048-256),Phi v3.5 3.8B,int4,openvino,2048-256,ov_llm_bench,phi_v3.5_4b,2048,256,GPU,4,1800

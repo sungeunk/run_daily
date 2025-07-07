@@ -1,0 +1,11 @@
+--index-url https://download.pytorch.org/whl/cu118
+--extra-index-url https://pypi.org/simple
+torch
+torchvision
+torchaudio 
+diffusers
+transformers
+accelerate
+sentencepiece
+protobuf
+numpy==1.26.4

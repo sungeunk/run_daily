@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,computer_vision,workload,framework,iteration,Timeout
+TI-4164035 - OpenVINO Nightly CV Benchmark | ResNet50 | fp16 | (FPS),ResNet50,fp16,openvino-nightly,FPS,computer_vision,resnet50,openvino-nightly,4,1800

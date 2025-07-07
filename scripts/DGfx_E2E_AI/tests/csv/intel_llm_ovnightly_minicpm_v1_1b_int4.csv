@@ -1,0 +1,5 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,ov_llm_bench,model,input,output,device,iteration,nightly,Timeout
+TI-4394063 - OpenVINO Nightly LLM Benchmark | MiniCPM v1.0 1B | int4 | (32-32),MiniCPM v1.0 1B,int4,openvino-nightly,32-32,ov_llm_bench,minicpm_v1.0_1b,32,32,GPU,4,nightly,1800
+TI-4394063 - OpenVINO Nightly LLM Benchmark | MiniCPM v1.0 1B | int4 | (256-256),MiniCPM v1.0 1B,int4,openvino-nightly,256-256,ov_llm_bench,minicpm_v1.0_1b,256,256,GPU,4,nightly,1800
+TI-4394063 - OpenVINO Nightly LLM Benchmark | MiniCPM v1.0 1B | int4 | (1024-128),MiniCPM v1.0 1B,int4,openvino-nightly,1024-128,ov_llm_bench,minicpm_v1.0_1b,1024,128,GPU,4,nightly,1800
+TI-4394063 - OpenVINO Nightly LLM Benchmark | MiniCPM v1.0 1B | int4 | (2048-256),MiniCPM v1.0 1B,int4,openvino-nightly,2048-256,ov_llm_bench,minicpm_v1.0_1b,2048,256,GPU,4,nightly,1800

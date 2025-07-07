@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino,llm,model,Timeout
+OpenVINO Release LLM Golden | MiniCPM 1B,MiniCPM 1B,int4,openvino,int4_sym_gs128,golden,openvino,llm,minicpm_v1.0_1b,3600

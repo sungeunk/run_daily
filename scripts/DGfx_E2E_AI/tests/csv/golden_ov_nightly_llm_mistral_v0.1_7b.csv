@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Mistral v0.1 7B,Mistral v0.1 7B,int4,openvino-nightly-nightlyno,int4_sym_gs128,golden,openvino-nightly,llm,mistral_v0.1_7b,3600

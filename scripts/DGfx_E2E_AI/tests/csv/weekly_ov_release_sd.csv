@@ -1,0 +1,8 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,base_sd,framework,model,height,width,iteration,Timeout
+TI-4254033 - OpenVINO Release SD Benchmark | Stable Diffusion v1.5 (512x512),Stable Diffusion v1.5,fp16,openvino,512x512,base_sd,openvino,v1.5,512,512,4,1800
+TI-4254034 - OpenVINO Release SD Benchmark | Stable Diffusion v2.0 | (512x512),Stable Diffusion v2.0,fp16,openvino,512x512,base_sd,openvino,v2.0,512,512,4,1800
+TI-4254035 - OpenVINO Release SD Benchmark | Stable Diffusion v2.1 | (512x512),Stable Diffusion v2.1,fp16,openvino,512x512,base_sd,openvino,v2.1,512,512,4,1800
+TI-4254036 - OpenVINO Release SD Benchmark | Stable Diffusion XL (768x768),Stable Diffusion XL,fp16,openvino,768x768,base_sd,openvino,xl,768,768,4,1800
+TI-4254037 - OpenVINO Release SD Benchmark | Stable Diffusion LCM | (512x512),Stable Diffusion LCM,fp16,openvino,512x512,base_sd,openvino,lcm,512,512,4,1800
+TI-4394072 - OpenVINO Release SD Benchmark | Stable Diffusion v3.0 | (512x512),Stable Diffusion v3.0,fp16,openvino,512x512,base_sd,openvino,v3.0,512,512,4,1800
+TI-4608527 - OpenVINO Release SD Benchmark | Stable Diffusion Flux.1 Schnell | (512x512),Stable Diffusion Flux.1 Schnell,fp16,openvino,512x512,base_sd,openvino,flux.1_schnell,512,512,4,1800

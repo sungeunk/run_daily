@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Qwen v3.0 0.6B,Qwen v3.0 0.6B,int4,openvino-nightly,int4_sym_gs128,golden,openvino-nightly,llm,qwen_v3.0_0.6b,3600

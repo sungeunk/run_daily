@@ -1,0 +1,4 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,dml_llm_bench,model,input,output,Timeout
+TI-4163198 - DirectML LLM Benchmark | Phi v2.0 2.7B | int4 | (32-32),Phi v2.0 2.7B,int4,directml,32-32,dml_llm_bench,phi_v2,32,32,1800
+TI-4163198 - DirectML LLM Benchmark | Phi v2.0 2.7B | int4 | (256-256),Phi v2.0 2.7B,int4,directml,256-256,dml_llm_bench,phi_v2,256,256,1800
+TI-4163198 - DirectML LLM Benchmark | Phi v2.0 2.7B | int4 | (1024-128),Phi v2.0 2.7B,int4,directml,1024-128,dml_llm_bench,phi_v2,1024,128,1800

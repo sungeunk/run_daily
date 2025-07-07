@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Golden | Phi v2.0 2.7B,Phi v2.0 2.7B,int4,openvino-nightly,int4_sym_gs128,golden,openvino-nightly,llm,phi_v2.0_3b,3600

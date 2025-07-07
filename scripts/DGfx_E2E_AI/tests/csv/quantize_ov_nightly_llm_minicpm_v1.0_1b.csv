@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,quantize,openvino-nightly,llm,model,Timeout
+OpenVINO Nightly LLM Quantization | MiniCPM 1B,MiniCPM 1B,int4,openvino-nightly,int4_sym_gs128,quantize,openvino-nightly,llm,minicpm_v1.0_1b,1800

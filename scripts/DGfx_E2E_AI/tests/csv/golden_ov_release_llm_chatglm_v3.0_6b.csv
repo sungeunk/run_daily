@@ -1,0 +1,2 @@
+Test Name,attributes.workload,attributes.precision,attributes.framework,attributes.parameter,golden,openvino,llm,model,Timeout
+OpenVINO Release LLM Golden | ChatGLM v3.0 6B,ChatGLM v3.0 6B,int4,openvino,int4_sym_gs128,golden,openvino,llm,chatglm_v3.0_6b,3600
