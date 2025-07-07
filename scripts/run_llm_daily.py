@@ -51,12 +51,16 @@ class CmdHelper():
     def __init__(self, cmd_item:dict):
         self.cmd_item = cmd_item
         self.test_config = self.cmd_item.get(CmdItemKey.test_config, {})
+        self.old_cwd = None
 
     def __enter__(self):
         if self.test_config.get(CmdItemKey.TestConfigKey.mem_check, False):
             self.tracker = HWResourceTracker()
             self.tracker.start()
 
+        if self.cmd_item.get(CmdItemKey.work_dir, None):
+            self.old_cwd = os.getcwd()
+            os.chdir(self.cmd_item[CmdItemKey.work_dir])
         self.test_start_time = time.time()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -67,6 +71,9 @@ class CmdHelper():
             self.cmd_item[CmdItemKey.peak_mem_usage_size] = mem_usage_size  #sizeof_fmt(mem_usage_size)
 
         self.cmd_item[CmdItemKey.process_time] = time.time() - self.test_start_time
+
+        if self.old_cwd:
+            os.chdir(self.old_cwd)
 
 def run_daily(args):
     cfg = GlobalConfig()
@@ -84,7 +91,7 @@ def run_daily(args):
     # Run all tests
     #
     for key_tuple, cmd_item_list in result_root.items():
-        log.info(f'Run {key_tuple}...')
+        log.info(f'Run {key_tuple}... cmd_item_list:{cmd_item_list}')
 
         # remove all cache before run each tests
         remove_cache(args)

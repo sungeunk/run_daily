@@ -45,6 +45,7 @@ class CmdItemKey:
     peak_cpu_usage_percent = 'peak_cpu_usage_percent'
     peak_mem_usage_percent = 'peak_mem_usage_percent'
     peak_mem_usage_size = 'peak_mem_usage_size'
+    work_dir = 'work_dir'
 
     class TestConfigKey:
         mem_check = 'mem_check'

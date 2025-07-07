@@ -21,6 +21,7 @@ from test_cases.test_benchmark_app import TestBenchmarkapp
 from test_cases.test_chat_sample import TestChatSample
 from test_cases.test_measured_usage_cpp import TestMeasuredUsageCpp
 from test_cases.test_stable_diffusion_genai import TestStableDiffusionGenai
+from test_cases.test_stable_diffusion_DGfx_E2E_AI import TestStableDiffusionDGfxE2eAi
 from test_cases.test_whisper_base import TestWhisperBase
 
 
@@ -137,14 +138,14 @@ def generate_csv_raw_data(result_root) -> list:
         [('stable-diffusion-v2-1', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
         [('stable-diffusion-3.5-large-turbo', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
         [('lcm-dreamshaper-v7', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
+        [('stable-diffusion-v3.0', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
+        [('stable-diffusion-xl', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
     ]
 
     table = []
     for config in MODEL_REPORT_CONFIG:
         key_tuple = config[0]
         raw_data_func = config[1]
-
-        print(f'config: {config}, {len(config)}')
 
         if len(config) == 3:
             table.extend(raw_data_func(key_tuple, config[2]))
@@ -309,6 +310,7 @@ def get_test_list(target:str=''):
         TestMeasuredUsageCpp,
         # TestStableDiffusion,
         TestStableDiffusionGenai,
+        TestStableDiffusionDGfxE2eAi,
         TestWhisperBase,
         TestBenchmarkapp,
         TestChatSample,
