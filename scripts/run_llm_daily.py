@@ -197,7 +197,7 @@ def main():
     parser.add_argument('--generate_report', help='generate a report file from pickle', action='store_true')
 
     parser.add_argument('-cd', '--cache_dir', help='cache directory', type=Path, default=convert_path(f'{cfg.PWD}/llm-cache'))
-    parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'c:/dev/models'))
+    parser.add_argument('-m', '--model_dir', help='root directory for models', type=Path, default=convert_path(f'c:/dev/models/daily'))
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
 
     # config for test

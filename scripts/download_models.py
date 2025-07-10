@@ -38,7 +38,6 @@ def generate_download_url_list(args):
         'stable-diffusion-v1-5',
         'stable-diffusion-v2-1',
         'stable-diffusion-3.5-large-turbo',
-        # 'stable-diffusion-xl-1.0-inpainting-0.1',
         'lcm-dreamshaper-v7',
     ]
     SD_MODEL_PRECISION_LIST = [
@@ -71,7 +70,7 @@ async def async_download_files(url_list, output):
 
 def main():
     parser = argparse.ArgumentParser(description="download models" , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-o', '--output', help='output directory', type=Path, default='c:\dev\models' if IS_WINDOWS else '/var/www/html/models')
+    parser.add_argument('-o', '--output', help='output directory', type=Path, default='c:\dev\models' if IS_WINDOWS else '/var/www/html/models/daily')
     parser.add_argument('--model_commit', help='model commit name at http://ov-share-05.sclab.intel.com/cv_bench_cache/. ex) WW14_llm-optimum_2025.2.0-18615', type=str, default='WW14_llm-optimum_2025.2.0-18615')
     args = parser.parse_args()
 

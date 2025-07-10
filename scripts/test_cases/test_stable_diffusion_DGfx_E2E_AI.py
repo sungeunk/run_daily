@@ -29,7 +29,8 @@ class TestStableDiffusionDGfxE2eAi(TestTemplate):
 
             ret_dict[key_tuple] = []
             for config in config_list:
-                cmd = f'python {APP_PATH} --device {args.device} --api openvino-nightly --model {config.get("model_name")} --height {config.get("height")} --width {config.get("width")} --num_warm 1 --num_iter 1 --model_root {MODEL_ROOT_PATH}'
+                cmd  = f'python {APP_PATH} --device {args.device} --api openvino-nightly --model {config.get("model_name")}' \
+                       f' --height {config.get("height")} --width {config.get("width")} --num_warm 1 --num_iter 1 --model_root {MODEL_ROOT_PATH}'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd, CmdItemKey.work_dir: WORK_PATH})
 
         return ret_dict

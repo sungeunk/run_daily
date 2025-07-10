@@ -9,10 +9,10 @@ from .test_template import *
 class TestStableDiffusion(TestTemplate):
     MODEL_DATE_WW32_LLM = 'WW32_llm_2024.4.0-16283-41691a36b90'
     CONFIG_MAP = {
-        ('SD 1.5', ModelConfig.FP16): [{'model': 'daily/sd_15_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
-        ('SD 1.5', ModelConfig.INT8): [{'model': 'daily/sd_15_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
-        ('SD 2.1', ModelConfig.FP16): [{'model': 'daily/sd_21_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
-        ('SD 2.1', ModelConfig.INT8): [{'model': 'daily/sd_21_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
+        ('SD 1.5', ModelConfig.FP16): [{'model': 'sd_15_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
+        ('SD 1.5', ModelConfig.INT8): [{'model': 'sd_15_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
+        ('SD 2.1', ModelConfig.FP16): [{'model': 'sd_21_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
+        ('SD 2.1', ModelConfig.INT8): [{'model': 'sd_21_ov', 'app_path': 'bin/sd/stable_diffusion.exe'}],
         ('Stable-Diffusion LCM', ModelConfig.FP16): [{'model': f'{MODEL_DATE_WW32_LLM}/lcm-dreamshaper-v7/pytorch/dldt', 'app_path': 'bin/lcm/lcm_dreamshaper.exe'}],
         ('Stable Diffusion XL', ModelConfig.FP16): [{'model': f'daily/sdxl_1_0_ov/FP16', 'app_path': 'scripts/sdxl/run_sdxl.py'}],
         ('SD 3.0 Dynamic', ModelConfig.MIXED): [{'model': f'stable-diffusion-3', 'app_path': 'scripts/stable-diffusion/run_sd3_ov_daily.py', 'dynamic': True}],
