@@ -1,2 +1,0 @@
-trigger_date,config.batch_size,config.precision,config.warmup_runs,config.measured_runs,config.model_info.full_name,config.Warm Up,config.Iteration,config.Width,config.Height,config.Inference Steps,config.Guidance Scale,metadata.device,metrics.Pre Inference Time (s),metrics.Wall Clock throughput (img/s),metrics.Wall Clock Time (s),metrics.Performance All Runs,metrics.Seconds per image (s/img)
-2025-07-07 22:29:34,1,fp16,1,10,stabilityai/stable-diffusion-xl-base-1.0,1,1,768,768,20,7.5,GPU.1,8.36,17.97,35.94,[17.786805868148804],17.79
