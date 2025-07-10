@@ -130,7 +130,7 @@ def main():
                 quantization_config = OVWeightQuantizationConfig(bits=8)
                 pipeline = OVStableDiffusionXLPipeline.from_pretrained(model_id, device=args.device, export=True, quantization_config=quantization_config)
             else:
-                model_dir = os.path.join(*[args.model_root, 'daily', f'stable-diffusion-{args.model}'])
+                model_dir = os.path.join(*[args.model_root, f'stable-diffusion-{args.model}'])
                 if Path(model_dir).exists():
                     pipeline = OVStableDiffusionXLPipeline.from_pretrained(model_dir, device=args.device, export=False, local_files_only=True)
                 else:
@@ -158,7 +158,7 @@ def main():
             pipeline = OVStableDiffusionXLPipeline.from_pretrained(output_model_path, device=args.device)
             
         elif args.model == "v3.0":
-            model_dir = os.path.join(*[args.model_root, 'daily', f'stable-diffusion-{args.model}'])
+            model_dir = os.path.join(*[args.model_root, f'stable-diffusion-{args.model}'])
             from optimum.intel import OVStableDiffusion3Pipeline
             if Path(model_dir).exists():
                 pipeline = OVStableDiffusion3Pipeline.from_pretrained(model_dir, device=args.device, export=False, local_files_only=True, ov_config={"INFERENCE_PRECISION_HINT": "f16"})
