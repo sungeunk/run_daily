@@ -23,17 +23,13 @@ class TestStableDiffusionDGfxE2eAi(TestTemplate):
         ret_dict = {}
 
         for key_tuple, config_list in __class__.__get_configs().items():
-            # MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
             WORK_PATH = convert_path(f'{cfg.PWD}/scripts/DGfx_E2E_AI/tests')
             APP_PATH = convert_path(f'temp/base_sd.py')
-            MODEL_PATH = convert_path(f'{args.model_dir}/daily/{key_tuple[0]}')
-
-            # python c:\dev\sungeunk\note\DGfx_E2E_AI\tests\temp\base_sd.py --api openvino-nightly --model v3.0 --height 512 --width 512 --num_warm 1 --num_iter 1
-            # python base_sd.py --api openvino-nightly --model xl --height 768 --width 768 --num_warm 1 --num_iter 1
+            MODEL_ROOT_PATH = convert_path(f'{args.model_dir}')
 
             ret_dict[key_tuple] = []
             for config in config_list:
-                cmd = f'python {APP_PATH} --device {args.device} --api openvino-nightly --model {config.get("model_name")} --height {config.get("height")} --width {config.get("width")} --num_warm 1 --num_iter 1 --model_root {MODEL_PATH}'
+                cmd = f'python {APP_PATH} --device {args.device} --api openvino-nightly --model {config.get("model_name")} --height {config.get("height")} --width {config.get("width")} --num_warm 1 --num_iter 1 --model_root {MODEL_ROOT_PATH}'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd, CmdItemKey.work_dir: WORK_PATH})
 
         return ret_dict
@@ -46,14 +42,14 @@ class TestStableDiffusionDGfxE2eAi(TestTemplate):
             if idx > 0:
                 line = line[idx:]
 
-            # Overall Score:  {'config': {'batch_size': 1, 'precision': 'fp16', 'warmup_runs': 1, 'measured_runs': 10,
-            # 'model_info': {'full_name': 'stabilityai/stable-diffusion-3-medium-diffusers'},
-            # 'Warm Up': 1, 'Iteration': 1, 'Width': 512, 'Height': 512, 'Inference Steps': 20, 'Guidance Scale': 7.5},
-            # 'metadata': {'device': 'GPU.1'},
-            # 'metrics': {'Pre Inference Time (s)': 27.55, 'Wall Clock throughput (img/s)': 2.79, 'Wall Clock Time (s)': 5.57, 'Performance All Runs': [2.4369802474975586], 'Seconds per image (s/img)': np.float64(2.44)}, 'logging': {}, 'trigger_date': '2025-07-07 21:16:08',
-            # 'testResult': {'config': {'batch_size': 1, 'precision': 'fp16', 'warmup_runs': 1, 'measured_runs': 10, 'model_info': {'full_name': 'stabilityai/stable-diffusion-3-medium-diffusers'}, 'Warm Up': 1, 'Iteration': 1, 'Width': 512, 'Height': 512, 'Inference Steps': 20, 'Guidance Scale': 7.5},
-            # 'metadata': {'device': 'GPU.1'},
-            # 'metrics': {'Pre Inference Time (s)': 27.55, 'Wall Clock throughput (img/s)': 2.79, 'Wall Clock Time (s)': 5.57, 'Performance All Runs': [2.4369802474975586], 'Seconds per image (s/img)': np.float64(2.44)}, 'logging': {}, 'trigger_date': '2025-07-07 21:16:08'}}
+                # Overall Score:  {'config': {'batch_size': 1, 'precision': 'fp16', 'warmup_runs': 1, 'measured_runs': 10,
+                # 'model_info': {'full_name': 'stabilityai/stable-diffusion-3-medium-diffusers'},
+                # 'Warm Up': 1, 'Iteration': 1, 'Width': 512, 'Height': 512, 'Inference Steps': 20, 'Guidance Scale': 7.5},
+                # 'metadata': {'device': 'GPU.1'},
+                # 'metrics': {'Pre Inference Time (s)': 27.55, 'Wall Clock throughput (img/s)': 2.79, 'Wall Clock Time (s)': 5.57, 'Performance All Runs': [2.4369802474975586], 'Seconds per image (s/img)': np.float64(2.44)}, 'logging': {}, 'trigger_date': '2025-07-07 21:16:08',
+                # 'testResult': {'config': {'batch_size': 1, 'precision': 'fp16', 'warmup_runs': 1, 'measured_runs': 10, 'model_info': {'full_name': 'stabilityai/stable-diffusion-3-medium-diffusers'}, 'Warm Up': 1, 'Iteration': 1, 'Width': 512, 'Height': 512, 'Inference Steps': 20, 'Guidance Scale': 7.5},
+                # 'metadata': {'device': 'GPU.1'},
+                # 'metrics': {'Pre Inference Time (s)': 27.55, 'Wall Clock throughput (img/s)': 2.79, 'Wall Clock Time (s)': 5.57, 'Performance All Runs': [2.4369802474975586], 'Seconds per image (s/img)': np.float64(2.44)}, 'logging': {}, 'trigger_date': '2025-07-07 21:16:08'}}
 
                 match_obj = re.search(r'\'batch_size\': (\d+)', line)
                 if match_obj != None:
