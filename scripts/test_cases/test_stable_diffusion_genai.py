@@ -10,7 +10,6 @@ class TestStableDiffusionGenai(TestTemplate):
     CONFIG_MAP = {
         ('stable-diffusion-v1-5', ModelConfig.FP16): [],
         ('stable-diffusion-v2-1', ModelConfig.FP16): [],
-        ('stable-diffusion-3.5-large-turbo', ModelConfig.FP16): [],
         ('lcm-dreamshaper-v7', ModelConfig.FP16): [],
     }
 

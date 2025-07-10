@@ -37,7 +37,6 @@ def generate_download_url_list(args):
     SD_MODEL_LIST = [
         'stable-diffusion-v1-5',
         'stable-diffusion-v2-1',
-        'stable-diffusion-3.5-large-turbo',
         'lcm-dreamshaper-v7',
     ]
     SD_MODEL_PRECISION_LIST = [
