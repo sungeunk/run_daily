@@ -25,7 +25,7 @@ class TestChatSample(TestTemplate):
             for config in config_list:
                 APP_PATH = convert_path(f'{config["app_path"]}')
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device}'
+                cmd = f'python {APP_PATH} {MODEL_PATH} {args.device}'
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
 
         return ret_dict
