@@ -136,9 +136,9 @@ def generate_csv_raw_data(result_root) -> list:
         [('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase), raw_data_for_whisperbase],
         [('stable-diffusion-v1-5', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
         [('stable-diffusion-v2-1', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
-        [('lcm-dreamshaper-v7', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
         [('stable-diffusion-v3.0', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
         [('stable-diffusion-xl', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
+        [('lcm-dreamshaper-v7', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
     ]
 
     table = []
