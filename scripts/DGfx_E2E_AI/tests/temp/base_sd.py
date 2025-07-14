@@ -132,7 +132,7 @@ def main():
             else:
                 model_dir = os.path.join(*[args.model_root, f'stable-diffusion-{args.model}'])
                 if Path(model_dir).exists():
-                    pipeline = OVStableDiffusionXLPipeline.from_pretrained(model_dir, device=args.device, export=False, local_files_only=True)
+                    pipeline = OVStableDiffusionXLPipeline.from_pretrained(model_dir, device=args.device, export=False, local_files_only=True, compile=False)
                 else:
                     pipeline = OVStableDiffusionXLPipeline.from_pretrained(model_id, device=args.device, export=True)
                     pipeline.save_pretrained(model_dir)
@@ -161,7 +161,7 @@ def main():
             model_dir = os.path.join(*[args.model_root, f'stable-diffusion-{args.model}'])
             from optimum.intel import OVStableDiffusion3Pipeline
             if Path(model_dir).exists():
-                pipeline = OVStableDiffusion3Pipeline.from_pretrained(model_dir, device=args.device, export=False, local_files_only=True, ov_config={"INFERENCE_PRECISION_HINT": "f16"})
+                pipeline = OVStableDiffusion3Pipeline.from_pretrained(model_dir, device=args.device, export=False, local_files_only=True, compile=False, ov_config={"INFERENCE_PRECISION_HINT": "f16"})
             else:
                 pipeline = OVStableDiffusion3Pipeline.from_pretrained(model_id, device=args.device, ov_config={"INFERENCE_PRECISION_HINT": "f16"})
                 pipeline.save_pretrained(model_dir)
