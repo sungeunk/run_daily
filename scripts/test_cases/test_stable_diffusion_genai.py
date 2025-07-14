@@ -8,9 +8,10 @@ from .test_template import *
 
 class TestStableDiffusionGenai(TestTemplate):
     CONFIG_MAP = {
-        ('stable-diffusion-v1-5', ModelConfig.FP16): [],
-        ('stable-diffusion-v2-1', ModelConfig.FP16): [],
-        ('lcm-dreamshaper-v7', ModelConfig.FP16): [],
+        # ('stable-diffusion-v1-5', ModelConfig.FP16): [{}],
+        # ('stable-diffusion-v2-1', ModelConfig.FP16): [{}],
+        ('lcm-dreamshaper-v7', ModelConfig.FP16): [{}],
+        ('flux.1-schnell', ModelConfig.OV_FP16_4BIT_DEFAULT): [{'prompt':'prompts/32_1024/flux.1-schnell.jsonl'}],
     }
 
     def __get_configs():
@@ -24,11 +25,14 @@ class TestStableDiffusionGenai(TestTemplate):
         ret_dict = {}
 
         for key_tuple, config_list in __class__.__get_configs().items():
-            MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-            APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
-            PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/multimodal/{key_tuple[0]}.jsonl')
-            cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --genai -pf {PROMPT_PATH} --output_dir {args.output_dir}'
-            ret_dict[key_tuple] = [{CmdItemKey.cmd: cmd}]
+            for config in config_list:
+                MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
+                APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
+                prompt = config.get('prompt', f'prompts/multimodal/{key_tuple[0]}.jsonl')
+                PROMPT_PATH = convert_path(f'{cfg.PWD}/{prompt}')
+
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --genai -pf {PROMPT_PATH} --output_dir {args.output_dir}'
+                ret_dict[key_tuple] = [{CmdItemKey.cmd: cmd}]
 
         return ret_dict
 
@@ -40,13 +44,17 @@ class TestStableDiffusionGenai(TestTemplate):
             if match_obj:   # ignore warm-up inference
                 continue
 
-            match_obj = re.search(r'Input params: Batch_size=(\d+), steps=(\d+), width=(\d+), height=(\d+), guidance_scale=(\d+.\d+)', line)
+            match_obj = re.search(r'Input params: Batch_size=(\d+), steps=(\d+), width=(\d+), height=(\d+)', line)
             if match_obj != None:
                 values = match_obj.groups()
                 data_dict['Batch_size'] = int(values[0])
                 data_dict['steps'] = int(values[1])
                 data_dict['size'] = f'{int(values[2])}x{int(values[3])}'
-                data_dict['guidance_scale'] = float(values[4])
+
+            match_obj = re.search(r'guidance_scale=(\d+.\d+)', line)
+            if match_obj != None:
+                values = match_obj.groups()
+                data_dict['guidance_scale'] = float(values[0])
 
             match_obj = re.search(r'Input token size: (\d+), Infer count: (\d+), Generation Time: (\d+.\d+)s,', line)
             if match_obj != None:

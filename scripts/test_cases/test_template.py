@@ -63,10 +63,8 @@ class ModelName():
     chatglm3_6b = 'chatglm3-6b'
     llama_2_7b_chat_hf = 'llama-2-7b-chat-hf'
     minicpm_1b_sft = 'minicpm-1b-sft'
-    mistral_7b = 'mistral-7b-v0.1'
     phi_3_mini_4k_instruct = 'phi-3-mini-4k-instruct'
     gemma_7b_it = 'gemma-7b-it'
-    qwen_7b_chat = 'qwen-7b-chat'
 
 class ModelConfig():
     UNKNOWN = ''

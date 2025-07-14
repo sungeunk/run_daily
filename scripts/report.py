@@ -22,7 +22,6 @@ from test_cases.test_chat_sample import TestChatSample
 from test_cases.test_measured_usage_cpp import TestMeasuredUsageCpp
 from test_cases.test_stable_diffusion_genai import TestStableDiffusionGenai
 from test_cases.test_stable_diffusion_DGfx_E2E_AI import TestStableDiffusionDGfxE2eAi
-from test_cases.test_whisper_base import TestWhisperBase
 
 
 def convert_url(filename) -> str:
@@ -101,18 +100,7 @@ def generate_csv_raw_data(result_root) -> list:
         for cmd_item in result_root.get(key_tuple, []):
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
                 for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
-
-        print(f'raw_data_list: {raw_data_list}')
-        while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
-        return raw_data_list
-
-    def raw_data_for_whisperbase(key_tuple):
-        raw_data_list = []
-        for cmd_item in result_root.get(key_tuple, []):
-            if cmd_item.get(CmdItemKey.return_code, -1) == 0:
-                for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'ms/token', __get_inf(data_item, 0, fps_to_ms)])
+                    raw_data_list.append([key_tuple[0], key_tuple[1], data_item[CmdItemKey.DataItemKey.perf][4], '', 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
 
         while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
@@ -125,15 +113,17 @@ def generate_csv_raw_data(result_root) -> list:
         [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('llama-3.1-8b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('mistral-7b-instruct-v0.2', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('phi-3.5-vision-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
+        [('qwen2.5-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark, {'data_num':2}],
+        [('flux.1-schnell', ModelConfig.OV_FP16_4BIT_DEFAULT, TestStableDiffusionGenai), raw_data_for_stablediffusion],
+        [('whisper-large-v3', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
         [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_measure_usage],
         [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
-        [('Whisper base', ModelConfig.UNKNOWN, TestWhisperBase), raw_data_for_whisperbase],
         [('stable-diffusion-v1-5', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
         [('stable-diffusion-v2-1', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
         [('stable-diffusion-v3.0', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
@@ -228,7 +218,6 @@ def __get_data_item(parent_list, index):
 def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
     SKIP_KEY_LIST = [
         'qwen_usage',
-        'Whisper base',
         'stable-diffusion-v1-5',
         'stable-diffusion-v2-1',
         'lcm-dreamshaper-v7',
@@ -306,10 +295,8 @@ def get_test_list(target:str=''):
     all_test_list = [
         TestBenchmark,
         TestMeasuredUsageCpp,
-        # TestStableDiffusion,
         TestStableDiffusionGenai,
         TestStableDiffusionDGfxE2eAi,
-        TestWhisperBase,
         TestBenchmarkapp,
         TestChatSample,
     ]

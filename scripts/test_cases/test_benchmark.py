@@ -19,17 +19,19 @@ class TestBenchmark(TestTemplate):
     CONFIG_MAP = {
         (ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ("glm-4-9b-chat-hf", ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('llama-3.1-8b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.mistral_7b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.qwen_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT): [{BENCHMARK_MODE:BENCHMARK_MODE_VLM, 'prompt': 'What is on this image?', 'media': convert_path("res/cat-448x448.png")}],
+        ('mistral-7b-instruct-v0.2', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('phi-3.5-vision-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('whisper-large-v3', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('qwen2.5-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
     }
 
     def __get_configs():
