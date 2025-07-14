@@ -6,12 +6,15 @@ import time
 from common_utils import *
 from .test_template import *
 
+
 class TestStableDiffusionGenai(TestTemplate):
     CONFIG_MAP = {
-        # ('stable-diffusion-v1-5', ModelConfig.FP16): [{}],
-        # ('stable-diffusion-v2-1', ModelConfig.FP16): [{}],
-        ('lcm-dreamshaper-v7', ModelConfig.FP16): [{}],
-        ('flux.1-schnell', ModelConfig.OV_FP16_4BIT_DEFAULT): [{'prompt':'prompts/32_1024/flux.1-schnell.jsonl'}],
+        ('stable-diffusion-v1-5', ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('stable-diffusion-v2-1', ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('lcm-dreamshaper-v7',    ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('flux.1-schnell',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('whisper-large-v3',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('minicpm-v-2_6',         ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
     }
 
     def __get_configs():
@@ -22,16 +25,20 @@ class TestStableDiffusionGenai(TestTemplate):
 
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
+        APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
 
         for key_tuple, config_list in __class__.__get_configs().items():
+            ret_dict.setdefault(key_tuple, [])
+
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
-                prompt = config.get('prompt', f'prompts/multimodal/{key_tuple[0]}.jsonl')
-                PROMPT_PATH = convert_path(f'{cfg.PWD}/{prompt}')
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --genai --output_dir {args.output_dir}'
 
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --genai -pf {PROMPT_PATH} --output_dir {args.output_dir}'
+                prompt_type = config.get(PROMPT_TYPE_KEY, PROMPT_TYPE_DEFAULT)
+                PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/{prompt_type}/{key_tuple[0]}.jsonl')
+                cmd += f' -pf {PROMPT_PATH}'
+
                 ret_dict[key_tuple] = [{CmdItemKey.cmd: cmd}]
 
         return ret_dict
@@ -44,27 +51,38 @@ class TestStableDiffusionGenai(TestTemplate):
             if match_obj:   # ignore warm-up inference
                 continue
 
-            match_obj = re.search(r'Input params: Batch_size=(\d+), steps=(\d+), width=(\d+), height=(\d+)', line)
-            if match_obj != None:
-                values = match_obj.groups()
-                data_dict['Batch_size'] = int(values[0])
-                data_dict['steps'] = int(values[1])
-                data_dict['size'] = f'{int(values[2])}x{int(values[3])}'
+            def __add_value_to_dict(result_dict, key, parse_str, line):
+                match_obj = re.search(parse_str, line)
+                if match_obj != None:
+                    values = match_obj.groups()
+                    result_dict[key] = float(values[0]) if is_float(values[0]) else int(values[0])
 
-            match_obj = re.search(r'guidance_scale=(\d+.\d+)', line)
-            if match_obj != None:
-                values = match_obj.groups()
-                data_dict['guidance_scale'] = float(values[0])
+            __add_value_to_dict(data_dict, 'Batch_size', r'Batch_size=(\d+)', line)
+            __add_value_to_dict(data_dict, 'steps', r'steps=(\d+)', line)
+            __add_value_to_dict(data_dict, 'width', r'width=(\d+)', line)
+            __add_value_to_dict(data_dict, 'height', r'height=(\d+)', line)
+            __add_value_to_dict(data_dict, 'guidance_scale', r'guidance_scale=(\d+.\d+)', line)
+            __add_value_to_dict(data_dict, 'Input token size', r'Input token size: (\d+)', line)
+            __add_value_to_dict(data_dict, 'Output token size', r'Output size: (\d+)', line)
+            __add_value_to_dict(data_dict, 'Infer count', r'Infer count: (\d+)', line)
+            __add_value_to_dict(data_dict, 'Generation Time', r'Generation Time: (\d+.\d+)s', line)
 
-            match_obj = re.search(r'Input token size: (\d+), Infer count: (\d+), Generation Time: (\d+.\d+)s,', line)
+            match_obj = re.search(r'\[(\d+)\]\[P(\d+)\] start: ', line)
             if match_obj != None:
-                values = match_obj.groups()
-                data_dict['Input token size'] = int(values[0])
-                data_dict['Infer count'] = int(values[1])
-                data_dict['Generation Time'] = float(values[2])
+                width = data_dict.get('width', '')
+                height = data_dict.get('height', '')
+                size = f'{int(width)}x{int(height)}' if width and height else ''
+
                 item = {}
-                item[CmdItemKey.DataItemKey.perf] = [data_dict['Generation Time'], data_dict['Batch_size'], data_dict['steps'], data_dict['size'], data_dict['Input token size'], data_dict['Infer count']]
+                item[CmdItemKey.DataItemKey.perf] = [data_dict.get('Generation Time'),
+                                                     data_dict.get('Batch_size', ''),
+                                                     data_dict.get('steps', ''),
+                                                     size,
+                                                     data_dict.get('Input token size', ''),
+                                                     data_dict.get('Output token size', ''),
+                                                     data_dict.get('Infer count', '')]
                 ret_list.append(item)
+                data_dict = {}
 
         return ret_list
 
@@ -72,7 +90,10 @@ class TestStableDiffusionGenai(TestTemplate):
         def __get_inf(data_item:dict, index):
             try:
                 value = data_item[CmdItemKey.DataItemKey.perf][index]
-                return f'{value:.02f}' if is_float(value) else value
+                if is_float(value):
+                    return f'{value:.02f}' if index == 0 else int(value)
+                else:
+                    return value
             except:
                 return ''
 
@@ -89,7 +110,7 @@ class TestStableDiffusionGenai(TestTemplate):
                     raw_data_list.append([key_tuple[0], key_tuple[1]] + raw_data)
 
         if len(raw_data_list):
-            headers = ['model', 'precision', 'pipeline time(s)', 'Batch_size', 'steps', 'size', 'Input token size', 'Infer count']
+            headers = ['model', 'precision', 'pipeline time(s)', 'Batch_size', 'steps', 'size', 'Input token size', 'Output token size', 'Infer count']
             tabulate_str = tabulate(raw_data_list, tablefmt="github", headers=headers, stralign='right', numalign='right')
             return f'[RESULT] stable_diffusion_genai / process_time: {time.strftime("%H:%M:%S", time.gmtime(take_time))}\n' + tabulate_str + '\n'
         else:

@@ -77,6 +77,13 @@ class ModelConfig():
     OV_FP16_INT4_SYM_CW = 'OV_FP16_INT4_SYM_CW'
 
 
+PROMPT_TYPE_KEY = 'prompt_type'
+PROMPT_TYPE_32_1K = '32_1024'
+PROMPT_TYPE_MULTIMODAL = 'multimodal'
+PROMPT_TYPE_DEFAULT = PROMPT_TYPE_32_1K
+
+
+
 ################################################
 # Template Class
 ################################################

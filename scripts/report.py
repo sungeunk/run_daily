@@ -100,35 +100,45 @@ def generate_csv_raw_data(result_root) -> list:
         for cmd_item in result_root.get(key_tuple, []):
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
                 for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], data_item[CmdItemKey.DataItemKey.perf][4], '', 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
+                    raw_data_list.append([key_tuple[0], key_tuple[1], data_item[CmdItemKey.DataItemKey.perf][4], data_item[CmdItemKey.DataItemKey.perf][5], 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
+
+        while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
+        return raw_data_list
+
+    def raw_data_for_stablediffusion_dgfx(key_tuple):
+        raw_data_list = []
+        for cmd_item in result_root.get(key_tuple, []):
+            if cmd_item.get(CmdItemKey.return_code, -1) == 0:
+                for data_item in cmd_item.get(CmdItemKey.data_list, []):
+                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
 
         while len(raw_data_list) < 1: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
     MODEL_REPORT_CONFIG = [
-        [(ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [("glm-4-9b-chat-hf", ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('llama-3.1-8b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('mistral-7b-instruct-v0.2', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('phi-3.5-vision-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('qwen2.5-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark, {'data_num':2}],
-        [('flux.1-schnell', ModelConfig.OV_FP16_4BIT_DEFAULT, TestStableDiffusionGenai), raw_data_for_stablediffusion],
-        [('whisper-large-v3', ModelConfig.OV_FP16_4BIT_DEFAULT, TestBenchmark), raw_data_for_benchmark],
-        [('qwen_usage', ModelConfig.INT8, TestMeasuredUsageCpp), raw_data_for_measure_usage],
-        [('Resnet50', ModelConfig.INT8, TestBenchmarkapp), raw_data_for_benchmarkapp],
-        [('stable-diffusion-v1-5', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
-        [('stable-diffusion-v2-1', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
-        [('stable-diffusion-v3.0', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
-        [('stable-diffusion-xl', ModelConfig.FP16, TestStableDiffusionDGfxE2eAi), raw_data_for_stablediffusion],
-        [('lcm-dreamshaper-v7', ModelConfig.FP16, TestStableDiffusionGenai), raw_data_for_stablediffusion],
+        [(ModelName.baichuan2_7b_chat,      ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [(ModelName.chatglm3_6b,            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [("glm-4-9b-chat-hf",               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [(ModelName.gemma_7b_it,            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [(ModelName.llama_2_7b_chat_hf,     ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [(ModelName.minicpm_1b_sft,         ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('flux.1-schnell',                 ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('whisper-large-v3',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('qwen_usage',                     ModelConfig.INT8,                   TestMeasuredUsageCpp),          raw_data_for_measure_usage],
+        [('Resnet50',                       ModelConfig.INT8,                   TestBenchmarkapp),              raw_data_for_benchmarkapp],
+        [('stable-diffusion-v1-5',          ModelConfig.FP16,                   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('stable-diffusion-v2-1',          ModelConfig.FP16,                   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('stable-diffusion-v3.0',          ModelConfig.FP16,                   TestStableDiffusionDGfxE2eAi),  raw_data_for_stablediffusion_dgfx],
+        [('stable-diffusion-xl',            ModelConfig.FP16,                   TestStableDiffusionDGfxE2eAi),  raw_data_for_stablediffusion_dgfx],
+        [('lcm-dreamshaper-v7',             ModelConfig.FP16,                   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
     ]
 
     table = []
@@ -242,6 +252,8 @@ def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
                 if this_item != None:
                     callback(fos, this_key_tuple, this_item, ref_item)
 
+ERROR_IOU_NUM=0.05
+
 # tabulate_data: [model, precision, token, iou]
 def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dict, ref_item:dict):
     this_text = this_item.get(CmdItemKey.DataItemKey.generated_text, '')
@@ -255,7 +267,7 @@ def generate_compared_text_summary(tabulate_data, key_tuple:tuple, this_item:dic
     ref_text = ref_item.get(CmdItemKey.DataItemKey.generated_text, '')
     iou = calculate_score(this_text, ref_text)
 
-    if iou < 0.2:
+    if iou < ERROR_IOU_NUM:
         tabulate_data.append([key_tuple[0], key_tuple[1], in_token, f'{iou:.2f}'])
 
 def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
@@ -279,8 +291,8 @@ def print_compared_text(fos, key_tuple:tuple, this_item:dict, ref_item:dict):
     ref_text = ref_text if len(ref_text) < LIMIT_TEXT_LENGTH else ref_text[0:LIMIT_TEXT_LENGTH]
     ref_text = ref_text.replace("<s>", "_s_")
 
-    sts_str = ('OK' if iou > 0.2 else 'DIFF') if iou > 0 else 'ERR'
-    if iou <= 0.2 :
+    sts_str = ('OK' if iou > ERROR_IOU_NUM else 'DIFF') if iou > 0 else 'ERR'
+    if iou <= ERROR_IOU_NUM :
         fos.write(f'[TEXT][{key_tuple}][{in_token}][{sts_str}][iou:{iou:0.2f}]\n')
         fos.write(f'\t[this] {this_text}\n')
         fos.write(f'\t[ref ] {ref_text}\n\n')

@@ -9,29 +9,22 @@ from common_utils import *
 from .test_template import *
 
 
-BENCHMARK_MODE = 'BENCHMARK_MODE'
-BENCHMARK_MODE_LLM = 'LLM'
-BENCHMARK_MODE_VLM = 'VLM'
-BENCHMARK_MODE_DEFAULT = BENCHMARK_MODE_LLM
-
 class TestBenchmark(TestTemplate):
 
     CONFIG_MAP = {
-        (ModelName.baichuan2_7b_chat, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.chatglm3_6b, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.gemma_7b_it, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ("glm-4-9b-chat-hf", ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.llama_2_7b_chat_hf, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('llama-3.1-8b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.minicpm_1b_sft, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('minicpm-v-2_6', ModelConfig.OV_FP16_4BIT_DEFAULT): [{BENCHMARK_MODE:BENCHMARK_MODE_VLM, 'prompt': 'What is on this image?', 'media': convert_path("res/cat-448x448.png")}],
-        ('mistral-7b-instruct-v0.2', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.baichuan2_7b_chat,      ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.chatglm3_6b,            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.gemma_7b_it,            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ("glm-4-9b-chat-hf",               ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.llama_2_7b_chat_hf,     ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        (ModelName.minicpm_1b_sft,         ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-3.5-mini-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-3.5-vision-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('whisper-large-v3', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('qwen2-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('qwen2.5-7b-instruct', ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], 
+        ('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
     }
 
     def __get_configs():
@@ -44,6 +37,7 @@ class TestBenchmark(TestTemplate):
         cfg = GlobalConfig()
         APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
+
         for key_tuple, config_list in __class__.__get_configs().items():
             ret_dict.setdefault(key_tuple, [])
 
@@ -55,12 +49,9 @@ class TestBenchmark(TestTemplate):
                 if not args.continuous_batch:
                     cmd += f' --load_config {convert_path("res/config_wa.json")}'
 
-                TEST_MODE = config.get(BENCHMARK_MODE, BENCHMARK_MODE_DEFAULT)
-                if TEST_MODE == BENCHMARK_MODE_LLM:
-                    PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/32_1024/{key_tuple[0]}.jsonl')
-                    cmd += f' -pf {PROMPT_PATH}'
-                elif TEST_MODE == BENCHMARK_MODE_VLM:
-                    cmd += f' -p "{config["prompt"]}" --media {config["media"]}'
+                prompt_type = config.get(PROMPT_TYPE_KEY, PROMPT_TYPE_DEFAULT)
+                PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/{prompt_type}/{key_tuple[0]}.jsonl')
+                cmd += f' -pf {PROMPT_PATH}'
 
                 ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
         return ret_dict
