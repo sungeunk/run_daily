@@ -344,14 +344,6 @@ def generate_summary(args, PROCESS_TIME) -> str:
     summary_table_data.append(['RawLog', f'{convert_url(cfg.RAW_FILENAME)}'])
     summary_table_data.append(['PipRequirements', f'{convert_url(cfg.PIP_FREEZE_FILENAME)}'])
 
-    RESULT_SD3_DYNAMIC_PATH = convert_path(f'{args.output_dir}/{cfg.RESULT_SD3_DYNAMIC_FILENAME}')
-    if exists_path(RESULT_SD3_DYNAMIC_PATH):
-        summary_table_data.append(['SD3.0 dynamic', f'{convert_url(cfg.RESULT_SD3_DYNAMIC_FILENAME)}'])
-
-    RESULT_SD3_STATIC_PATH = convert_path(f'{args.output_dir}/{cfg.RESULT_SD3_STATIC_FILENAME}')
-    if exists_path(RESULT_SD3_STATIC_PATH):
-        summary_table_data.append(['SD3.0 static', f'{convert_url(cfg.RESULT_SD3_STATIC_FILENAME)}'])
-
     if args.ref_report != None:
         summary_table_data.append(['Reference Report', f'{convert_url(os.path.basename(args.ref_report))}'])
     summary_table = tabulate(summary_table_data, tablefmt="youtrack")
