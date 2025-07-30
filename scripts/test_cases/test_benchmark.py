@@ -19,6 +19,7 @@ class TestBenchmark(TestTemplate):
         (ModelName.llama_2_7b_chat_hf,     ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.minicpm_1b_sft,         ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
         ('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], 

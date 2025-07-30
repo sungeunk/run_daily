@@ -14,7 +14,6 @@ class TestStableDiffusionGenai(TestTemplate):
         ('lcm-dreamshaper-v7',    ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
         ('flux.1-schnell',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('whisper-large-v3',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
-        ('minicpm-v-2_6',         ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
     }
 
     def __get_configs():

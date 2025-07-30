@@ -129,7 +129,7 @@ def generate_csv_raw_data(result_root) -> list:
         [('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark, {'data_num':2}],
         [('flux.1-schnell',                 ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
         [('whisper-large-v3',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
         [('qwen_usage',                     ModelConfig.INT8,                   TestMeasuredUsageCpp),          raw_data_for_measure_usage],
