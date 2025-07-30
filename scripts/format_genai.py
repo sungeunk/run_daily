@@ -57,7 +57,7 @@ def parsing_log(handle, args):
 
         #  [ INFO ] [1][P0] First token latency: 1048.52 ms/token, other tokens latency: 117.78 ms/token, len of tokens: 128 * 1
         # "[1] First token latency: 195.68 ms/token, other tokens latency: 120.94 ms/token, len of tokens: 128 * 1"
-        match_obj = re.search(r'First token latency: (\d+.\d+) ms\/token, other tokens latency: ([\d.NA]+)', line)
+        match_obj = re.search(r'First token latency: (\d+.\d+) ms, other tokens latency: (\d+.\d+)', line)
         if match_obj:
             values = match_obj.groups()
             ret.append([model_name, temp_item[0], temp_item[2], temp_item[3], temp_item[4], get_float(values[0]), get_float(values[1]), temp_item[5], temp_item[6], float(temp_item[7])*1000, temp_item[8]])
@@ -69,8 +69,8 @@ def parsing_log(handle, args):
                 dict_data[key].append([get_float(values[0]), get_float(values[1])])
             continue
 
-    # raw_data_list = []
-    print(f'model,model_precision,token,exec,latench(ms)')
+    raw_data_list = []
+    # print(f'model,model_precision,token,exec,latench(ms)')
     for key, data_list in dict_data.items():
         prev_geomean = 100000
         prev_data = []
@@ -79,15 +79,15 @@ def parsing_log(handle, args):
             if prev_geomean > geomean:
                 prev_geomean = geomean
                 prev_data = data
-        # raw_data_list.append([key[0], key[1], key[2], '1st', prev_data[0]])
-        # raw_data_list.append([key[0], key[1], key[2], '2nd', prev_data[1]])
-        print(f'{key[0]},{key[1]},{key[2]},1st,{prev_data[0]:.2f}')
-        print(f'{key[0]},{key[1]},{key[2]},2nd,{prev_data[1]:.2f}')
+        raw_data_list.append([key[0], key[1], key[2], '1st', prev_data[0]])
+        raw_data_list.append([key[0], key[1], key[2], '2nd', prev_data[1]])
+        # print(f'{key[0]},{key[1]},{key[2]},1st,{prev_data[0]:.2f}')
+        # print(f'{key[0]},{key[1]},{key[2]},2nd,{prev_data[1]:.2f}')
 
-    # headers = ['model', 'iteration', 'token size', 'out size', 'inf num', '1st inf(ms)', '2nd inf(ms)', 'token(ms)', 'detoken(ms)', 'generation(ms)', 'latency(ms)/token']
-    # table = tabulate(ret, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
-    # print(f'OV Version: {ov_version}')
-    # print(f'{table}')
+    headers = ['model', 'iteration', 'token size', 'out size', 'inf num', '1st inf(ms)', '2nd inf(ms)', 'token(ms)', 'detoken(ms)', 'generation(ms)', 'latency(ms)/token']
+    table = tabulate(ret, tablefmt="github", headers=headers, floatfmt='.2f', stralign='right', numalign='right')
+    print(f'OV Version: {ov_version}')
+    print(f'{table}')
 
 
 # Device Timeline for sdpa_opt_single_token_1941726075318499197_0_0__sa (enqueue 16373) = 1578431119375 ns (queued), 1578431119427 ns (submit), 1578431119479 ns (start), 1578431210624 ns (end)
