@@ -7,6 +7,7 @@ if exist user_definitions_%COMPUTERNAME%.bat (
     call user_definitions_default.bat
 )
 
+git submodule update --init --recursive
 
 :: python environment for daily
 call conda create -n daily python=3.11 -y
@@ -28,8 +29,7 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
     )
 )
 
-pip install -r requirements.txt
-pip install -U --pre --no-deps -r requirements_no_deps.txt
+pip install -r requirements.windows.txt
 
 call conda deactivate
 

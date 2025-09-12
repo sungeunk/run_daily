@@ -61,7 +61,7 @@ if %BUILD_BENCHMARK% == 1 (
     if exist build\ (
         rmdir /S /Q build
     )
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_PRIVATE_ROOT%\scripts\buildsystems\vcpkg.cmake
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_PRIVATE_ROOT%\scripts\buildsystems\vcpkg.cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     ninja -j %NPROC% -C build benchmark_app
 
     mkdir %BIN_DIR%\benchmark_app
@@ -75,7 +75,7 @@ if %BUILD_QWEN% == 1 (
     if exist build\ (
         rmdir /S /Q build
     )
-    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+    cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     ninja -j %NPROC% -C build main
 
     mkdir %BIN_DIR%\qwen
