@@ -10,8 +10,12 @@ if exist user_definitions_%COMPUTERNAME%.bat (
 git submodule update --init --recursive
 
 :: python environment for daily
-call conda create -n daily python=3.11 -y
 call conda activate daily
+if %ERRORLEVEL% NEQ 0 (
+    call conda create -n daily python=3.11 -y
+    call conda activate daily
+)
+
 
 :: set environments
 if exist %VC_ENV_FILE_BUILDTOOLS% (
