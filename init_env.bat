@@ -33,14 +33,12 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
     )
 )
 
-pip install -r requirements.windows.txt
-
-call conda deactivate
+pip install -r requirements.txt
 
 
 :: vcpkg for opencl
 cd vcpkg
-bootstrap-vcpkg.bat
+call bootstrap-vcpkg.bat
 vcpkg.exe install opencl
 cd ..
 

@@ -1,3 +1,5 @@
+--index-url https://download.pytorch.org/whl/cpu
+
 aiohttp==3.11.2
 bs4==0.0.2
 diffusers==0.31.0
@@ -22,5 +24,5 @@ tqdm==4.67.1
 transformers==4.46.2
 WMI==1.5.1
 
--r requirements.ubuntu.txt; sys_platform == 'win32'
--r requirements.windows.txt; sys_platform == 'linux'
+-r requirements.windows.txt sys_platform == 'win32'
+-r requirements.ubuntu.txt sys_platform == 'linux'
