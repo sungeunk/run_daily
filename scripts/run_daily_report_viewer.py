@@ -126,7 +126,7 @@ def main():
         daily_list_on = st.checkbox("daily", value=True)
 
     with config_column_2:
-        server_selection = st.selectbox("Select Server", ['DUT4037PTLH', 'MTL-01', 'DUT6047BMGFRD', 'DUT133ARLH', 'LNL-02', 'dg2alderlake'] if daily_list_on else sorted(os.listdir(args.report_dir)))
+        server_selection = st.selectbox("Select Server", ['DUT4015PTLH', 'ARLH-01', 'LNL-03', 'MTL-01', 'DUT6047BMGFRD', 'dg2alderlake'] if daily_list_on else sorted(os.listdir(args.report_dir)))
         report_dir = os.path.join(args.report_dir, server_selection)
     report_df = get_daily_report_dataframe(report_dir)
 
