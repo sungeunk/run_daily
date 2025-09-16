@@ -34,6 +34,7 @@ if exist %VC_ENV_FILE_BUILDTOOLS% (
 )
 
 pip install -r requirements.txt
+pip install -r requirements.cpu.txt
 
 
 :: vcpkg for opencl
