@@ -6,6 +6,7 @@ from common_utils import * # Assuming this contains load_result_file, is_float, 
 from report import * # Assuming this contains generate_csv_table
 from datetime import datetime
 from pathlib import Path
+from st_copy_to_clipboard import st_copy_to_clipboard
 from typing import List, Dict, Tuple, Optional
 
 # --- Constants ---
@@ -139,15 +140,18 @@ def main():
     is_daily_list = st.sidebar.checkbox("Filter by Standard Servers", value=True)
     
     if is_daily_list:
-        server_options = ['DUT4015PTLH', 'ARLH-01', 'LNL-03', 'MTL-01', 'DUT6047BMGFRD', 'dg2alderlake']
+        server_options = ['DUT4015PTLH', 'ARLH-01', 'LNL-03', 'MTL-01', 'BMG-02', 'dg2alderlake']
     else:
         server_options = sorted([d.name for d in args.report_dir.iterdir() if d.is_dir()])
     
-    server_selection = st.sidebar.selectbox("Select Server", server_options)
+    server_selection = st.sidebar.radio("Select Server", server_options)
     report_dir = args.report_dir / server_selection
 
     all_reports_df = load_all_reports(report_dir)
-    
+    if all_reports_df.empty:
+        st.info(f"No report file in {server_selection}")
+        return
+
     filter_str = st.text_input('Filter reports by purpose:', value='daily_CB')
     filtered_reports_df = all_reports_df
     if filter_str:
