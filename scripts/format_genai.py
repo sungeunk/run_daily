@@ -57,7 +57,7 @@ def parsing_log(handle, args):
 
         #  [ INFO ] [1][P0] First token latency: 1048.52 ms/token, other tokens latency: 117.78 ms/token, len of tokens: 128 * 1
         # "[1] First token latency: 195.68 ms/token, other tokens latency: 120.94 ms/token, len of tokens: 128 * 1"
-        match_obj = re.search(r'First token latency: (\d+.\d+) ms, other tokens latency: (\d+.\d+)', line)
+        match_obj = re.search(r'First infer latency: (\d+.\d+) ms\/infer, other infers latency: (\d+.\d+)', line)
         if match_obj:
             values = match_obj.groups()
             ret.append([model_name, temp_item[0], temp_item[2], temp_item[3], temp_item[4], get_float(values[0]), get_float(values[1]), temp_item[5], temp_item[6], float(temp_item[7])*1000, temp_item[8]])
