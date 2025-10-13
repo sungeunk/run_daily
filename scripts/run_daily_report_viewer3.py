@@ -6,11 +6,13 @@ from common_utils import * # Assuming this contains load_result_file, is_float, 
 from report import * # Assuming this contains generate_csv_table
 from datetime import datetime
 from pathlib import Path
-from st_copy_to_clipboard import st_copy_to_clipboard
 from typing import List, Dict, Tuple, Optional
+
 
 # --- Constants ---
 ROOT_DAILY_REPORT = Path('/var/www/html/daily')
+METADATA_COLS = ['model', 'precision', 'in', 'out', 'execution']
+
 
 # --- Data Loading and Parsing Functions ---
 
@@ -100,23 +102,22 @@ def generate_excel_paste_data(df: pd.DataFrame, report_df: pd.DataFrame) -> Tupl
     if df.empty:
         return None, ""
 
-    METADATA_COLS = ['model', 'precision', 'in', 'out', 'execution']
     perf_cols = [col for col in df.columns if col not in METADATA_COLS]
     if not perf_cols:
         return df, "No performance data columns found to generate Excel string."
 
-    # This removes the leftmost metadata columns from the string output.
     perf_df = df[perf_cols]
     data_str = perf_df.to_csv(sep='\t', index=False, header=False, float_format='%.2f')
 
-    header_data = report_df.loc[perf_cols]
+    valid_perf_cols = [pc for pc in perf_cols if pc in report_df.index]
+    header_data = report_df.loc[valid_perf_cols]
+    
     commit_line = "\t".join(header_data["commit_id"])
     ww_line = "\t".join(header_data["workweek"])
     date_line = "\t".join(header_data.index)
 
     full_paste_string = "\n\n" + "\n".join([commit_line, ww_line, '', date_line, data_str])
     
-    # Return the original merged DataFrame for the preview table in the UI.
     return df, full_paste_string
 
 # --- Streamlit UI ---
@@ -161,8 +162,7 @@ def main():
     selection = st.dataframe(
         filtered_reports_df, 
         on_select='rerun', 
-        selection_mode='multi-row',
-        width='stretch'
+        selection_mode='multi-row'
     )
     
     selected_rows = selection['selection']['rows']
@@ -172,30 +172,78 @@ def main():
         
     selected_reports_df = filtered_reports_df.iloc[selected_rows]
 
-    excel_tab, summary_tab = st.tabs(["Excel Paste", "Summary"])
+    # --- Data Loading for Selected Reports (Moved before tabs) ---
+    merged_df = pd.DataFrame()
+    for datetime_key, row in selected_reports_df.iterrows():
+        pickle_path = (report_dir / row['filename']).with_suffix('.pickle')
+        if pickle_path.exists():
+            perf_df = load_perf_df_from_pickle(pickle_path, merged_df.empty)
+            merged_df = perf_df if merged_df.empty else merged_df.join(perf_df, how='left')
+        else:
+            st.warning(f"Pickle file not found for {row['filename']}")
+
+    # --- UI Tabs ---
+    excel_tab, summary_tab = st.tabs(["Excel Paste", "Summary & Chart"])
 
     with excel_tab:
-        merged_df = pd.DataFrame()
-        for datetime_key, row in selected_reports_df.iterrows():
-            pickle_path = (report_dir / row['filename']).with_suffix('.pickle')
-            if pickle_path.exists():
-                perf_df = load_perf_df_from_pickle(pickle_path, merged_df.empty)
-                merged_df = perf_df if merged_df.empty else merged_df.join(perf_df, how='left')
-            else:
-                st.warning(f"Pickle file not found for {row['filename']}")
-
         excel_df, excel_paste_str = generate_excel_paste_data(merged_df, all_reports_df)
         
         st.subheader("Data for Excel")
-        st.text_area('Copy the text below and paste it into Excel:', value=excel_paste_str, height=100)
+        st.text_area('Copy the text below and paste it into Excel:', value=excel_paste_str, height=200)
         
         st.subheader("Preview")
         if excel_df is not None:
-            st.dataframe(excel_df, width='stretch')
+            st.dataframe(excel_df)
 
     with summary_tab:
         st.subheader("Selected Reports Summary")
-        st.dataframe(selected_reports_df, width='stretch')
+        st.dataframe(selected_reports_df)
+        
+        st.markdown("---") 
+        st.subheader("Performance Trend Charts 📈")
+
+        if merged_df.empty:
+            st.warning("No performance data loaded to generate a chart.")
+        else:
+            model_list = sorted(merged_df['model'].unique())
+            selected_model = st.selectbox('Select a model to visualize:', model_list)
+
+            if selected_model:
+                model_df = merged_df[merged_df['model'] == selected_model].copy()
+                
+                # Get all unique execution types for the selected model
+                unique_executions = sorted(model_df['execution'].unique())
+                
+                # --- Loop and create a separate chart for each execution type ---
+                for i, execution_type in enumerate(unique_executions):
+                    if i > 0:
+                        st.markdown("---") # Add a separator between charts
+
+                    st.subheader(f"📊 Trend for Execution: `{execution_type}`")
+                    
+                    # Filter data for the current execution type
+                    execution_df = model_df[model_df['execution'] == execution_type].copy()
+                    
+                    # Create a label for the lines within this chart
+                    execution_df['label'] = (execution_df['precision'].astype(str) + 
+                                             ' (in:' + execution_df['in'].astype(str) +
+                                             '/out:' + execution_df['out'].astype(str) + ')')
+                    
+                    execution_df.set_index('label', inplace=True)
+                    
+                    perf_cols = [col for col in execution_df.columns if col not in METADATA_COLS]
+                    
+                    if not perf_cols:
+                        st.warning(f"No performance data found for execution type: {execution_type}")
+                        continue
+
+                    chart_data = execution_df[perf_cols].T
+                    chart_data.index.name = "Report Run"
+                    
+                    if chart_data.empty:
+                        st.info(f"No data points to plot for '{execution_type}'.")
+                    else:
+                        st.line_chart(chart_data)
 
 
 if __name__ == "__main__":
