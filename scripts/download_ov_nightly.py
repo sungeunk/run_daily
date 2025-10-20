@@ -391,13 +391,6 @@ def get_url(commit_id):
         'releases/2025/2/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/2/commit/',
         'releases/2025/1/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/1/commit/',
         'releases/2025/0/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/commit/',
-        # 'releases/2024/4/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/commit/',
-        # 'releases/2024/4/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/4/pre_commit/',
-        # 'releases/2024/5/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/commit/',
-        # 'releases/2024/5/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/5/pre_commit/',
-        # 'releases/2024/6/commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/commit/',
-        # 'releases/2024/6/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2024/6/pre_commit/',
-        # 'releases/2025/0/pre_commit': 'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/0/pre_commit/'
     }
 
     for key, url in url_list.items():
@@ -460,7 +453,6 @@ def main():
     parser.add_argument('-d', '--download_url', help=help_download_url, type=str, default=None)
     parser.add_argument('-c', '--commit_id', help='commit id for openvino', type=str, default=None)
     parser.add_argument('--keep_old', help='keep old pkg files/directories', action='store_true')
-    parser.add_argument('--clean_up', help='[deprecated] not working. remove old pkg files/directories', type=bool, default=True)
     parser.add_argument('--no_proxy', help='try to download pkgs with no_proxy', action='store_true')
     parser.add_argument('-i', '--install', help='install openvino package', type=Path, default=None)
     parser.add_argument('--latest_commit', help='query latest master commit', action='store_true')
