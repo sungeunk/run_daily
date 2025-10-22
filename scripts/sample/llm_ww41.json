@@ -1,0 +1,11 @@
+{
+    "server":"ov-share-05",
+    "cache_commit":"WW42_llm-optimum_2025.4.0-20191",
+    "model":[
+        {
+            "name":["deepseek-r1-distill-qwen-14b"],
+            "framework": ["pytorch"],
+            "precision": ["OV_FP16-NF4"]
+        }
+    ]
+}

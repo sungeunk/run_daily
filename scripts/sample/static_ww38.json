@@ -1,0 +1,21 @@
+{
+    "server":"ov-share-04",
+    "cache_commit":"WW42_static_2025.4.0-20191",
+    "model":[
+        {
+            "name":["hbonet-0.25"],
+            "framework": ["onnx"],
+            "precision": ["FP16", "FP32"]
+        },
+        {
+            "name":["person-attributes-recognition-crossroad-0238"],
+            "framework": ["onnx"],
+            "precision": ["FP16-INT8"]
+        },
+        {
+            "name":["hbonet-0.25", "east_resnet_v1_50", "shufflenet"],
+            "framework": ["tf"],
+            "precision": ["FP16"]
+        }
+    ]
+}
