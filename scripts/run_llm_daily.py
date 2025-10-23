@@ -34,12 +34,16 @@ from test_cases.test_template import *
 # Utils
 ################################################
 def remove_cache(args):
-    if exists_path(args.cache_dir):
-        for file in glob(convert_path(f'{args.cache_dir}/*.cl_cache')):
-            os.remove(file)
-        for file in glob(convert_path(f'{args.cache_dir}/*.blob')):
-            os.remove(file)
-        time.sleep(1)
+    try:
+        if exists_path(args.cache_dir):
+            for file in glob(convert_path(f'{args.cache_dir}/*.cl_cache')):
+                os.remove(file)
+            for file in glob(convert_path(f'{args.cache_dir}/*.blob')):
+                os.remove(file)
+    except Exception as e:
+        print(f'Exception: {e}')
+
+    time.sleep(1)
 
 
 
