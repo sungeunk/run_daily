@@ -159,6 +159,7 @@ def main():
         args.download_dir = 'c:/dev/models/daily' if IS_WINDOWS else '/var/www/html/models/daily'
 
     download_target_list = generate_download_target_list(args)
+    print('\n'.join(url[1] for url in download_target_list))
 
     os.makedirs(args.download_dir, exist_ok=True)
 
