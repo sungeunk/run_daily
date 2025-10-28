@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import logging as log
+import logging.config
 import os
 import sys
 import time
