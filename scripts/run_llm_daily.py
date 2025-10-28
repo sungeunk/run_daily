@@ -14,7 +14,7 @@ from pathlib import Path
 try:
     from openvino import get_version
 except:
-    log.warning('could not load openvino.runtime package.')
+    logging.warning('could not load openvino.runtime package.')
     def get_version():
         return 'none'
 
