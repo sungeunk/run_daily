@@ -6,6 +6,7 @@ import logging as log
 import os
 import platform
 import re
+import stat
 import subprocess
 import time
 
@@ -83,6 +84,61 @@ def compare_class_name(klass, target):
         if target.lower() == class_name.lower():
             return True
     return False
+
+def force_delete_file(file_path):
+    """
+    Deletes a file. If the file is read-only (common issue on Windows),
+    it removes the read-only attribute and tries again.
+
+    Args:
+        file_path (str): The full path to the file to be deleted.
+
+    Returns:
+        bool: True if deletion was successful, False otherwise.
+    """
+
+    # 1. Check if the file exists
+    if not os.path.exists(file_path):
+        print(f"Info: File does not exist, nothing to delete: {file_path}")
+        return True # Technically successful, as the file is gone.
+
+    # 2. First attempt: Try to delete it directly
+    try:
+        os.remove(file_path)
+        print(f"Successfully deleted file: {file_path}")
+        return True
+
+    except PermissionError as e:
+        print(f"Warning: PermissionError encountered: {e}")
+        print("Attempting to remove read-only attribute and retry...")
+
+        # 3. If PermissionError, remove read-only attribute and retry
+        try:
+            # Get current permissions
+            current_mode = os.stat(file_path).st_mode
+
+            # Add write permission for the user (owner)
+            os.chmod(file_path, current_mode | stat.S_IWRITE)
+
+            print("Read-only attribute removed. Retrying deletion...")
+
+            # 4. Second attempt: Delete again
+            os.remove(file_path)
+
+            print(f"Successfully deleted read-only file: {file_path}")
+            return True
+
+        except Exception as e2:
+            print(f"Error: Failed to delete file even after changing permissions.")
+            print(f"       Underlying error: {e2}")
+            print("       This can happen if you don't own the file (requires Admin/sudo)")
+            print("       or if the file is currently in use by another program.")
+            return False
+    except Exception as e:
+        print(f"Error: An unexpected error occurred: {e}")
+        print("       The file might be in use by another program.")
+        return False
+
 
 #
 # WA: At subprocess.popen(cmd, ...), the cmd should be string on ubuntu or be string array on windows.

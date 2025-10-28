@@ -3,10 +3,7 @@
 import argparse
 import datetime as dt
 import logging as log
-import logging.config
 import os
-import re
-import subprocess
 import sys
 import time
 
@@ -17,7 +14,7 @@ from pathlib import Path
 try:
     from openvino import get_version
 except:
-    logging.warning('could not load openvino.runtime package.')
+    log.warning('could not load openvino.runtime package.')
     def get_version():
         return 'none'
 
@@ -33,13 +30,18 @@ from test_cases.test_template import *
 ################################################
 # Utils
 ################################################
+
 def remove_cache(args):
     try:
-        if exists_path(args.cache_dir):
-            for file in glob(convert_path(f'{args.cache_dir}/*.cl_cache')):
-                os.remove(file)
-            for file in glob(convert_path(f'{args.cache_dir}/*.blob')):
-                os.remove(file)
+        TARGET_DIR = [convert_path('scripts/DGfx_E2E_AI/tests/logs'), args.cache_dir]
+        TARGET_PATTERN = ['*.cl_cache', '*.blob', '*.png']
+        for dir in TARGET_DIR:
+            if exists_path(dir):
+                continue
+            for pattern in TARGET_PATTERN:
+                for file in glob(convert_path(f'{dir}/{pattern}')):
+                    print(f'try to delete: {file}')
+                    force_delete_file(file)
     except Exception as e:
         print(f'Exception: {e}')
 
