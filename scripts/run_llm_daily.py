@@ -34,10 +34,12 @@ from test_cases.test_template import *
 
 def remove_cache(args):
     try:
-        TARGET_DIR = [convert_path('scripts/DGfx_E2E_AI/tests/logs'), args.cache_dir]
+        TARGET_DIR = [ convert_path('scripts/DGfx_E2E_AI/tests/logs'),
+                       args.cache_dir,
+                       convert_path(f'{args.model_dir}/stable-diffusion-xl/unet/model_cache')]
         TARGET_PATTERN = ['*.cl_cache', '*.blob', '*.png']
         for dir in TARGET_DIR:
-            if exists_path(dir):
+            if not exists_path(dir):
                 continue
             for pattern in TARGET_PATTERN:
                 for file in glob(convert_path(f'{dir}/{pattern}')):
