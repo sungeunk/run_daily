@@ -105,12 +105,10 @@ def force_delete_file(file_path):
     # 2. First attempt: Try to delete it directly
     try:
         os.remove(file_path)
-        print(f"Successfully deleted file: {file_path}")
         return True
 
     except PermissionError as e:
         print(f"Warning: PermissionError encountered: {e}")
-        print("Attempting to remove read-only attribute and retry...")
 
         # 3. If PermissionError, remove read-only attribute and retry
         try:
@@ -120,12 +118,8 @@ def force_delete_file(file_path):
             # Add write permission for the user (owner)
             os.chmod(file_path, current_mode | stat.S_IWRITE)
 
-            print("Read-only attribute removed. Retrying deletion...")
-
             # 4. Second attempt: Delete again
             os.remove(file_path)
-
-            print(f"Successfully deleted read-only file: {file_path}")
             return True
 
         except Exception as e2:

@@ -36,6 +36,7 @@ def remove_cache(args):
     try:
         TARGET_DIR = [ convert_path('scripts/DGfx_E2E_AI/tests/logs'),
                        args.cache_dir,
+                       convert_path(f'{args.model_dir}/stable-diffusion-v3.0/transformer/model_cache'),
                        convert_path(f'{args.model_dir}/stable-diffusion-xl/unet/model_cache')]
         TARGET_PATTERN = ['*.cl_cache', '*.blob', '*.png']
         for dir in TARGET_DIR:
@@ -43,7 +44,6 @@ def remove_cache(args):
                 continue
             for pattern in TARGET_PATTERN:
                 for file in glob(convert_path(f'{dir}/{pattern}')):
-                    print(f'try to delete: {file}')
                     force_delete_file(file)
     except Exception as e:
         print(f'Exception: {e}')
@@ -102,10 +102,10 @@ def run_daily(args):
     for key_tuple, cmd_item_list in result_root.items():
         log.info(f'Run {key_tuple}... cmd_item_list:{cmd_item_list}')
 
-        # remove all cache before run each tests
-        remove_cache(args)
 
         for cmd_item in cmd_item_list:
+            # remove all cache before run each tests
+            remove_cache(args)
             with CmdHelper(cmd_item) as helper:
                 log.info(f'cmd: {cmd_item[CmdItemKey.cmd]}')
                 output, return_code = call_cmd(args, cmd_item[CmdItemKey.cmd])
@@ -113,6 +113,9 @@ def run_daily(args):
                 cmd_item[CmdItemKey.raw_log] = output
                 cmd_item[CmdItemKey.return_code] = return_code
                 cmd_item[CmdItemKey.data_list] = key_tuple[2].parse_output(args, output)
+
+            # remove all cache after run each tests
+            remove_cache(args)
 
         log.info(f'Run {key_tuple}... Done\n')
 
