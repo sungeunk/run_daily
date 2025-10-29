@@ -148,7 +148,12 @@ def main():
     parser.add_argument('-d', '--download_dir', help='download directory', type=Path, default='.' if IS_WINDOWS else '.')
     parser.add_argument('-cj', '--config_json', help='user config json file path', type=Path, default=None)
     parser.add_argument('-mw', '--max_workers', help='count of workers', type=int, default=5)
+    parser.add_argument('--for_daily', help='download models for daily. ignore config_json & download_dir', action='store_true')
     args = parser.parse_args()
+
+    if args.for_daily:
+        args.config_json = 'sample/daily_WW43_llm-optimum_2025.4.0-20264.json'
+        args.download_dir = 'c:/dev/models/daily' if IS_WINDOWS else '/var/www/html/models/daily'
 
     download_target_list = generate_download_target_list(args)
 
