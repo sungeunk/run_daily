@@ -1,0 +1,18 @@
+{
+    "server":"ov-share-05",
+    "cache_commit":"WW45_llm-optimum_2025.4.0-20381-RC1",
+    "model":[
+        {
+            "name":["baichuan2-7b-chat", "chatglm3-6b", "glm-4-9b-chat-hf", "gemma-7b-it", "llama-2-7b-chat-hf",
+                    "llama-3.1-8b-instruct", "minicpm-1b-sft", "mistral-7b-instruct-v0.2", "phi-3-mini-4k-instruct", "phi-3.5-mini-instruct",
+                    "phi-3.5-vision-instruct", "qwen2-7b-instruct", "qwen2.5-7b-instruct", "minicpm-v-2_6", "flux.1-schnell", "whisper-large-v3"],
+            "framework": ["pytorch"],
+            "precision": ["OV_FP16-4BIT_DEFAULT"]
+        },
+        {
+            "name":["stable-diffusion-v1-5", "stable-diffusion-v2-1", "lcm-dreamshaper-v7"],
+            "framework": ["pytorch"],
+            "precision": ["FP16"]
+        }
+    ]
+}
