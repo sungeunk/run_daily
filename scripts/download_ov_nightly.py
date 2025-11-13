@@ -57,6 +57,9 @@ if platform.system() == 'Linux':
 def check_filepath(path: Path) -> bool:
     """Checks if a file or directory exists at the given Path."""
     try:
+        # Ensure the input is a Path object before calling .exists()
+        if not isinstance(path, Path):
+            path = Path(path)
         return path.exists()
     except Exception as e:
         # Catch potential errors like permission issues
@@ -430,7 +433,7 @@ def install_openvino(ov_filepath: Path, output_dir: Path):
         log.warning(f'no file: {ov_filepath}')
         return
 
-    uncompressed_dir, ext = decompress(ov_filepath, output_dir)
+    uncompressed_dir = decompress(ov_filepath, output_dir)
     if uncompressed_dir:
         setup_script = uncompressed_dir / ('setupvars.bat' if IS_WINDOWS else 'setupvars.sh')
         update_latest_ov_setup_file(setup_script, output_dir)
