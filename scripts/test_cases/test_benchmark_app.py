@@ -23,12 +23,11 @@ class TestBenchmarkapp(TestTemplate):
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         ret_dict = {}
-        APP_PATH=convert_path(f'{cfg.PWD}/bin/benchmark_app/benchmark_app')
         for key_tuple, config_list in __class__.__get_configs().items():
             ret_dict[key_tuple] = []
             for config in config_list:
                 ret_dict[key_tuple].append({
-                    CmdItemKey.cmd: f'{APP_PATH} -m {convert_path(config["model"])} -b {config["batch"]} -d {args.device} --hint none -nstreams 2 -nireq 4 -t 10',
+                    CmdItemKey.cmd: ['python', '-c', "from openvino.tools.benchmark.main import main; main()", '-m', f'{convert_path(config["model"])}', '-b', f'{config["batch"]}', '-d', f'{args.device}', '-hint', 'none', '-nstreams', '2', '-nireq', '4', '-t', '10'],
                     CmdItemKey.test_config: {
                         CmdItemKey.TestConfigKey.batch: config['batch']
                     }

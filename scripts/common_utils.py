@@ -137,9 +137,11 @@ def force_delete_file(file_path):
 #
 # WA: At subprocess.popen(cmd, ...), the cmd should be string on ubuntu or be string array on windows.
 #
-def convert_cmd_for_popen(cmd: str) -> str:
-    # return cmd.split() # if is_windows() else cmd
-    return cmd if is_windows() else cmd.split()
+def convert_cmd_for_popen(cmd) -> str:
+    if isinstance(cmd, list) or is_windows():
+        return cmd
+    else:
+        return cmd.split()
 
 def convert_path(path):
     if is_windows():

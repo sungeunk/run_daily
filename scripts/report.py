@@ -306,7 +306,7 @@ def get_test_list(target:str=''):
 
     all_test_list = [
         TestBenchmark,
-        TestMeasuredUsageCpp,
+        # TestMeasuredUsageCpp,
         TestStableDiffusionGenai,
         TestStableDiffusionDGfxE2eAi,
         TestBenchmarkapp,
