@@ -155,7 +155,7 @@ def main():
     args = parser.parse_args()
 
     if args.for_daily:
-        args.config_json = convert_path(os.path.join(*[Path(__file__).resolve().parent, 'sample/daily_WW43_llm-optimum_2025.4.0-20264.json']))
+        args.config_json = convert_path(os.path.join(*[Path(__file__).resolve().parent, 'sample/daily.json']))
         args.download_dir = 'c:/dev/models/daily' if IS_WINDOWS else '/var/www/html/models/daily'
 
     download_target_list = generate_download_target_list(args)
