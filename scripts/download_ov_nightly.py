@@ -11,8 +11,9 @@ try:
     import shutil
     import subprocess
     import sys
-    import zipfile
+    import tarfile
     import tqdm.asyncio as tqdm_asyncio
+    import zipfile
     import yaml
 
     from bs4 import BeautifulSoup
@@ -405,27 +406,30 @@ def decompress(compressed_filepath: Path, store_path: Path, delete_zip: bool = F
     Returns:
         Path to the root of the uncompressed content, or None on failure.
     """
-
     root, ext = os.path.splitext(compressed_filepath.name)
 
-    try:
-        if ext == '.zip' or ext == '.tgz' or ext == '.gz':
-            # Use zipfile module on all platforms (more reliable than 'unzip' cmd)
-            with zipfile.ZipFile(compressed_filepath, 'r') as file:
-                file.extractall(store_path)
-        else:
-            log.warning(f'Unknown compression format: {ext}')
-            return None
-
-        if delete_zip:
-            os.remove(compressed_filepath)
-
-        # Return the path to the directory that was likely created
-        # Note: This assumes the archive extracts to a dir named like the archive
-        return store_path / root
-    except (zipfile.BadZipFile, IOError) as e:
-        log.error(f'Failed to decompress {compressed_filepath}: {e}')
+    if ext == '.zip':
+        try:
+            command = ['unzip', '-o', '-q', compressed_filepath, '-d', store_path]
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            print("Error: could not find 'unzip'", file=sys.stderr)
+        except subprocess.CalledProcessError as e:
+            print(f"Error: 'unzip' execution failture (ReturnCode {e.returncode}):", file=sys.stderr)
+            print(f"STDERR: {e.stderr}", file=sys.stderr)
+    elif ext == '.tgz' or ext == '.gz':
+        with tarfile.open(compressed_filepath, 'r:gz') as tar:
+            tar.extractall(store_path, filter='tar', numeric_owner=True)
+    else:
+        log.warning(f'Unknown compression format: {ext}')
         return None
+
+    if delete_zip:
+        os.remove(compressed_filepath)
+
+    # Return the path to the directory that was likely created
+    # Note: This assumes the archive extracts to a dir named like the archive
+    return store_path / root
 
 def install_openvino(ov_filepath: Path, output_dir: Path):
     """Wrapper function to decompress a single OV package and update the setup path."""

@@ -22,7 +22,7 @@ class TestBenchmark(TestTemplate):
         ('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
         ('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], 
+        ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
@@ -86,8 +86,8 @@ class TestBenchmark(TestTemplate):
                 continue
 
             values = None
-            match_obj1 = re.search(r'\[\d+\]\[\w(\d+)\] First token latency: (\d+.\d+) ms\/token, other tokens latency: (\d+.\d+) ms\/token', line)
-            match_obj2 = re.search(r'\[\d+\]\[\w(\d+)\] First token latency: (\d+.\d+) ms\/token', line)
+            match_obj1 = re.search(r'\[\d+\]\[\w(\d+)\] First token latency: (\d+.\d+) ms, other tokens latency: (\d+.\d+) ms', line)
+            match_obj2 = re.search(r'\[\d+\]\[\w(\d+)\] First token latency: (\d+.\d+) ms', line)
             if match_obj1 != None:
                 values = match_obj1.groups()
             elif match_obj2 != None:
