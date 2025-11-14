@@ -409,14 +409,18 @@ def decompress(compressed_filepath: Path, store_path: Path, delete_zip: bool = F
     root, ext = os.path.splitext(compressed_filepath.name)
 
     if ext == '.zip':
-        try:
-            command = ['unzip', '-o', '-q', compressed_filepath, '-d', store_path]
-            subprocess.run(command, check=True, capture_output=True, text=True)
-        except FileNotFoundError:
-            print("Error: could not find 'unzip'", file=sys.stderr)
-        except subprocess.CalledProcessError as e:
-            print(f"Error: 'unzip' execution failture (ReturnCode {e.returncode}):", file=sys.stderr)
-            print(f"STDERR: {e.stderr}", file=sys.stderr)
+        if IS_WINDOWS:
+            with zipfile.ZipFile(compressed_filepath, 'r') as file:
+                file.extractall(store_path)
+        else:
+            try:
+                command = ['unzip', '-o', '-q', compressed_filepath, '-d', store_path]
+                subprocess.run(command, check=True, capture_output=True, text=True)
+            except FileNotFoundError:
+                print("Error: could not find 'unzip'", file=sys.stderr)
+            except subprocess.CalledProcessError as e:
+                print(f"Error: 'unzip' execution failture (ReturnCode {e.returncode}):", file=sys.stderr)
+                print(f"STDERR: {e.stderr}", file=sys.stderr)
     elif ext == '.tgz' or ext == '.gz':
         with tarfile.open(compressed_filepath, 'r:gz') as tar:
             tar.extractall(store_path, filter='tar', numeric_owner=True)
