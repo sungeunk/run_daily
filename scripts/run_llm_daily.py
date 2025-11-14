@@ -123,6 +123,8 @@ def run_daily(args):
     return result_root
 
 def set_global_config():
+    os.environ['PYTHONUTF8'] = '1'
+
     cfg = GlobalConfig()
     cfg.NOW = dt.datetime.now().strftime("%Y%m%d_%H%M")
     cfg.PWD = Path(__file__).parent.parent
