@@ -102,7 +102,7 @@ def generate_csv_raw_data(result_root) -> list:
                 for data_item in cmd_item.get(CmdItemKey.data_list, []):
                     raw_data_list.append([key_tuple[0], key_tuple[1], data_item[CmdItemKey.DataItemKey.perf][4], data_item[CmdItemKey.DataItemKey.perf][5], 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
 
-        while len(raw_data_list) < args.get('data_num', 2): raw_data_list.append([key_tuple[0], key_tuple[1]])
+        while len(raw_data_list) < args.get('data_num', 1): raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
     def raw_data_for_stablediffusion_dgfx(key_tuple, args={}):
@@ -130,7 +130,7 @@ def generate_csv_raw_data(result_root) -> list:
         [('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark, {'data_num':2}],
-        [('flux.1-schnell',                 ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('flux.1-schnell',                 ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion, {'data_num':2}],
         [('whisper-large-v3',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion, {'data_num':2}],
         [('qwen_usage',                     ModelConfig.INT8,                   TestMeasuredUsageCpp),          raw_data_for_measure_usage],
         [('Resnet50',                       ModelConfig.INT8,                   TestBenchmarkapp),              raw_data_for_benchmarkapp],
