@@ -166,36 +166,71 @@ def get_static_info_from_raw_data(raw_data_table) -> tuple[int, int]:
     geomean = geometric_mean(value_list) if len(value_list) else 0
     return geomean, success_count
 
-def generate_csv_table(result_root, format_number = True) -> list:
+
+
+def generate_csv_table(result_root, format_number=True) -> list:
     csv_table = generate_csv_raw_data(result_root)
     geomean, success_count = get_static_info_from_raw_data(csv_table)
 
-    # formating table for report
-    if format_number:
-        for item in csv_table:
-            if len(item) == 6 and item[0] == 'qwen_usage':
-                if item[4] == 'memory percent':
-                    item[5] = f'{item[5]:.2f} %'
-                elif item[4] == 'memory size':
-                    item[5] = sizeof_fmt(item[5])
+    def classify_token_size(ts):
+        """
+        Short:  token_size < 400
+        Long:   401 <= token_size <= 1200
+        else:   Unknown
+        """
+        try:
+            ts = int(ts)
+        except Exception:
+            return 'Unknown'
 
-    def add_table_for_llm(table, token_size, exec):
-        __value_list = [ float(raw_list[5]) for raw_list in table if len(raw_list) == 6 and is_float(raw_list[5]) and raw_list[2] == token_size and raw_list[4] == exec ]
+        if ts < 400:
+            return 'Short'
+        elif 401 <= ts <= 1200:
+            return 'Long'
+        else:
+            return 'Unknown'
+
+    def add_table_for_llm(table, token_size, exec_stage):
+        """
+        Previously, we aggregated rows where raw_list[2] == token_size.
+        Now, we aggregate rows where the classification (Short/Long/Unknown) matches.
+        """
+        target_class = classify_token_size(token_size)
+
+        def _row_matches(row):
+            # Row format: [*, *, token_size, *, exec, value]
+            if len(row) != 6:
+                return False
+            if not is_float(row[5]):
+                return False
+            if row[4] != exec_stage:
+                return False
+            # Compare classification of raw token_size
+            row_class = classify_token_size(row[2])
+            return row_class == target_class
+
+        __value_list = [float(raw_list[5]) for raw_list in table if _row_matches(raw_list)]
+
+        label = f'geomean (LLM/{exec_stage}/{target_class})'
         if len(__value_list):
             __geomean = geometric_mean(__value_list)
-            table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', f'{float(__geomean):.2f}'])
+            table.append([label, '', '', '', '', f'{float(__geomean):.2f}'])
         else:
-            table.append([f'geomean (LLM/{exec}/{token_size:4})', '', '', '', '', 0])
+            table.append([label, '', '', '', '', 0])
 
+    # Add summary rows
     csv_table.append(['', '', '', '', '', ''])
     csv_table.append(['Success count', '', '', '', '', success_count])
     csv_table.append(['geomean', '', '', '', '', f'{float(geomean):.2f}'])
-    add_table_for_llm(csv_table, 32, '2nd')
-    add_table_for_llm(csv_table, 32, '1st')
-    add_table_for_llm(csv_table, 1024, '2nd')
-    add_table_for_llm(csv_table, 1024, '1st')
+
+    # Keep original calls, but internally aggregation is based on classification
+    add_table_for_llm(csv_table, 32, '2nd')     # 32 -> Short
+    add_table_for_llm(csv_table, 32, '1st')     # 32 -> Short
+    add_table_for_llm(csv_table, 1024, '2nd')   # 1024 -> Long
+    add_table_for_llm(csv_table, 1024, '1st')   # 1024 -> Long
 
     return csv_table
+
 
 def generate_csv_tabulate_str(csv_table):
     tabulate_str = tabulate(csv_table, tablefmt="github", headers=['model', 'precision', 'in', 'out', 'exec', 'latency(ms)'], floatfmt='.2f', stralign='right', numalign='right')
