@@ -307,9 +307,8 @@ def load_local_ov_version(args: argparse.Namespace) -> OV_VERSION | None:
     try:
         with open(version_file, 'r', encoding='utf8') as fis:
             return OV_VERSION(fis.readline().strip())  # .strip() to remove newlines
-    except FileNotFoundError:
-        return None
-    except IOError as e:
+    except Exception as e:
+        print(f'load_local_ov_version: error: {e}')
         return None
 
 def check_ov_version(exist_ov_version: OV_VERSION, url: str) -> bool:
