@@ -288,7 +288,11 @@ def get_ov_version(url: str) -> OV_VERSION | None:
     manifest_data = get_text_from_web(manifest_url)
     if manifest_data:
         data_dic = yaml.safe_load(manifest_data)
-        return OV_VERSION(data_dic['components']['dldt']['version'])
+        try:
+            return OV_VERSION(data_dic['components']['dldt']['version'])
+        except Exception as e:
+            print(f'get_ov_version: error: {e}')
+            return None
     else:
         return None
 
