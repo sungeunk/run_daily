@@ -27,10 +27,10 @@ def parsing_log(handle, args):
         if args.verbose:
             print(f'{line}', end =' ')
 
-        match_obj = re.search(r'([\d.-]+)[\\\/]([\w\.\-]+)[\\\/]pytorch[\\\/]ov[\\\/]([\w\.\-]+)', line)
+        match_obj = re.search(r'[\\\/]([\w\.\-]+)[\\\/]pytorch[\\\/]ov[\\\/]([\w\.\-]+)', line)
         if match_obj:
-            model_name = match_obj.groups()[1]
-            model_precision = match_obj.groups()[2]
+            model_name = match_obj.groups()[0]
+            model_precision = match_obj.groups()[1]
 
             match_obj = re.search(fr'openvino runtime version: ([\w\d\-\_\.\/]+)', line)
             if match_obj:
@@ -55,9 +55,24 @@ def parsing_log(handle, args):
             temp_item = match_obj.groups()
             continue
 
+        match_obj = re.search(r'\[([\S]+)\]\[P(\d+)\] Input token size: (\d+), Output size: (\d+), Infer count: (\d+), Tokenization Time: (\d+.\d+)ms, Detokenization Time: (\d+.\d+)ms,  Multimodal Embeddings Preparation Time: (\d+.\d+)ms, Generation Time: (\d+.\d+)s, Latency: (\d+.\d+) ms\/token', line)
+        if match_obj:
+            # temp_item
+            # 0: iteration
+            # 1: prompt index
+            # 2: input token size
+            # 3: output size
+            # 4: infer count
+            # 5: tokenization time
+            # 6: detokenization time
+            # 7: generation time
+            # 8: latency per token time
+            temp_item = match_obj.groups()
+            continue
+
         #  [ INFO ] [1][P0] First token latency: 1048.52 ms/token, other tokens latency: 117.78 ms/token, len of tokens: 128 * 1
         # "[1] First token latency: 195.68 ms/token, other tokens latency: 120.94 ms/token, len of tokens: 128 * 1"
-        match_obj = re.search(r'First infer latency: (\d+.\d+) ms\/infer, other infers latency: (\d+.\d+)', line)
+        match_obj = re.search(r'First infer latency: (\d+.\d+) ms, other infers latency: (\d+.\d+)', line)
         if match_obj:
             values = match_obj.groups()
             ret.append([model_name, temp_item[0], temp_item[2], temp_item[3], temp_item[4], get_float(values[0]), get_float(values[1]), temp_item[5], temp_item[6], float(temp_item[7])*1000, temp_item[8]])
@@ -70,7 +85,6 @@ def parsing_log(handle, args):
             continue
 
     raw_data_list = []
-    # print(f'model,model_precision,token,exec,latench(ms)')
     for key, data_list in dict_data.items():
         prev_geomean = 100000
         prev_data = []
