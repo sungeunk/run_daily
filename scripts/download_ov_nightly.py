@@ -592,12 +592,10 @@ def get_list_of_openvino_master(args: argparse.Namespace) -> tuple[list, bool]:
     # Sort by date, newest first
     master_commit_list.sort(key = lambda x : x[1], reverse=True)
 
-    old_ov_version = load_local_ov_version(args)
     latest_commit_list = get_latest_commit_list_from_openvino()
     if not latest_commit_list:
         log.warning('Could not get latest commit list from GitHub, proceeding anyway...')
 
-    exist_ov_version = load_local_ov_version(args)
     ret_list = []
     # Check the top 40 builds from the server
     for commit, date in master_commit_list[:40]:
@@ -607,14 +605,9 @@ def get_list_of_openvino_master(args: argparse.Namespace) -> tuple[list, bool]:
             continue
 
         url = MASTER_COMMIT_URL_TEMPLATE.replace('COMMIT_ID', commit)
+        ret_list.append(url)
 
-        # Check if this version is newer than what we have
-        if args.force or check_ov_version(exist_ov_version, url):
-            ret_list.append(url)
-        else:
-            log.warning(f'Skipping older version. Have: {old_ov_version}, Found: {get_ov_version(url)} at {url}')
-
-        # Stop once we have 10 valid, new URLs
+        # Stop once we have 10 valid URLs
         if len(ret_list) >= 10:
             break
 
@@ -624,7 +617,7 @@ def get_list_of_openvino_master(args: argparse.Namespace) -> tuple[list, bool]:
     else:
         for url in ret_list:
             log.info(f'\t{url}')
-    return ret_list, old_ov_version != None
+    return ret_list, False
 
 def get_url(commit_id: str) -> str | None:
     """
