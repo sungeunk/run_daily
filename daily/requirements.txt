@@ -1,0 +1,6 @@
+pytest>=7.4
+pytest-json-report>=1.5
+tabulate>=0.9
+psutil>=5.9
+openpyxl>=3.1
+
