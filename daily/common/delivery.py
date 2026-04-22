@@ -25,13 +25,34 @@ from typing import Iterable
 log = logging.getLogger(__name__)
 
 
-def backup_server_url(base_url: str, filename: str) -> str:
+# Default target server. The legacy scripts used the same host for both
+# publishing (``http://...``) and scp'ing (bare hostname), so we keep one
+# source of truth here and derive both from it.
+DEFAULT_BACKUP_HOST = 'dg2raptorlake.ikor.intel.com'
+
+# Remote directory under which every machine's artefacts live. Kept distinct
+# from the legacy ``/var/www/html/daily`` path so the new pytest-based pipeline
+# can coexist with the old one without mixing files.
+REMOTE_BASE_DIR = '/var/www/html/daily2'
+
+
+def _resolve_host(relay_server: str | None) -> str:
+    """Pick the scp target host.
+
+    Precedence: explicit arg → ``MAIL_RELAY_SERVER`` env → ``DEFAULT_BACKUP_HOST``.
+    """
+    return relay_server or os.environ.get('MAIL_RELAY_SERVER') or DEFAULT_BACKUP_HOST
+
+
+def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     """Return the public URL for a backed-up artefact.
 
-    The backup destination is ``<MAIL_RELAY_SERVER>:/var/www/html/daily/<node>/``
-    which the relay server exposes at ``<BACKUP_SERVER>/daily/<node>/<file>``.
+    The scp target is ``<host>:/var/www/html/daily2/<node>/`` and the relay
+    exposes it at ``http://<host>/daily2/<node>/<file>``.
     """
-    return f'{base_url.rstrip("/")}/daily/{platform.node()}/{filename}'
+    if base_url is None:
+        base_url = f'http://{_resolve_host(None)}'
+    return f'{base_url.rstrip("/")}/daily2/{platform.node()}/{filename}'
 
 
 def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
@@ -40,20 +61,37 @@ def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
 
     Returns the list of files that were successfully uploaded.
 
-    ``relay_server`` defaults to the ``MAIL_RELAY_SERVER`` environment
-    variable (kept for parity with the old scripts).
+    Host precedence: ``relay_server`` arg → ``MAIL_RELAY_SERVER`` env
+    → ``DEFAULT_BACKUP_HOST``. The remote directory is created on demand so
+    new hosts don't need manual setup.
     """
-    relay = relay_server or os.environ.get('MAIL_RELAY_SERVER')
-    if not relay:
-        log.warning('MAIL_RELAY_SERVER not set; skipping backup')
-        return []
-
-    remote = f'{relay}:/var/www/html/daily/{platform.node()}/'
-    uploaded: list[Path] = []
+    relay = _resolve_host(relay_server)
+    remote_dir = f'{REMOTE_BASE_DIR}/{platform.node()}'
+    remote = f'{relay}:{remote_dir}/'
 
     is_windows = platform.system() == 'Windows'
     scp_bin = 'scp.exe' if is_windows else 'scp'
+    ssh_bin = 'ssh.exe' if is_windows else 'ssh'
 
+    # The legacy ``daily2/`` is owned ``root:www-data`` with 775, so mkdir
+    # only works if the ssh user is in ``www-data``. Probe first; if the dir
+    # is missing *and* we can't create it, surface an actionable error so
+    # the admin knows what to fix rather than watching scp fail mysteriously.
+    probe = subprocess.run(
+        [ssh_bin, relay, f'test -d {remote_dir} || mkdir -p {remote_dir}'],
+        capture_output=True, text=True,
+    )
+    if probe.returncode != 0:
+        log.error(
+            'backup: remote dir %s missing and mkdir failed (rc=%d). '
+            'Add the ssh user to the www-data group on %s, or have an admin '
+            'pre-create %s. ssh stderr: %s',
+            remote_dir, probe.returncode, relay, remote_dir,
+            (probe.stderr or '').strip(),
+        )
+        return []
+
+    uploaded: list[Path] = []
     for f in files:
         f = Path(f)
         if not f.exists():
@@ -83,12 +121,12 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
     full_title = f'[{platform.node()}/{now_stamp}] {title} {suffix_title}'.strip()
 
     if platform.system() == 'Windows':
-        try:
-            id_rsa = Path(os.environ['USERPROFILE']) / '.ssh' / 'id_rsa'
-            relay = relay_server or os.environ['MAIL_RELAY_SERVER']
-        except KeyError as e:
-            log.error('send_mail: missing env %s', e)
+        user_profile = os.environ.get('USERPROFILE')
+        if not user_profile:
+            log.error('send_mail: USERPROFILE env not set')
             return False
+        id_rsa = Path(user_profile) / '.ssh' / 'id_rsa'
+        relay = _resolve_host(relay_server)
         # Remote mail via ssh — the Windows build doesn't have ``mail(1)``.
         quoted_title = shlex.quote(full_title)
         quoted_to = shlex.quote(recipients)
