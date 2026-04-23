@@ -61,12 +61,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='Output directory (defaults to <repo>/output)')
     group.addoption('--daily-timeout', default=1800, type=int,
                     help='Per-subprocess timeout in seconds')
-    group.addoption('--optimum', action='store_true',
-                    help='Enable --optimum flag in llm_bench')
-    group.addoption('--continuous-batch', action='store_true',
-                    help='Enable continuous-batch pipeline')
-    group.addoption('--prompt-permutation', action='store_true',
-                    help='Enable prompt permutation in llm_bench')
     group.addoption('--short-run', action='store_true',
                     help='Reduced token/iter counts for quick smoke runs')
 
@@ -92,9 +86,6 @@ def daily_config(request: pytest.FixtureRequest) -> DailyConfig:
         model_date=opt('--model-date'),
         device=opt('--device'),
         timeout_sec=opt('--daily-timeout'),
-        optimum=opt('--optimum'),
-        continuous_batch=opt('--continuous-batch'),
-        prompt_permutation=opt('--prompt-permutation'),
         short_run=opt('--short-run'),
     )
     return cfg

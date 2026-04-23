@@ -36,9 +36,6 @@ class DailyConfig:
     model_date: str
     device: str
     timeout_sec: int
-    optimum: bool
-    continuous_batch: bool
-    prompt_permutation: bool
     short_run: bool           # replaces --test: shorten tokens/iters
     out_token_length: int
     benchmark_iter_num: int
@@ -92,9 +89,6 @@ def build_config(
     model_date: str,
     device: str = 'GPU',
     timeout_sec: int = 1800,
-    optimum: bool = False,
-    continuous_batch: bool = False,
-    prompt_permutation: bool = False,
     short_run: bool = False,
 ) -> DailyConfig:
     now = dt.datetime.now().strftime('%Y%m%d_%H%M')
@@ -115,9 +109,6 @@ def build_config(
         model_date=model_date,
         device=device,
         timeout_sec=timeout_sec,
-        optimum=optimum,
-        continuous_batch=continuous_batch,
-        prompt_permutation=prompt_permutation,
         short_run=short_run,
         out_token_length=out_token_length,
         benchmark_iter_num=benchmark_iter_num,

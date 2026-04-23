@@ -112,11 +112,8 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help='Root directory for models')
     p.add_argument('--model-date', default='WW45_llm-optimum_2025.4.0-20381-RC1')
     p.add_argument('--cache-dir', default=str(REPO_ROOT / 'llm-cache'))
-    p.add_argument('--output-dir', default=str(REPO_ROOT / 'output'))
+    p.add_argument('--output-dir', default=str(REPO_ROOT / 'daily_output'))
     p.add_argument('--daily-timeout', type=int, default=1800)
-    p.add_argument('--optimum', action='store_true')
-    p.add_argument('--continuous-batch', action='store_true')
-    p.add_argument('--prompt-permutation', action='store_true')
     p.add_argument('--short-run', action='store_true',
                    help='Use reduced token counts / iterations')
     p.add_argument('-k', dest='keyword', default=None,
@@ -174,12 +171,6 @@ def main() -> int:
         f'--json-report-file={pytest_json}',
         '--json-report-omit=collectors',
     ]
-    if args.optimum:
-        pytest_cmd.append('--optimum')
-    if args.continuous_batch:
-        pytest_cmd.append('--continuous-batch')
-    if args.prompt_permutation:
-        pytest_cmd.append('--prompt-permutation')
     if args.short_run:
         pytest_cmd.append('--short-run')
     if args.keyword:

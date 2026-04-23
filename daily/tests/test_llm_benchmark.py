@@ -81,14 +81,10 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase) -> str:
         f'-ic {cfg.out_token_length}',
         f'-n {cfg.benchmark_iter_num}',
     ]
-    if cfg.optimum:
-        parts.append('--optimum')
     if case.apply_chat_template:
         parts.append('--apply_chat_template')
-    if not cfg.prompt_permutation:
-        parts.append('--disable_prompt_permutation')
-    if not cfg.continuous_batch:
-        parts.append(f'--load_config {convert_path(str(cfg.wa_config_path))}')
+    parts.append('--disable_prompt_permutation')
+    parts.append(f'--load_config {convert_path(str(cfg.wa_config_path))}')
     parts.append(f'-pf {prompt_path}')
 
     return ' '.join(parts)
