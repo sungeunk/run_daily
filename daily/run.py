@@ -187,11 +187,16 @@ def main() -> int:
     pytest_cmd.extend(passthrough)
 
     print(f'[run.py] pytest: {" ".join(pytest_cmd)}', flush=True)
-    # pytest's exit code: 0 = all pass, 1 = failures, 5 = no tests collected.
-    # We still want to build a report for 1, so only propagate other codes.
+    # pytest exit code: 0 = all pass, 1 = failures, 5 = no tests collected.
+    # Individual test failures do not fail this script — callers (Jenkins,
+    # cron) treat a non-zero exit as "the run itself broke" and should not
+    # page on routine test regressions. Only infra issues (no pytest output
+    # at all) propagate below.
     rc = subprocess.call(pytest_cmd, cwd=str(DAILY_DIR))
 
     if not pytest_json.exists():
+        # No JSON means pytest never produced a result (config error, crash,
+        # etc.). That IS an infra failure worth surfacing.
         print(f'[run.py] no pytest json at {pytest_json} (rc={rc})',
               file=sys.stderr)
         return rc or 2
@@ -253,7 +258,10 @@ def main() -> int:
         print(f'[run.py] xlsx updated: {matched}/{total} rows '
               f'→ {args.xlsx_update}')
 
-    return rc
+    # Run completed end-to-end. Test pass/fail is reflected in the JSON
+    # summary and the mail/backup artefacts; don't double-report via exit
+    # code.
+    return 0
 
 
 if __name__ == '__main__':

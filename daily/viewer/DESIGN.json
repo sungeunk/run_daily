@@ -1,0 +1,268 @@
+{
+  "project": {
+    "name": "daily-llm-viewer",
+    "goal": "Streamlit-based analysis tool for the LLM daily test results. Supersedes _old_viewer.py + _old_ingest.py + _old_schema.sql.",
+    "working_dir": "/home/sungeunk/repo/run_daily2/daily",
+    "results_root": "/var/www/html/daily/<MACHINE>/",
+    "language_preference": "ko-KR for conversation; English for code/comments/docs"
+  },
+
+  "pipeline": {
+    "old": ".pickle (run_daily2/scripts pipeline) + .report (text) -> ingest -> DuckDB",
+    "new": ".summary.json (daily/run.py -> report/builder.py) -> ingest -> DuckDB",
+    "both_converge_on": "RunRecord dataclass, then writer.upsert_run",
+    "viewer_consumes": "DuckDB read-only via queries.py; Streamlit app in app.py"
+  },
+
+  "files": {
+    "daily/viewer/schema.sql": {
+      "purpose": "DuckDB schema. Source of truth. ensure_schema() runs this on every ingest.",
+      "tables": ["runs", "system_devices", "perf", "display_rows", "viewer_settings"],
+      "views": ["perf_with_buckets", "perf_flat", "perf_stats", "latest_run_per_machine"],
+      "notes": [
+        "perf stores RAW in_token/out_token. No bucketing at write time (per user requirement B).",
+        "perf_with_buckets derives in_bucket/out_bucket ('short'/'long'/'0') with threshold=100.",
+        "perf_stats uses correlated subqueries for rolling median + MAD over a 30-day back-window. Fast enough (<1s) at 27k rows; switch to CTE/Python if it slows.",
+        "runs.rawlog_path stores a FILE PATH, not the log body (old schema stored the whole log in a TEXT column; removed to keep DB small).",
+        "runs.source_format is 'old' | 'new' — keep this for debugging data provenance."
+      ]
+    },
+
+    "daily/viewer/profiles/default.yaml": {
+      "purpose": "Replacement for FIXED_ROW_ORDER. Controls row order in Excel-paste tab.",
+      "match_spec_semantics": {
+        "short": "token > 0 AND < 100",
+        "long": "token >= 100",
+        "0": "token == 0 (exact)",
+        "*": "any value (token-agnostic; used for SD/LCM pipelines)",
+        "<int>": "exact numeric (e.g. '802' for phi-3.5-vision-instruct)"
+      },
+      "extension": "Add e.g. profiles/iGPU.yaml for machine-specific rows. Load via `python -m viewer.ingest.cli --profile <yaml>`. Sidebar picks between loaded profiles."
+    },
+
+    "daily/viewer/ingest/record.py": {
+      "purpose": "RunRecord + DeviceRecord + PerfRow dataclasses. Format-neutral — loaders fill these, writer consumes them.",
+      "do_not": "Add format-specific fields here. Put them on the loader."
+    },
+
+    "daily/viewer/ingest/_common.py": {
+      "purpose": "Shared helpers for loaders.",
+      "exports": ["parse_stamp_from_name", "workweek_of", "split_ov_version", "file_hash (sha256 content hash of source file)", "run_id_of (sha1 of machine|iso_ts|report_file, 20 chars)"]
+    },
+
+    "daily/viewer/ingest/loader_new.py": {
+      "purpose": "summary.json -> RunRecord. Raw token counts preserved.",
+      "test_type_handlers": ["llm_benchmark", "benchmark_app", "sd_genai", "sd_dgfx", "qwen_usage", "whisper_base"],
+      "meta_handling": "summary.meta is optional — falls back to filename stamp + parent-dir machine + generated_at ts. Early summary files (before meta landed) still work."
+    },
+
+    "daily/viewer/ingest/loader_old.py": {
+      "purpose": "legacy .pickle + .report -> RunRecord.",
+      "pickle_trick": "_TolerantUnpickler.find_class replaces missing classes (test_cases.TestBenchmark etc.) with _UnknownClass stubs. Key tuple is (model, precision, TestClass) — we read TestClass.__name__ to dispatch to the correct extractor.",
+      "class_handlers": {
+        "TestBenchmark": "_benchmark_perf",
+        "TestBenchmarkapp": "_benchmark_app_perf",
+        "TestMeasuredUsageCpp": "_measured_usage_perf",
+        "TestStableDiffusion": "_sd_perf",
+        "TestStableDiffusionGenai": "_sd_perf",
+        "TestStableDiffusionDGfxE2eAi": "_sd_perf",
+        "TestWhisperBase": "_whisper_perf"
+      },
+      "version_parsing": "OV version pulled from filename 'daily.<stamp>.<ov_version>.pickle' AND from .report text (Purpose + OpenVINO line). Report text is preferred when present.",
+      "memory_size_conversion": "_sizestr_to_gb handles '8.5 GB' / '1024 MB' strings from qwen_usage."
+    },
+
+    "daily/viewer/ingest/writer.py": {
+      "purpose": "DuckDB upsert (transactional per RunRecord) + display profile loader.",
+      "dedup": "perf is replaced wholesale per run (DELETE + INSERT). Duplicate PKs within a run are deduplicated to last-wins.",
+      "file_hash_skip": "already_ingested() checks runs.file_hash. Skip unless --force."
+    },
+
+    "daily/viewer/ingest/cli.py": {
+      "purpose": "Single CLI; --root scans, --input handles one file.",
+      "auto_detect": "_classify: *.summary.json -> new; *.pickle (with sibling .report) -> old; *.report alone -> old if sibling pickle exists, else skip.",
+      "progress": "Inline progress bar. Failures collected and reported at end; not fatal.",
+      "profile_load": "Each run (re)loads profiles/default.yaml into display_rows unless --skip-profile."
+    },
+
+    "daily/viewer/queries.py": {
+      "purpose": "DuckDB helpers used by app.py. All return pandas DataFrames.",
+      "funcs": {
+        "list_machines": "SELECT DISTINCT machine",
+        "list_runs": "runs metadata for one machine, newest first",
+        "list_profiles": "SELECT DISTINCT profile FROM display_rows",
+        "build_excel_matrix": "Cross-join display_rows x selected runs, LEFT JOIN perf_with_buckets, then manual pivot (pandas pivot_table drops NaN index and explodes on dropna=False)",
+        "extra_rows": "Perf rows in selected runs NOT covered by the display profile — QA aid",
+        "series_history": "Time series of one (machine, model, precision, in_token, out_token, exec_mode) with perf_stats columns",
+        "regressions_for_run": "z_score + pct_diff flags with direction sensitivity (ms/s/% -> lower better; FPS/tps -> higher better)",
+        "noise_summary": "Per-series CV over a window",
+        "geomean_trend": "exp(avg(ln(value))) per run, filtered by exec_mode/in_bucket/out_bucket/excluded_models"
+      }
+    },
+
+    "daily/viewer/app.py": {
+      "purpose": "Streamlit entry. 5 tabs.",
+      "tabs": {
+        "Excel": "Select runs -> wide matrix (profile rows x run stamps) + tab-separated paste block + 'extra rows' expander",
+        "Trend": "Multiselect series from latest run; plot line + median ± 2σ band",
+        "Regressions": "Pick run -> regression/improvement tables; metrics row shows counts",
+        "Geomean": "exec_mode x in_bucket x out_bucket geomean trend + band + latest-point alert (user-requested)",
+        "Noise": "Per-series CV table sorted desc (iGPU diagnostics)"
+      },
+      "caching": "All queries wrapped with @st.cache_data keyed on DB mtime to auto-invalidate on re-ingest.",
+      "config_source": "DAILY_DB env var or `-- --db <path>` trailing arg (streamlit swallows its own flags)."
+    },
+
+    "daily/viewer/_old_viewer.py": "Legacy reference. Do not import.",
+    "daily/viewer/_old_ingest.py": "Legacy reference. Do not import.",
+    "daily/viewer/_old_schema.sql": "Legacy reference. Do not use.",
+    "daily/viewer/perf_rows.py": "Used by xlsx_update.py path (flatten summary -> lookup dict). Kept as-is. NOTE: this one DOES bucket ('short'/'long') for the xlsx template — do not reuse for DB ingest (which must keep raw tokens).",
+    "daily/viewer/xlsx_update.py": "Separate xlsx append path invoked from run.py. Independent of the DuckDB pipeline."
+  },
+
+  "design_decisions": [
+    {
+      "topic": "FIXED_ROW_ORDER replacement",
+      "choice": "YAML profile + DB display_rows table",
+      "rejected": ["Python list in code (no version control per-row, harder to diff)", "DB-only (no git history)"],
+      "why": "User adds/removes models frequently. YAML is reviewable in git; DB copy is for fast JOINs in queries. Match spec ('short'/'long'/'*'/<int>') is expressive enough without code changes."
+    },
+    {
+      "topic": "Raw tokens in DB vs bucketed",
+      "choice": "Raw only",
+      "user_request": "B — ingest is data-as-is; viewer does the bucketing",
+      "implementation": "perf_with_buckets view derives in_bucket/out_bucket. Threshold lives in SQL — change the view to retune, no re-ingest needed."
+    },
+    {
+      "topic": "Regression detection method",
+      "choice": "Robust z-score using MAD + pct threshold (both must trigger)",
+      "rejected": ["mean/std z-score — too sensitive to iGPU outliers", "single-point baseline — flips on any blip"],
+      "why": "User flagged iGPU fluctuation as a core problem. MAD is outlier-resistant. Requiring both z and pct thresholds reduces false positives further. 'noisy_cv' flag tells the user which series are inherently jittery so a flagged regression there should be treated with skepticism.",
+      "default_thresholds": {"z": 3.0, "pct": 0.05, "cv": 0.10, "window_days": 30},
+      "ui": "All four exposed as sidebar sliders."
+    },
+    {
+      "topic": "Geomean alerting",
+      "user_request": "C — user explicitly wants geomean-level trend alerts (not just per-series)",
+      "implementation": "geomean_trend() groups by (machine, exec_mode, in_bucket, out_bucket). Tab computes median + MAD of the geomean series itself and shows a banner if latest point falls outside ±z·σ AND ±pct%."
+    },
+    {
+      "topic": "run_id",
+      "choice": "sha1(machine|iso_ts|report_file)[:20]",
+      "why": "Including iso_ts makes re-runs minutes apart distinct even if the file stem somehow collides."
+    },
+    {
+      "topic": "file_hash for dedup",
+      "choice": "sha256 content hash of the source file (pickle or summary.json)",
+      "why": "Stable across path changes / rsyncs / backups. Replaces the old (path|size|mtime) scheme which broke on copy.",
+      "cost": "Hashing is I/O-bound but amortised: 453 pickles in 4.7s on a local drive."
+    },
+    {
+      "topic": "rawlog storage",
+      "choice": "Store PATH only (rawlog_path); never the body",
+      "old_behavior": "_old_schema.sql stored the full text in runs.rawlog — this exploded the DB",
+      "mitigation": "If log access is needed from the UI, open the file from the path. Viewer doesn't do this yet."
+    },
+    {
+      "topic": "pickle unpickle without legacy modules",
+      "choice": "_TolerantUnpickler.find_class returns _UnknownClass stub on ModuleNotFoundError",
+      "why": "Legacy pickles reference test_cases.test_benchmark.TestBenchmark etc. We don't want to import that package into the viewer. We only need the class NAME to dispatch extractors."
+    },
+    {
+      "topic": "Transaction granularity",
+      "choice": "One transaction per RunRecord (runs + system_devices + perf together)",
+      "why": "Partial-state bugs in the old ingest (separate inserts) were painful. Run is the natural unit."
+    },
+    {
+      "topic": "Streamlit caching",
+      "choice": "@st.cache_data with _v=DB.stat().st_mtime as a tiebreaker argument",
+      "why": "Streamlit cache invalidates when any cache key changes. Passing mtime means re-ingest auto-refreshes all cached queries without manual invalidation."
+    }
+  ],
+
+  "match_rules_in_sql": {
+    "location": "queries.build_excel_matrix (also mirrored in extra_rows)",
+    "rule": "display_rows.<spec> matches perf_with_buckets as follows",
+    "logic": [
+      "spec = '*'                        -> always matches",
+      "spec = 'short'/'long'/'0'         -> matches the corresponding <side>_bucket column",
+      "TRY_CAST(spec AS INTEGER) = token -> exact numeric match",
+      "else                              -> no match"
+    ],
+    "note": "All three are OR'd. TRY_CAST returns NULL for non-integer strings, which cleanly fails the comparison."
+  },
+
+  "how_to_run": {
+    "ingest_all": "cd daily && python -m viewer.ingest.cli --root /var/www/html/daily --db viewer/bench.duckdb",
+    "ingest_one_new": "cd daily && python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json",
+    "ingest_one_old": "cd daily && python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.<ver>.pickle",
+    "force_reingest": "Add --force",
+    "reload_profile_only": "python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml   # or cleaner: keep an --only-profile flag if needed",
+    "launch_viewer": "cd daily && streamlit run viewer/app.py -- --db viewer/bench.duckdb",
+    "alt_db_via_env": "DAILY_DB=/path/to/bench.duckdb streamlit run viewer/app.py"
+  },
+
+  "smoke_test_results_2026_04_25": {
+    "new_format_ingest": "1 file (daily.20260422_0903.summary.json from dg2raptorlake) -> 4 perf rows. OK.",
+    "old_format_ingest": "1 file (daily.20250224_0104 from res/) -> 74 perf rows. OK.",
+    "bulk_old_ingest": "453 files from /var/www/html/daily/LNL-02 -> 452 runs (one collision handled correctly), 27k perf rows, 4.7s, 0 failures.",
+    "perf_stats_query": "27001/27283 rows have a valid baseline (others are first-in-series). 0.1s.",
+    "viewer_smoke": "All 5 tab render functions called headlessly against real data with mocked streamlit — no uncaught exceptions. Streamlit server starts on port and serves shell (200 OK)."
+  },
+
+  "known_gaps_and_future_work": [
+    {
+      "item": "Viewer doesn't open raw logs from rawlog_path yet.",
+      "why_not_done": "Not requested. One-liner to add in Regressions tab or a new 'Raw Log' tab."
+    },
+    {
+      "item": "No unit tests.",
+      "why_not_done": "All modules were smoke-tested against real data. If the codebase grows, pytest on _common.py (stamp/hash parsers), loader_new/loader_old (fixture files), and queries (synthetic DB) would be worth it."
+    },
+    {
+      "item": "perf_stats uses correlated subqueries (O(n*m) conceptually).",
+      "cost_today": "~0.1s at current scale (27k rows).",
+      "when_to_revisit": "If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest."
+    },
+    {
+      "item": "Email regression alerts from run.py",
+      "why_not_done": "Out of scope for this change. Hook would be: after run.py's send_mail, run queries.regressions_for_run and append a section to the mail body."
+    },
+    {
+      "item": "'description' in runs currently copies 'purpose' when loading old format. Not sure if the distinction ever mattered — new summary.json uses 'description' from CLI args.",
+      "action_if_it_breaks_ui": "Keep the two columns; in queries, coalesce them: COALESCE(description, purpose)."
+    },
+    {
+      "item": "Profile CLI currently always loads default.yaml on every ingest unless --skip-profile. To use a different profile, call once with --profile <path> --skip-profile (to avoid overwrite), then pass --profile to load the desired one without overwriting default.",
+      "possible_refactor": "Make --profile additive by default: skip-if-exists semantics, or always upsert only the named profile without touching others."
+    },
+    {
+      "item": "machine name for pickles ingested from non-canonical locations",
+      "why": "loader_old.py derives machine from parent dir name. If a pickle sits in a dir not named after the machine, the value is wrong (seen with res/ fixture -> machine='res').",
+      "mitigation": "Acceptable for real /var/www/html/daily/<MACHINE>/ layout. If we need to rescue fixtures, add a --machine override to cli.py."
+    }
+  ],
+
+  "conventions": {
+    "units": {
+      "ms": "latency, lower_is_better",
+      "s":  "seconds (SD pipeline), lower_is_better",
+      "FPS": "throughput (benchmark_app), higher_is_better",
+      "tps": "tokens per second (whisper), higher_is_better",
+      "%":   "percent (memory/cpu), treated as lower_is_better for regression direction — revisit if that ever flips"
+    },
+    "exec_mode_values": ["1st", "2nd", "pipeline", "batch:<n>", "tps", "memory size", "memory percent", "cpu percent"],
+    "token_bucket_threshold": 100,
+    "regression_defaults": {"window_days": 30, "z_threshold": 3.0, "pct_threshold": 0.05, "noisy_cv_threshold": 0.10}
+  },
+
+  "user_profile": {
+    "role": "OpenVINO GPU plugin developer; owns the daily benchmark pipeline.",
+    "preferences": [
+      "Korean for conversation; English for code/doc artefacts.",
+      "Autonomous execution preferred once direction is agreed — do not pause for confirmation on each substep.",
+      "Wants root-cause fixes, not workarounds.",
+      "Appreciates explicit trade-off analysis when multiple approaches exist."
+    ]
+  }
+}

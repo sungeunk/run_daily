@@ -5,3 +5,5 @@ __pycache__/
 openvino.git/
 output
 logs/
+*.duckdb
+*.duckdb.wal
