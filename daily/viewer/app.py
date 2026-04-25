@@ -103,9 +103,10 @@ def cached_profiles(_v: float) -> list[str]:
 @st.cache_data(show_spinner=False)
 def cached_series(machine: str, model: str, precision: str,
                   in_token: int, out_token: int, exec_mode: str,
-                  days: int, _v: float) -> pd.DataFrame:
+                  days: int, purpose_filter: str, _v: float) -> pd.DataFrame:
     return q.series_history(DB, machine, model, precision,
-                            in_token, out_token, exec_mode, days=days)
+                            in_token, out_token, exec_mode, days=days,
+                            purpose_filter=purpose_filter)
 
 
 @st.cache_data(show_spinner=False)
@@ -115,10 +116,11 @@ def cached_noise(machine: str, days: int, _v: float) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def cached_geomean(machine: str, exec_mode: str, in_bucket: str | None,
-                   out_bucket: str | None, days: int, _v: float) -> pd.DataFrame:
+                   out_bucket: str | None, days: int,
+                   purpose_filter: str, _v: float) -> pd.DataFrame:
     return q.geomean_trend(DB, machine, exec_mode=exec_mode,
                            in_bucket=in_bucket, out_bucket=out_bucket,
-                           days=days)
+                           days=days, purpose_filter=purpose_filter)
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +136,24 @@ def _worse_direction(unit: str | None) -> int:
     if unit is None:
         return +1
     return +1 if unit in ("ms", "s", "%") else -1
+
+
+def _stable_y_range(values: pd.Series, min_relative_span: float = 0.10) -> list[float] | None:
+    clean = pd.to_numeric(values, errors="coerce").dropna()
+    if clean.empty:
+        return None
+
+    low = float(clean.min())
+    high = float(clean.max())
+    midpoint = (low + high) / 2.0
+    actual_span = high - low
+    min_span = max(abs(midpoint) * min_relative_span, 1e-9)
+    span = max(actual_span * 1.10, min_span)
+    lower = midpoint - span / 2.0
+    upper = midpoint + span / 2.0
+    if low >= 0 and lower < 0:
+        lower = 0.0
+    return [lower, upper]
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +242,7 @@ def _tab_excel(cfg: dict) -> None:
     st.caption(f"{len(view)} runs")
     event = st.dataframe(
         view[["stamp", "ww", "ov_version", "purpose", "source_format"]],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         selection_mode="multi-row",
         on_select="rerun",
@@ -254,20 +274,22 @@ def _tab_excel(cfg: dict) -> None:
     st.text_area("Copy & paste into Excel", value=paste, height=260)
 
     st.markdown("**Matrix preview**")
-    st.dataframe(matrix, use_container_width=True, hide_index=True)
+    st.dataframe(matrix, width="stretch", hide_index=True)
 
     extras = cached_extra_rows(run_ids, cfg["profile"], cfg["v"])
     if not extras.empty:
         with st.expander(f"⚠ {len(extras)} perf rows not covered by display profile"):
-            st.dataframe(extras, use_container_width=True, hide_index=True)
+            st.dataframe(extras, width="stretch", hide_index=True)
 
 
 @st.cache_data(show_spinner=False)
 def cached_trend_regressions(machine: str, recent_days: int,
-                             baseline_days: int, _v: float) -> pd.DataFrame:
+                             baseline_days: int, purpose_filter: str,
+                             _v: float) -> pd.DataFrame:
     return q.trend_regressions(DB, machine,
                                recent_days=recent_days,
-                               baseline_days=baseline_days)
+                               baseline_days=baseline_days,
+                               purpose_filter=purpose_filter)
 
 
 def _series_label(row: pd.Series) -> str:
@@ -296,30 +318,44 @@ def _tab_regression(cfg: dict) -> None:
                                    "their median is the comparison point.")
 
     df = cached_trend_regressions(cfg["machine"], recent_days,
-                                  baseline_days, cfg["v"])
+                                  baseline_days, DEFAULT_RUN_FILTER, cfg["v"])
     if df.empty:
         st.info("No data for this machine / window.")
         return
 
     valid = df[df["status"] == "ok"].copy()
+    valid["severity"] = pd.concat([
+        valid["worsening_pct"].fillna(0) / cfg["pct"],
+        valid["worsening_z"].fillna(0) / cfg["z"],
+    ], axis=1).max(axis=1)
+    valid = valid.sort_values("severity", ascending=False).reset_index(drop=True)
     noisy_count = int((valid["recent_cv"].fillna(0) >= cfg["cv"]).sum())
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Series tracked", len(valid))
-    # Worsening above pct threshold, regardless of noise — surfaces the
+    # Worsening above either threshold, regardless of noise — surfaces the
     # strongest signals. The user should cross-check with the graph for
     # series that are flagged noisy.
-    bad = valid[valid["worsening_pct"].fillna(0) >= cfg["pct"]]
+    bad = valid[(valid["worsening_pct"].fillna(0) >= cfg["pct"]) |
+                (valid["worsening_z"].fillna(0) >= cfg["z"])]
     m2.metric("Worsening ≥ threshold", len(bad))
-    better = valid[valid["worsening_pct"].fillna(0) <= -cfg["pct"]]
+    better = valid[(valid["worsening_pct"].fillna(0) <= -cfg["pct"]) |
+                   (valid["worsening_z"].fillna(0) <= -cfg["z"])]
     m3.metric("Improving ≥ threshold", len(better))
     m4.metric("Noisy (recent CV high)", noisy_count)
 
     # Build a compact, sortable table.
     def _fmt(frame: pd.DataFrame) -> pd.DataFrame:
         out = frame.copy()
+        if "severity" not in out.columns:
+            out["severity"] = pd.concat([
+                out["worsening_pct"].fillna(0) / cfg["pct"],
+                out["worsening_z"].fillna(0) / cfg["z"],
+            ], axis=1).max(axis=1)
         out["series"] = out.apply(_series_label, axis=1)
         out["worsening_%"] = (out["worsening_pct"] * 100).round(2)
+        out["worsening_z"] = out["worsening_z"].round(2)
+        out["severity"] = out["severity"].round(2)
         out["recent_cv_%"] = (out["recent_cv"] * 100).round(2)
         # Display-only columns that carry the unit suffix so SD pipelines
         # (seconds) aren't mistaken for LLM latencies (ms) at a glance. The
@@ -333,7 +369,7 @@ def _tab_regression(cfg: dict) -> None:
                          zip(out["recent_median"], out["unit"].fillna(""))]
         out["baseline"] = [_with_unit(v, u) for v, u in
                            zip(out["baseline_median"], out["unit"].fillna(""))]
-        return out[["series", "worsening_%", "recent", "baseline",
+        return out[["series", "severity", "worsening_%", "worsening_z", "recent", "baseline",
                     "recent_n", "baseline_n", "recent_cv_%",
                     "direction", "status",
                     # keep these for downstream selection, hidden via
@@ -351,7 +387,7 @@ def _tab_regression(cfg: dict) -> None:
                "than the baseline. Click a row to plot it below.")
     event = st.dataframe(
         table,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         selection_mode="single-row",
         on_select="rerun",
@@ -386,7 +422,7 @@ def _tab_regression(cfg: dict) -> None:
     hist = cached_series(
         cfg["machine"], row["model"], row["precision"],
         int(row["in_token"]), int(row["out_token"]), row["exec_mode"],
-        cfg["days"], cfg["v"])
+        cfg["days"], DEFAULT_RUN_FILTER, cfg["v"])
     if hist.empty:
         st.info("No history for this series in the selected window.")
         return
@@ -443,20 +479,34 @@ def _tab_regression(cfg: dict) -> None:
             hoverinfo="skip",
         ))
 
+    y_values = [hist["value"]]
+    if pd.notna(row["baseline_median"]):
+        y_values.append(pd.Series([float(row["baseline_median"])]))
+    if pd.notna(row["recent_median"]):
+        y_values.append(pd.Series([float(row["recent_median"])]))
+    if hist["win_median"].notna().any():
+        y_values.extend([band_hi, band_lo])
+    yaxis = {}
+    y_range = _stable_y_range(pd.concat(y_values, ignore_index=True))
+    if y_range is not None:
+        yaxis["range"] = y_range
+
     fig.update_layout(
         height=450, hovermode="x unified",
         xaxis_title="timestamp",
         yaxis_title=f"value [{unit}]" if unit else "value",
+        yaxis=yaxis,
         xaxis=dict(autorange="reversed"),
         legend=dict(orientation="h", y=-0.2),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
     st.caption(
         f"Recent median = {row['recent_median']:.3f} {unit} "
         f"(n={int(row['recent_n'])}) vs baseline median = "
         f"{row['baseline_median']:.3f} {unit} (n={int(row['baseline_n'])}). "
-        f"Worsening = {row['worsening_%']:+.2f}%. "
+        f"Worsening = {row['worsening_%']:+.2f}%, "
+        f"z={row['worsening_z']:+.2f}. "
         f"Direction: {row['direction']}. "
         f"Recent CV = {row['recent_cv_%']:.2f}% "
         + ("(noisy — interpret with care)."
@@ -468,7 +518,7 @@ def _tab_regression(cfg: dict) -> None:
         with st.expander(f"{len(insufficient)} series with insufficient data"):
             st.caption("Fewer points than min_recent/min_baseline in the "
                        "chosen windows.")
-            st.dataframe(_fmt(insufficient), use_container_width=True,
+            st.dataframe(_fmt(insufficient), width="stretch",
                          hide_index=True)
 
 
@@ -487,7 +537,7 @@ def _tab_geomean(cfg: dict) -> None:
                                 value=cfg["days"])
 
     df = cached_geomean(cfg["machine"], exec_mode, in_bucket, out_bucket,
-                        int(days), cfg["v"])
+                        int(days), DEFAULT_RUN_FILTER, cfg["v"])
     if df.empty:
         st.info("No data for this filter.")
         return
@@ -512,22 +562,26 @@ def _tab_geomean(cfg: dict) -> None:
                       annotation_text="±2σ")
     fig.update_layout(height=450, hovermode="x unified",
                       xaxis_title="timestamp", yaxis_title="geomean")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
     # Alert banner when the latest point is outside the band.
     if len(df) >= 5 and sigma > 0:
         latest = df.iloc[-1]["geomean"]
         z = (latest - median) / sigma
         pct = (latest - median) / median * 100 if median else 0
-        if abs(z) >= cfg["z"] and abs(pct) >= cfg["pct"] * 100:
-            direction = "worse" if z > 0 else "better"
+        sign = -1 if exec_mode == "tps" else 1
+        worsening_z = sign * z
+        worsening_pct = sign * pct
+        if abs(worsening_z) >= cfg["z"] and abs(worsening_pct) >= cfg["pct"] * 100:
+            direction = "worse" if worsening_z > 0 else "better"
             st.error(f"⚠ Latest geomean is {direction} by "
-                     f"z={z:+.2f}, {pct:+.1f}%.")
+                     f"z={worsening_z:+.2f}, {worsening_pct:+.1f}%.")
         else:
-            st.success(f"Latest geomean within band (z={z:+.2f}, {pct:+.1f}%).")
+            st.success("Latest geomean within band "
+                       f"(z={worsening_z:+.2f}, {worsening_pct:+.1f}%).")
 
     st.dataframe(df[["ts", "ww", "ov_version", "geomean", "n_samples"]]
-                 .tail(30), use_container_width=True, hide_index=True)
+                 .tail(30), width="stretch", hide_index=True)
 
 
 def _tab_noise(cfg: dict) -> None:
@@ -546,7 +600,7 @@ def _tab_noise(cfg: dict) -> None:
     st.dataframe(
         df[["model", "precision", "in_token", "out_token", "exec_mode",
             "unit", "n", "median_value", "std_value", "cv_pct"]],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
 

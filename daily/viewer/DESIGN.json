@@ -22,7 +22,7 @@
       "notes": [
         "perf stores RAW in_token/out_token. No bucketing at write time (per user requirement B).",
         "perf_with_buckets derives in_bucket/out_bucket ('short'/'long'/'0') with threshold=100.",
-        "perf_stats uses correlated subqueries for rolling median + MAD over a 30-day back-window. Fast enough (<1s) at 27k rows; switch to CTE/Python if it slows.",
+        "perf_stats uses correlated subqueries for rolling median + MAD over a 30-day back-window. Kept for legacy point-vs-band helpers; Regression tab now recomputes the selected-series rolling band from purpose-filtered perf_flat rows so personal PR results do not pollute the chart.",
         "runs.rawlog_path stores a FILE PATH, not the log body (old schema stored the whole log in a TEXT column; removed to keep DB small).",
         "runs.source_format is 'old' | 'new' — keep this for debugging data provenance."
       ]
@@ -52,7 +52,8 @@
 
     "daily/viewer/ingest/loader_new.py": {
       "purpose": "summary.json -> RunRecord. Raw token counts preserved.",
-      "test_type_handlers": ["llm_benchmark", "benchmark_app", "sd_genai", "sd_dgfx", "qwen_usage", "whisper_base"],
+      "test_type_handlers": ["llm_benchmark", "benchmark_app", "sd_genai", "sd_dgfx"],
+      "dropped_handlers": ["qwen_usage (TestMeasuredUsageCpp)", "whisper_base (TestWhisperBase) — removed in commit 708a853; no longer part of the daily signal"],
       "meta_handling": "summary.meta is optional — falls back to filename stamp + parent-dir machine + generated_at ts. Early summary files (before meta landed) still work."
     },
 
@@ -62,14 +63,13 @@
       "class_handlers": {
         "TestBenchmark": "_benchmark_perf",
         "TestBenchmarkapp": "_benchmark_app_perf",
-        "TestMeasuredUsageCpp": "_measured_usage_perf",
-        "TestStableDiffusion": "_sd_perf",
-        "TestStableDiffusionGenai": "_sd_perf",
-        "TestStableDiffusionDGfxE2eAi": "_sd_perf",
-        "TestWhisperBase": "_whisper_perf"
+        "TestStableDiffusion": "_sd_perf_ms (legacy C++ binary — ms in pickle, divided by 1000 at ingest)",
+        "TestStableDiffusionGenai": "_sd_perf_sec (pickle already seconds)",
+        "TestStableDiffusionDGfxE2eAi": "_sd_perf_sec (pickle already seconds)"
       },
+      "dropped_handlers": ["TestMeasuredUsageCpp (qwen_usage)", "TestWhisperBase (whisper base) — removed in commit 708a853"],
       "version_parsing": "OV version pulled from filename 'daily.<stamp>.<ov_version>.pickle' AND from .report text (Purpose + OpenVINO line). Report text is preferred when present.",
-      "memory_size_conversion": "_sizestr_to_gb handles '8.5 GB' / '1024 MB' strings from qwen_usage."
+      "sd_unit_normalization": "All SD pipelines land in the DB as unit='s' regardless of source class. Legacy ms pickles are divided by 1000 at load time. This removes the 1000x ambiguity that made SD-XL pipeline look like milliseconds in the viewer."
     },
 
     "daily/viewer/ingest/writer.py": {
@@ -93,24 +93,35 @@
         "list_profiles": "SELECT DISTINCT profile FROM display_rows",
         "build_excel_matrix": "Cross-join display_rows x selected runs, LEFT JOIN perf_with_buckets, then manual pivot (pandas pivot_table drops NaN index and explodes on dropna=False)",
         "extra_rows": "Perf rows in selected runs NOT covered by the display profile — QA aid",
-        "series_history": "Time series of one (machine, model, precision, in_token, out_token, exec_mode) with perf_stats columns",
-        "regressions_for_run": "z_score + pct_diff flags with direction sensitivity (ms/s/% -> lower better; FPS/tps -> higher better)",
+        "series_history": "Time series of one (machine, model, precision, in_token, out_token, exec_mode), with rolling median/MAD recomputed from purpose-filtered perf_flat rows. Used for the trend plot in the Regression tab.",
+        "trend_regressions": "NEW — per-series comparison: median of recent window vs median of baseline window. worsening_pct is sign-normalised (positive = worse regardless of ms vs FPS). This is what the Regression tab drives off.",
+        "regressions_for_run": "OLD point-vs-band flags. Kept for possible mail-alert reuse but not wired into the UI any more.",
         "noise_summary": "Per-series CV over a window",
         "geomean_trend": "exp(avg(ln(value))) per run, filtered by exec_mode/in_bucket/out_bucket/excluded_models"
       }
     },
 
     "daily/viewer/app.py": {
-      "purpose": "Streamlit entry. 5 tabs.",
+      "purpose": "Streamlit entry. 4 tabs.",
       "tabs": {
         "Excel": "Select runs -> wide matrix (profile rows x run stamps) + tab-separated paste block + 'extra rows' expander",
-        "Trend": "Multiselect series from latest run; plot line + median ± 2σ band",
-        "Regressions": "Pick run -> regression/improvement tables; metrics row shows counts",
+        "Regression": "MERGED tab (was separate Trend + Regressions). Shows a ranked table of series by worsening%, plus a one-series-at-a-time trend plot for the selected row. Baseline median + recent median rendered as Scatter traces with legend entries; rolling ±2σ band drawn with a visible fill (rgba 0.28) so it reads on bright monitors.",
         "Geomean": "exec_mode x in_bucket x out_bucket geomean trend + band + latest-point alert (user-requested)",
         "Noise": "Per-series CV table sorted desc (iGPU diagnostics)"
       },
+      "sidebar": {
+        "machine_filter": "'Daily machines only' checkbox (default True). When True, dropdown is filtered by DAILY_MACHINES constant (dg2alderlake, MTL-01, ARLH-01, BMG-02, LNL-03, LNL-04, DUT4580PTLH, DUT6047BMGFRD). Falls back to full list if none intersect.",
+        "default_filter": "Excel tab purpose filter defaults to 'daily_CB timer' via DEFAULT_RUN_FILTER constant.",
+        "days_slider": "7-60 day range for trend history. All tab-local days inputs (Geomean, Noise) capped at 60 for consistency."
+      },
+      "unit_display": "Every user-visible numeric carries its unit: table median columns render as '8.060 s', trend heading shows '[s]', caption prints 'Recent median = 8.060 s'. Prevents SD pipeline seconds from being mis-read as ms.",
       "caching": "All queries wrapped with @st.cache_data keyed on DB mtime to auto-invalidate on re-ingest.",
       "config_source": "DAILY_DB env var or `-- --db <path>` trailing arg (streamlit swallows its own flags)."
+    },
+
+    "daily/run.py": {
+      "purpose": "Daily suite entry — runs pytest, builds reports, ships mail/xlsx.",
+      "exit_policy": "Always returns 0 if the run completed end-to-end (report built). Test failures are reflected in JSON summary / mail, not exit code. Only infra failures (no pytest JSON produced) propagate a non-zero rc. Changed per user request; relied on by Jenkins to distinguish 'test failed' from 'run itself broke'."
     },
 
     "daily/viewer/_old_viewer.py": "Legacy reference. Do not import.",
@@ -134,17 +145,61 @@
       "implementation": "perf_with_buckets view derives in_bucket/out_bucket. Threshold lives in SQL — change the view to retune, no re-ingest needed."
     },
     {
-      "topic": "Regression detection method",
-      "choice": "Robust z-score using MAD + pct threshold (both must trigger)",
-      "rejected": ["mean/std z-score — too sensitive to iGPU outliers", "single-point baseline — flips on any blip"],
-      "why": "User flagged iGPU fluctuation as a core problem. MAD is outlier-resistant. Requiring both z and pct thresholds reduces false positives further. 'noisy_cv' flag tells the user which series are inherently jittery so a flagged regression there should be treated with skepticism.",
-      "default_thresholds": {"z": 3.0, "pct": 0.05, "cv": 0.10, "window_days": 30},
-      "ui": "All four exposed as sidebar sliders."
+      "topic": "Regression detection method (current approach)",
+      "choice": "Two-window median comparison: recent window median vs baseline window median",
+      "rejected": [
+        "Single-point robust z-score — user feedback: they want to see whether the recent BLOCK is drifting, not whether today is an outlier. Single-point tests flip on any blip and are useless when data is noisy or occasionally corrupted.",
+        "mean/std z-score — too sensitive to iGPU outliers"
+      ],
+      "why": "iGPU runs are noisy and individual data points are sometimes contaminated. Comparing medians of two time windows (default: last 7d vs 21d prior) washes both out while still catching slow drift. This matches common benchmark tools (ASV / pytest-benchmark) which emphasize median-like robust summaries and percentage thresholds rather than reacting to a single point.",
+      "defaults": {"recent_days": 7, "baseline_days": 21, "min_recent_points": 5, "min_baseline_points": 7, "pct_threshold_from_sidebar": 0.05, "z_threshold_from_sidebar": 3.0, "noisy_cv_threshold": 0.10},
+      "direction_normalisation": "worsening_pct is signed so positive always means 'worse' — ms/s/%: +pct when recent>baseline; FPS/tps: +pct when recent<baseline. worsening_z uses baseline MAD (sigma ~= 1.4826*MAD) so recent noise does not hide or inflate the comparison. The UI sorts by threshold-normalised severity = max(worsening_pct/pct_threshold, worsening_z/z_threshold).",
+      "purpose_filter": "Regression summary and selected-series history are filtered to purpose containing 'daily_CB timer' so personal PR runs do not pollute baseline/recent windows. The chart rolling band is recomputed from filtered perf_flat rows, not from perf_stats, because perf_stats is an all-purpose view.",
+      "ui": "Single merged 'Regression' tab. Ranked table (worst first by threshold-normalised severity) + one trend chart per selected row. See app.py:_tab_regression.",
+      "supersedes": "The earlier rolling z-score approach (queries.regressions_for_run) is still defined but unused by the UI."
+    },
+    {
+      "topic": "One series per trend chart",
+      "choice": "Enforce single-series plot in the Regression tab",
+      "why": "User feedback: mixing models with wildly different value ranges on one chart makes it unreadable. Table-plus-single-chart is the pattern that scales.",
+      "implementation": "Row selection in the summary table drives which series is plotted. Default = row 0 (worst drift). The y-axis range has a minimum relative span so tiny stable differences (e.g. 31.6 ms vs 31.95 ms) are not over-zoomed into visually noisy fluctuations."
+    },
+    {
+      "topic": "SD pipeline unit normalization",
+      "problem_observed": "Legacy TestStableDiffusion pickle stored ms; newer TestStableDiffusionGenai/DGfxE2eAi pickles stored seconds. The original _sd_perf lumped them all into unit='ms', so SD-XL pipeline (actually 8 s) showed up as 8 ms in comparisons.",
+      "fix": "Split into _sd_perf_ms (legacy, /1000) and _sd_perf_sec (new, as-is). All SD pipelines now land as unit='s'.",
+      "remediation": "Re-ingested with --force after the fix. Confirmed: 0 remaining ms-labeled SD rows in DB.",
+      "commit": "708a853"
+    },
+    {
+      "topic": "Units visible in every UI surface",
+      "choice": "Attach unit suffix to table cells, plot headings, and captions",
+      "why": "Raw numbers without units caused the SD-XL confusion above. User should never have to remember which test type is in which unit.",
+      "implementation": "Regression table builds display-only 'recent'/'baseline' columns like '8.060 s'; raw numeric columns hidden via column_config but retained for plot/caption code paths."
+    },
+    {
+      "topic": "Dropped qwen_usage and Whisper base",
+      "user_request": "Remove both entirely",
+      "action": "Removed handlers from loader_new.py + loader_old.py, deleted existing rows from DB.",
+      "note": "whisper-large-v3 (NOT Whisper base) is a different model in the GenAI pipeline and is kept."
     },
     {
       "topic": "Geomean alerting",
       "user_request": "C — user explicitly wants geomean-level trend alerts (not just per-series)",
       "implementation": "geomean_trend() groups by (machine, exec_mode, in_bucket, out_bucket). Tab computes median + MAD of the geomean series itself and shows a banner if latest point falls outside ±z·σ AND ±pct%."
+    },
+    {
+      "topic": "Daily machines filter",
+      "choice": "Hardcoded DAILY_MACHINES tuple in app.py with sidebar checkbox (default True)",
+      "rejected": ["DB-backed list (operational set doesn't need runtime mutation and git is the right source of truth)"],
+      "machines": ["dg2alderlake", "MTL-01", "ARLH-01", "BMG-02", "LNL-03", "LNL-04", "DUT4580PTLH", "DUT6047BMGFRD"],
+      "fallback": "If the checkbox filter leaves the dropdown empty (fresh DB), falls back to the full machine list."
+    },
+    {
+      "topic": "run.py exit code policy",
+      "user_request": "Always return 0 when the run completes, not when tests pass. Infra failure vs test failure must be distinguishable.",
+      "choice": "Return 0 after build_reports succeeds, regardless of pytest rc. Still propagates non-zero if pytest never produced the JSON (real infra break).",
+      "rationale": "Jenkins treats non-zero as 'build broke'. The team wants 'test failed' signalled via mail/report, not Jenkins."
     },
     {
       "topic": "run_id",
@@ -155,7 +210,7 @@
       "topic": "file_hash for dedup",
       "choice": "sha256 content hash of the source file (pickle or summary.json)",
       "why": "Stable across path changes / rsyncs / backups. Replaces the old (path|size|mtime) scheme which broke on copy.",
-      "cost": "Hashing is I/O-bound but amortised: 453 pickles in 4.7s on a local drive."
+      "cost": "Hashing is I/O-bound but amortised: 6006 files in 57s on /var/www/html/daily."
     },
     {
       "topic": "rawlog storage",
@@ -177,6 +232,11 @@
       "topic": "Streamlit caching",
       "choice": "@st.cache_data with _v=DB.stat().st_mtime as a tiebreaker argument",
       "why": "Streamlit cache invalidates when any cache key changes. Passing mtime means re-ingest auto-refreshes all cached queries without manual invalidation."
+    },
+    {
+      "topic": "Trend plot axis orientation",
+      "choice": "xaxis autorange reversed — newest on the left",
+      "why": "User request: matches the team's convention of reading newest-first."
     }
   ],
 
@@ -197,63 +257,74 @@
     "ingest_one_new": "cd daily && python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json",
     "ingest_one_old": "cd daily && python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.<ver>.pickle",
     "force_reingest": "Add --force",
-    "reload_profile_only": "python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml   # or cleaner: keep an --only-profile flag if needed",
+    "reload_profile_only": "python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml",
     "launch_viewer": "cd daily && streamlit run viewer/app.py -- --db viewer/bench.duckdb",
-    "alt_db_via_env": "DAILY_DB=/path/to/bench.duckdb streamlit run viewer/app.py"
+    "alt_db_via_env": "DAILY_DB=/path/to/bench.duckdb streamlit run viewer/app.py",
+    "python_env": "Use /home/sungeunk/miniforge3/envs/daily/bin/python (conda 'daily' env). System python3 doesn't have duckdb/streamlit."
   },
 
-  "smoke_test_results_2026_04_25": {
-    "new_format_ingest": "1 file (daily.20260422_0903.summary.json from dg2raptorlake) -> 4 perf rows. OK.",
-    "old_format_ingest": "1 file (daily.20250224_0104 from res/) -> 74 perf rows. OK.",
-    "bulk_old_ingest": "453 files from /var/www/html/daily/LNL-02 -> 452 runs (one collision handled correctly), 27k perf rows, 4.7s, 0 failures.",
-    "perf_stats_query": "27001/27283 rows have a valid baseline (others are first-in-series). 0.1s.",
-    "viewer_smoke": "All 5 tab render functions called headlessly against real data with mocked streamlit — no uncaught exceptions. Streamlit server starts on port and serves shell (200 OK)."
+  "smoke_test_results": {
+    "2026_04_25_initial": {
+      "new_format_ingest": "1 file (daily.20260422_0903.summary.json from dg2raptorlake) -> 4 perf rows. OK.",
+      "old_format_ingest": "1 file (daily.20250224_0104 from res/) -> 74 perf rows. OK.",
+      "bulk_old_ingest": "453 files from /var/www/html/daily/LNL-02 -> 452 runs, 27k perf rows, 4.7s, 0 failures.",
+      "viewer_smoke": "All 5 tabs called headlessly against real data — no uncaught exceptions."
+    },
+    "2026_04_25_sd_unit_fix": {
+      "full_tree_reingest": "6006 files from /var/www/html/daily -> 6006 runs, 57.6s, 0 failures.",
+      "unit_audit": "Final check: 0 ms-labeled SD rows remain; all SD/whisper/lcm/flux pipelines carry unit='s' with sensible magnitudes.",
+      "regression_tab_trace": "4 plot traces confirmed: value / baseline median / recent median / ±2σ band — all as Scatter with distinct legend entries."
+    }
   },
 
   "known_gaps_and_future_work": [
     {
       "item": "Viewer doesn't open raw logs from rawlog_path yet.",
-      "why_not_done": "Not requested. One-liner to add in Regressions tab or a new 'Raw Log' tab."
+      "why_not_done": "Not requested. One-liner to add in Regression tab or a new 'Raw Log' tab."
     },
     {
       "item": "No unit tests.",
       "why_not_done": "All modules were smoke-tested against real data. If the codebase grows, pytest on _common.py (stamp/hash parsers), loader_new/loader_old (fixture files), and queries (synthetic DB) would be worth it."
     },
     {
-      "item": "perf_stats uses correlated subqueries (O(n*m) conceptually).",
-      "cost_today": "~0.1s at current scale (27k rows).",
+      "item": "perf_stats still uses correlated subqueries (O(n*m) conceptually).",
+      "cost_today": "~0.1s at current scale (27k rows, then 6006 runs on full tree).",
       "when_to_revisit": "If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest."
     },
     {
       "item": "Email regression alerts from run.py",
-      "why_not_done": "Out of scope for this change. Hook would be: after run.py's send_mail, run queries.regressions_for_run and append a section to the mail body."
+      "why_not_done": "Out of scope for this change. Hook would be: after run.py's send_mail, run queries.trend_regressions for the latest machine and append a section to the mail body."
     },
     {
-      "item": "'description' in runs currently copies 'purpose' when loading old format. Not sure if the distinction ever mattered — new summary.json uses 'description' from CLI args.",
-      "action_if_it_breaks_ui": "Keep the two columns; in queries, coalesce them: COALESCE(description, purpose)."
+      "item": "regressions_for_run is defined but unused",
+      "why_kept": "Might still be useful for mail alerts or a per-run QA view. If it hasn't been touched by 2026-Q3, delete it."
     },
     {
-      "item": "Profile CLI currently always loads default.yaml on every ingest unless --skip-profile. To use a different profile, call once with --profile <path> --skip-profile (to avoid overwrite), then pass --profile to load the desired one without overwriting default.",
+      "item": "Profile CLI currently always loads default.yaml on every ingest unless --skip-profile.",
       "possible_refactor": "Make --profile additive by default: skip-if-exists semantics, or always upsert only the named profile without touching others."
     },
     {
       "item": "machine name for pickles ingested from non-canonical locations",
       "why": "loader_old.py derives machine from parent dir name. If a pickle sits in a dir not named after the machine, the value is wrong (seen with res/ fixture -> machine='res').",
       "mitigation": "Acceptable for real /var/www/html/daily/<MACHINE>/ layout. If we need to rescue fixtures, add a --machine override to cli.py."
+    },
+    {
+      "item": "Display profile dropdown shows only 'default' today",
+      "why": "Only one YAML exists. Consider hiding the dropdown until a second profile lands, or pre-ship an iGPU-focused profile to motivate the machinery."
     }
   ],
 
   "conventions": {
     "units": {
       "ms": "latency, lower_is_better",
-      "s":  "seconds (SD pipeline), lower_is_better",
+      "s":  "seconds (SD / LCM / whisper / flux pipelines), lower_is_better",
       "FPS": "throughput (benchmark_app), higher_is_better",
-      "tps": "tokens per second (whisper), higher_is_better",
-      "%":   "percent (memory/cpu), treated as lower_is_better for regression direction — revisit if that ever flips"
+      "tps": "tokens per second, higher_is_better",
+      "%":   "percent, treated as lower_is_better for regression direction"
     },
-    "exec_mode_values": ["1st", "2nd", "pipeline", "batch:<n>", "tps", "memory size", "memory percent", "cpu percent"],
+    "exec_mode_values": ["1st", "2nd", "pipeline", "batch:<n>", "tps"],
     "token_bucket_threshold": 100,
-    "regression_defaults": {"window_days": 30, "z_threshold": 3.0, "pct_threshold": 0.05, "noisy_cv_threshold": 0.10}
+    "regression_window_defaults": {"recent_days": 7, "baseline_days": 21, "min_recent_points": 3, "min_baseline_points": 5}
   },
 
   "user_profile": {
@@ -262,7 +333,8 @@
       "Korean for conversation; English for code/doc artefacts.",
       "Autonomous execution preferred once direction is agreed — do not pause for confirmation on each substep.",
       "Wants root-cause fixes, not workarounds.",
-      "Appreciates explicit trade-off analysis when multiple approaches exist."
+      "Appreciates explicit trade-off analysis when multiple approaches exist.",
+      "Reads newest-first: trend plots have the recent end on the left."
     ]
   }
 }

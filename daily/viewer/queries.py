@@ -75,7 +75,10 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
     if not run_ids:
         return pd.DataFrame()
 
-    # Placeholder list for IN clause.
+    # Preserve the caller's run order. The Excel paste headers are generated
+    # from the selected run_ids in app.py, so matrix columns must follow the
+    # same order rather than sorting stamps alphabetically.
+    run_order = {run_id: idx for idx, run_id in enumerate(run_ids)}
     placeholders = ",".join(["?"] * len(run_ids))
 
     sql = f"""
@@ -118,11 +121,13 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
          )
         WHERE d.profile = ?
     )
-    SELECT seq, d_model AS model, d_precision AS precision,
+        SELECT seq, d_model AS model, d_precision AS precision,
            in_spec, out_spec, d_exec AS exec_mode, label,
-           stamp, value
+            run_id, stamp, median(value) AS value
     FROM joined
-    ORDER BY seq, stamp
+        GROUP BY seq, d_model, d_precision, in_spec, out_spec, d_exec, label,
+              run_id, stamp
+        ORDER BY seq
     """
     with _read_only(db_path) as con:
         df = con.execute(sql, [*run_ids, profile]).fetchdf()
@@ -139,12 +144,15 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
              .drop_duplicates(subset="seq")
              .sort_values("seq")
              .reset_index(drop=True))
-    stamps = sorted(df["stamp"].dropna().unique())
+    run_stamps = (df[["run_id", "stamp"]]
+                  .drop_duplicates()
+                  .assign(_order=lambda frame: frame["run_id"].map(run_order))
+                  .sort_values("_order"))
     result = specs.copy()
-    for st in stamps:
-        vals = (df[df["stamp"] == st]
+    for _, run in run_stamps.iterrows():
+        vals = (df[df["run_id"] == run["run_id"]]
                 .set_index("seq")["value"])
-        result[st] = result["seq"].map(vals)
+        result[run["stamp"]] = result["seq"].map(vals)
     return result.drop(columns=["seq"])
 
 
@@ -194,22 +202,71 @@ def extra_rows(db_path: Path, run_ids: list[str],
 
 def series_history(db_path: Path, machine: str, model: str, precision: str,
                    in_token: int, out_token: int, exec_mode: str,
-                   days: int = 60) -> pd.DataFrame:
+                   days: int = 60,
+                   purpose_filter: str | None = None) -> pd.DataFrame:
     """Time-series of one perf point with rolling baseline stats."""
+    purpose_like = f"%{purpose_filter}%" if purpose_filter else None
     with _read_only(db_path) as con:
         return con.execute("""
-            SELECT ts, date, ov_version, ov_build, ww,
-                   value, unit,
-                   win_median, win_mad, win_sigma, win_n,
-                   z_score, pct_diff, cv
-            FROM perf_stats
-            WHERE machine = ?
-              AND model = ? AND precision = ?
-              AND in_token = ? AND out_token = ?
-              AND exec_mode = ?
-              AND ts >= current_date - (? || ' DAY')::INTERVAL
+            WITH base AS (
+                SELECT ts, date, ov_version, ov_build, ww,
+                       value, unit
+                FROM perf_flat
+                WHERE machine = ?
+                  AND model = ? AND precision = ?
+                  AND in_token = ? AND out_token = ?
+                  AND exec_mode = ?
+                  AND (? IS NULL OR COALESCE(purpose, '') ILIKE ?)
+                  AND ts >= current_date - (? || ' DAY')::INTERVAL
+            ),
+            with_baseline AS (
+                SELECT
+                    b.*,
+                    (
+                        SELECT median(b2.value)
+                        FROM base b2
+                        WHERE b2.ts < b.ts
+                          AND b2.ts >= b.ts - INTERVAL '30 DAY'
+                    ) AS win_median,
+                    (
+                        SELECT count(*)
+                        FROM base b2
+                        WHERE b2.ts < b.ts
+                          AND b2.ts >= b.ts - INTERVAL '30 DAY'
+                    ) AS win_n
+                FROM base b
+            ),
+            with_mad AS (
+                SELECT
+                    w.*,
+                    (
+                        SELECT median(abs(b2.value - w.win_median))
+                        FROM base b2
+                        WHERE b2.ts < w.ts
+                          AND b2.ts >= w.ts - INTERVAL '30 DAY'
+                    ) AS win_mad
+                FROM with_baseline w
+            )
+            SELECT
+                ts, date, ov_version, ov_build, ww,
+                value, unit,
+                win_median, win_mad, 1.4826 * win_mad AS win_sigma, win_n,
+                CASE
+                    WHEN win_mad IS NULL OR win_median IS NULL OR win_mad = 0 THEN NULL
+                    ELSE (value - win_median) / (1.4826 * win_mad)
+                END AS z_score,
+                CASE
+                    WHEN win_median IS NULL OR win_median = 0 THEN NULL
+                    ELSE (value - win_median) / win_median
+                END AS pct_diff,
+                CASE
+                    WHEN win_median IS NULL OR win_median = 0 OR win_mad IS NULL THEN NULL
+                    ELSE win_mad / win_median
+                END AS cv
+            FROM with_mad
             ORDER BY ts
-        """, [machine, model, precision, in_token, out_token, exec_mode, days]
+        """, [machine, model, precision, in_token, out_token, exec_mode,
+               purpose_filter, purpose_like, days]
                            ).fetchdf()
 
 
@@ -310,8 +367,9 @@ def noise_summary(db_path: Path, machine: str | None = None,
 def trend_regressions(db_path: Path, machine: str,
                       *, recent_days: int = 7,
                       baseline_days: int = 21,
-                      min_recent_points: int = 3,
-                      min_baseline_points: int = 5) -> pd.DataFrame:
+                      min_recent_points: int = 5,
+                      min_baseline_points: int = 7,
+                      purpose_filter: str | None = None) -> pd.DataFrame:
     """Per-series regression signal based on median comparison between two
     time windows.
 
@@ -329,6 +387,7 @@ def trend_regressions(db_path: Path, machine: str,
     lower is worse. ``pct_change`` is signed so that positive means "worse"
     regardless of unit, making sort-by-worst trivial.
     """
+    purpose_like = f"%{purpose_filter}%" if purpose_filter else None
     sql = """
     WITH base AS (
         SELECT machine, model, precision, in_token, out_token, exec_mode, unit,
@@ -336,6 +395,7 @@ def trend_regressions(db_path: Path, machine: str,
         FROM perf_flat
         WHERE machine = ?
           AND ts >= current_date - ((? + ?) || ' DAY')::INTERVAL
+          AND (? IS NULL OR COALESCE(purpose, '') ILIKE ?)
           AND value > 0
     ),
     tagged AS (
@@ -346,41 +406,48 @@ def trend_regressions(db_path: Path, machine: str,
             END AS window_tag
         FROM base
     ),
-    recent_with_mad AS (
+    window_medians AS (
+        SELECT machine, model, precision, in_token, out_token, exec_mode,
+               median(value) FILTER (WHERE window_tag = 'recent')   AS recent_median,
+               median(value) FILTER (WHERE window_tag = 'baseline') AS baseline_median
+        FROM tagged
+        GROUP BY machine, model, precision, in_token, out_token, exec_mode
+    ),
+    window_mads AS (
         -- DuckDB can't mix GROUP BY with a named window that references
-        -- an aggregate. Compute recent MAD in a separate pass, per series,
-        -- using a self-join on the recent window median.
+        -- an aggregate. Compute MAD in a separate pass, per series.
         SELECT t.machine, t.model, t.precision, t.in_token, t.out_token,
                t.exec_mode,
-               median(abs(t.value - rm.recent_median)) AS recent_mad
+               median(abs(t.value - wm.recent_median))
+                   FILTER (WHERE t.window_tag = 'recent') AS recent_mad,
+               median(abs(t.value - wm.baseline_median))
+                   FILTER (WHERE t.window_tag = 'baseline') AS baseline_mad
         FROM tagged t
-        JOIN (
-            SELECT machine, model, precision, in_token, out_token, exec_mode,
-                   median(value) AS recent_median
-            FROM tagged
-            WHERE window_tag = 'recent'
-            GROUP BY machine, model, precision, in_token, out_token, exec_mode
-        ) rm USING (machine, model, precision, in_token, out_token, exec_mode)
-        WHERE t.window_tag = 'recent'
+        JOIN window_medians wm
+          USING (machine, model, precision, in_token, out_token, exec_mode)
         GROUP BY t.machine, t.model, t.precision, t.in_token, t.out_token, t.exec_mode
     ),
     agg AS (
         SELECT t.machine, t.model, t.precision, t.in_token, t.out_token,
                t.exec_mode, t.unit,
-               median(t.value) FILTER (WHERE window_tag = 'recent')   AS recent_median,
-               median(t.value) FILTER (WHERE window_tag = 'baseline') AS baseline_median,
+               any_value(wm.recent_median) AS recent_median,
+               any_value(wm.baseline_median) AS baseline_median,
                count(*)        FILTER (WHERE window_tag = 'recent')   AS recent_n,
                count(*)        FILTER (WHERE window_tag = 'baseline') AS baseline_n,
-               any_value(rm.recent_mad) AS recent_mad
+               any_value(wmad.recent_mad) AS recent_mad,
+               any_value(wmad.baseline_mad) AS baseline_mad
         FROM tagged t
-        LEFT JOIN recent_with_mad rm
+        LEFT JOIN window_medians wm
+          USING (machine, model, precision, in_token, out_token, exec_mode)
+        LEFT JOIN window_mads wmad
           USING (machine, model, precision, in_token, out_token, exec_mode)
         GROUP BY t.machine, t.model, t.precision, t.in_token, t.out_token,
                  t.exec_mode, t.unit
     )
     SELECT
         machine, model, precision, in_token, out_token, exec_mode, unit,
-        recent_median, baseline_median, recent_n, baseline_n, recent_mad,
+        recent_median, baseline_median, recent_n, baseline_n,
+        recent_mad, baseline_mad,
         CASE WHEN unit IN ('ms', 's', '%') THEN 'lower_is_better'
              ELSE 'higher_is_better' END AS direction,
         CASE
@@ -398,7 +465,8 @@ def trend_regressions(db_path: Path, machine: str,
         END AS recent_cv
     FROM agg
     """
-    params = [machine, recent_days, baseline_days, recent_days]
+    params = [machine, recent_days, baseline_days,
+              purpose_filter, purpose_like, recent_days]
     with _read_only(db_path) as con:
         df = con.execute(sql, params).fetchdf()
 
@@ -415,6 +483,11 @@ def trend_regressions(db_path: Path, machine: str,
         return "ok"
 
     df["status"] = df.apply(_status, axis=1)
+    direction_sign = df["unit"].apply(lambda unit: 1 if unit in ("ms", "s", "%") else -1)
+    sigma = 1.4826 * df["baseline_mad"]
+    df["worsening_z"] = (direction_sign
+                          * (df["recent_median"] - df["baseline_median"])
+                          / sigma.where(sigma > 0))
     return df.sort_values("worsening_pct", ascending=False,
                           na_position="last").reset_index(drop=True)
 
@@ -428,7 +501,8 @@ def geomean_trend(db_path: Path, machine: str,
                   in_bucket: str | None = None,
                   out_bucket: str | None = None,
                   exclude_models: tuple[str, ...] = ("qwen_usage",),
-                  days: int = 90) -> pd.DataFrame:
+                  days: int = 90,
+                  purpose_filter: str | None = None) -> pd.DataFrame:
     """Geomean of ``value`` per run for a bucket of perf rows.
 
     ``exec_mode`` filters rows ('1st', '2nd', 'pipeline', ...).
@@ -437,6 +511,9 @@ def geomean_trend(db_path: Path, machine: str,
     """
     filters = ["f.machine = ?", "f.exec_mode = ?"]
     params: list = [machine, exec_mode]
+    if purpose_filter:
+        filters.append("COALESCE(f.purpose, '') ILIKE ?")
+        params.append(f"%{purpose_filter}%")
     if in_bucket:
         filters.append("f.in_bucket = ?")
         params.append(in_bucket)

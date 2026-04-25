@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -117,6 +118,8 @@ def _guess_machine(path: Path) -> str:
     When the results live under ``/var/www/html/daily/<MACHINE>/...`` the
     immediate parent directory is authoritative.
     """
+    if path.parent.name in {"output", "viewer", "daily"}:
+        return platform.node()
     return path.parent.name
 
 
@@ -128,6 +131,27 @@ def _raw_log_candidate(path: Path) -> Path | None:
     stem = path.name.split(".summary.json")[0]  # 'daily.20260419_2339'
     matches = sorted(path.parent.glob(f"{stem}.*.raw"))
     return matches[0] if matches else None
+
+
+def _report_candidate(path: Path) -> Path | None:
+    report = path.with_name(path.name.removesuffix(".summary.json") + ".report")
+    return report if report.exists() else None
+
+
+def _purpose_from_report(path: Path) -> str | None:
+    report = _report_candidate(path)
+    if report is None:
+        return None
+    try:
+        text = report.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        log.warning("Failed to read %s: %s", report, e)
+        return None
+    for line in text.splitlines():
+        if line.strip().startswith("| Purpose |"):
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            return cells[1] if len(cells) > 1 and cells[1] else None
+    return None
 
 
 def load_summary(path: Path) -> RunRecord:
@@ -154,6 +178,7 @@ def load_summary(path: Path) -> RunRecord:
         ts = datetime.fromtimestamp(path.stat().st_mtime)
 
     machine = meta.get("machine") or _guess_machine(path)
+    description = meta.get("description") or _purpose_from_report(path)
     ov_version = meta.get("ov_version")
     ov_build = meta.get("ov_build") or None
     ov_sha = meta.get("ov_sha") or None
@@ -170,8 +195,8 @@ def load_summary(path: Path) -> RunRecord:
         machine=machine,
         ts=ts,
         device=meta.get("device"),
-        purpose=meta.get("description"),
-        description=meta.get("description"),
+        purpose=description,
+        description=description,
         ww=ww,
         ov_version=ov_version,
         ov_build=ov_build,

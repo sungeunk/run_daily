@@ -66,7 +66,7 @@ def _normalise(v: Any) -> Any:
         s = v.strip()
         # Treat a blank cell the same as 0 for numeric key columns.
         if s == '':
-            return ''
+            return 0
         return s
     return v
 
