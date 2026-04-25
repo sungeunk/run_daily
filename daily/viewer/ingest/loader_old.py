@@ -13,14 +13,13 @@ Pickle layout::
                             "generated_text": str}, ...],
           "process_time": float,
           # TestBenchmarkapp extras
-          "test_config": {"batch": 1} or {"mem_check": True},
-          # TestMeasuredUsageCpp extras
-          "peak_cpu_usage_percent": float,
-          "peak_mem_usage_percent": float,
-          "peak_mem_usage_size":    str ("8.5 GB"),
+          "test_config": {"batch": 1},
         }, ...
       ]
     }
+
+qwen_usage (TestMeasuredUsageCpp) and whisper base (TestWhisperBase) rows
+are intentionally dropped — the daily suite has moved away from those.
 
 The tuple key contains the test-class *object*, which pickle serialises by
 fully-qualified name. To unpickle without pulling in the legacy test_cases
@@ -143,23 +142,6 @@ def _class_name(key_tuple: tuple) -> str:
     return getattr(cls, "__name__", str(cls))
 
 
-def _sizestr_to_gb(s: str | float | None) -> float | None:
-    """Legacy memory size strings look like '8.5 GB' or '1024 MB'."""
-    if s is None:
-        return None
-    if isinstance(s, (int, float)):
-        # Old rigs wrote bytes; others wrote GB. Use magnitude to guess.
-        return float(s) / (1024 ** 3) if float(s) > 1024 else float(s)
-    m = re.match(r"\s*([\d.]+)\s*([KMGT]?B)?\s*$", str(s), re.IGNORECASE)
-    if not m:
-        return None
-    n = float(m.group(1))
-    unit = (m.group(2) or "GB").upper()
-    factor = {"B": 1 / 1024 ** 3, "KB": 1 / 1024 ** 2, "MB": 1 / 1024,
-              "GB": 1.0, "TB": 1024.0}.get(unit, 1.0)
-    return n * factor
-
-
 def _benchmark_perf(key: tuple, items: list) -> list[PerfRow]:
     model, precision, _ = key
     out: list[PerfRow] = []
@@ -194,39 +176,26 @@ def _benchmark_app_perf(key: tuple, items: list) -> list[PerfRow]:
     return out
 
 
-def _measured_usage_perf(key: tuple, items: list) -> list[PerfRow]:
-    model, precision, _ = key
-    out: list[PerfRow] = []
-    for cmd_item in items:
-        if cmd_item.get("return_code", -1) != 0:
-            continue
-        peak_mem_pct = cmd_item.get("peak_mem_usage_percent")
-        peak_mem_sz = _sizestr_to_gb(cmd_item.get("peak_mem_usage_size"))
-        peak_cpu_pct = cmd_item.get("peak_cpu_usage_percent")
-        for d in cmd_item.get("data_list", []) or []:
-            in_tok = int(d.get("in_token") or 0)
-            out_tok = int(d.get("out_token") or 0)
-            perf = d.get("perf") or []
-            if len(perf) > 0 and perf[0] is not None:
-                out.append(PerfRow(model, precision, in_tok, out_tok,
-                                   "1st", float(perf[0]), "ms"))
-            if len(perf) > 1 and perf[1] is not None:
-                out.append(PerfRow(model, precision, in_tok, out_tok,
-                                   "2nd", float(perf[1]), "ms"))
-        if peak_mem_pct is not None:
-            out.append(PerfRow(model, precision, 0, 0, "memory percent",
-                               float(peak_mem_pct), "%"))
-        if peak_mem_sz is not None:
-            out.append(PerfRow(model, precision, 0, 0, "memory size",
-                               float(peak_mem_sz), "GB"))
-        if peak_cpu_pct is not None:
-            out.append(PerfRow(model, precision, 0, 0, "cpu percent",
-                               float(peak_cpu_pct), "%"))
-    return out
+def _sd_perf_ms(key: tuple, items: list) -> list[PerfRow]:
+    """Legacy ``TestStableDiffusion`` (pre-GenAI C++ binaries) — pickle
+    stores pipeline latency in **milliseconds**. We normalise all SD
+    pipelines to seconds so the viewer can compare them apples-to-apples
+    regardless of the underlying harness.
+    """
+    return _sd_collect(key, items, scale_to_seconds=1 / 1000.0)
 
 
-def _sd_perf(key: tuple, items: list) -> list[PerfRow]:
-    """Legacy SD perf rows: perf[0] is pipeline ms."""
+def _sd_perf_sec(key: tuple, items: list) -> list[PerfRow]:
+    """GenAI / DGfx SD harnesses (``TestStableDiffusionGenai``,
+    ``TestStableDiffusionDGfxE2eAi``) — pickle stores **seconds** directly;
+    the old text report multiplied by 1000 via ``sec_to_ms`` for display
+    but the raw pickle is seconds. The DB keeps seconds.
+    """
+    return _sd_collect(key, items, scale_to_seconds=1.0)
+
+
+def _sd_collect(key: tuple, items: list, *, scale_to_seconds: float
+                ) -> list[PerfRow]:
     model, precision, _ = key
     out: list[PerfRow] = []
     for cmd_item in items:
@@ -236,42 +205,27 @@ def _sd_perf(key: tuple, items: list) -> list[PerfRow]:
             perf = d.get("perf") or []
             if not perf or perf[0] is None:
                 continue
-            # Old format kept pipeline latency in ms already (see report.py
-            # sec_to_ms conversion). Some pickles stored it in seconds — if
-            # the magnitude is suspiciously small, scale up.
-            v = float(perf[0])
-            unit = "ms"
+            v = float(perf[0]) * scale_to_seconds
             # SD in/out tokens were stored at perf[4]/perf[5] in very old
             # dumps; newer ones emit them at top level.
             in_tok = int(d.get("in_token") or (perf[4] if len(perf) > 4 else 0) or 0)
             out_tok = int(d.get("out_token") or (perf[5] if len(perf) > 5 else 0) or 0)
             out.append(PerfRow(model, precision, in_tok, out_tok,
-                               "pipeline", v, unit))
-    return out
-
-
-def _whisper_perf(key: tuple, items: list) -> list[PerfRow]:
-    model, precision, _ = key
-    out: list[PerfRow] = []
-    for cmd_item in items:
-        if cmd_item.get("return_code", -1) != 0:
-            continue
-        for d in cmd_item.get("data_list", []) or []:
-            perf = d.get("perf") or []
-            if perf:
-                out.append(PerfRow(model, precision, 0, 0, "tps",
-                                   float(perf[0]), "tps"))
+                               "pipeline", v, "s"))
     return out
 
 
 _CLASS_HANDLERS = {
     "TestBenchmark":               _benchmark_perf,
     "TestBenchmarkapp":            _benchmark_app_perf,
-    "TestMeasuredUsageCpp":        _measured_usage_perf,
-    "TestStableDiffusion":         _sd_perf,
-    "TestStableDiffusionGenai":    _sd_perf,
-    "TestStableDiffusionDGfxE2eAi": _sd_perf,
-    "TestWhisperBase":             _whisper_perf,
+    # Legacy C++ SD binaries — pipeline stored as ms.
+    "TestStableDiffusion":         _sd_perf_ms,
+    # GenAI/DGfx harnesses — pipeline stored as seconds.
+    "TestStableDiffusionGenai":    _sd_perf_sec,
+    "TestStableDiffusionDGfxE2eAi": _sd_perf_sec,
+    # Deliberately dropped: TestMeasuredUsageCpp (qwen_usage) and
+    # TestWhisperBase — no longer part of the daily signal the team
+    # watches. Keeps perf table focused on LLM + SD.
     # TestChatSample: no numeric perf.
 }
 

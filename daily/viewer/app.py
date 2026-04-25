@@ -109,14 +109,6 @@ def cached_series(machine: str, model: str, precision: str,
 
 
 @st.cache_data(show_spinner=False)
-def cached_regressions(run_id: str, z: float, pct: float, cv: float,
-                       _v: float) -> pd.DataFrame:
-    return q.regressions_for_run(DB, run_id,
-                                 z_threshold=z, pct_threshold=pct,
-                                 noisy_cv=cv)
-
-
-@st.cache_data(show_spinner=False)
 def cached_noise(machine: str, days: int, _v: float) -> pd.DataFrame:
     return q.noise_summary(DB, machine=machine, days=days)
 
@@ -148,6 +140,24 @@ def _worse_direction(unit: str | None) -> int:
 # Sidebar
 # ---------------------------------------------------------------------------
 
+# Canonical daily rigs. Kept here (not in DB) because the list is small,
+# human-curated, and tied to the ops team's owned machines rather than
+# whatever happens to show up under /var/www/html/daily/ (old, one-off
+# folders often linger there).
+DAILY_MACHINES = (
+    "dg2alderlake",
+    "MTL-01",
+    "ARLH-01",
+    "BMG-02",
+    "LNL-03",
+    "LNL-04",
+    "DUT4580PTLH",
+    "DUT6047BMGFRD",
+)
+
+DEFAULT_RUN_FILTER = "daily_CB timer"
+
+
 def _sidebar() -> dict:
     st.sidebar.header("Settings")
     v = _db_version()
@@ -155,10 +165,22 @@ def _sidebar() -> dict:
         st.sidebar.error(f"DB not found at {DB}")
         st.stop()
     st.sidebar.caption(f"DB: `{DB}`")
-    machines = cached_machines(v)
-    if not machines:
+    all_machines = cached_machines(v)
+    if not all_machines:
         st.sidebar.warning("No runs in DB yet — run `viewer.ingest.cli` first.")
         st.stop()
+
+    daily_only = st.sidebar.checkbox("Daily machines only", value=True,
+                                     help="Filter to the canonical daily rig set.")
+    if daily_only:
+        machines = [m for m in all_machines if m in DAILY_MACHINES]
+        # Fall back to the full list if the DB has none of the canonical
+        # rigs yet — avoids an empty dropdown on fresh installs.
+        if not machines:
+            st.sidebar.caption("_No canonical daily rigs in DB — showing all._")
+            machines = all_machines
+    else:
+        machines = all_machines
     machine = st.sidebar.selectbox("Machine", machines)
 
     profile_options = cached_profiles(v) or ["default"]
@@ -173,7 +195,7 @@ def _sidebar() -> dict:
                            help="CV = MAD/median. Above this, series is "
                                 "treated as inherently noisy.")
 
-    days = st.sidebar.slider("Trend history (days)", 7, 365, 60)
+    days = st.sidebar.slider("Trend history (days)", 7, 60, 30)
     return dict(v=v, machine=machine, profile=profile,
                 z=z, pct=pct, cv=cv, days=days)
 
@@ -190,7 +212,7 @@ def _tab_excel(cfg: dict) -> None:
         return
 
     filt = st.text_input("Filter by purpose/description",
-                         value="", key="excel_filter")
+                         value=DEFAULT_RUN_FILTER, key="excel_filter")
     view = runs
     if filt:
         mask = (view["purpose"].fillna("").str.contains(filt, case=False) |
@@ -240,133 +262,214 @@ def _tab_excel(cfg: dict) -> None:
             st.dataframe(extras, use_container_width=True, hide_index=True)
 
 
-def _tab_trend(cfg: dict) -> None:
-    st.subheader("Trend — single series")
-    runs = cached_runs(cfg["machine"], cfg["v"])
-    if runs.empty:
+@st.cache_data(show_spinner=False)
+def cached_trend_regressions(machine: str, recent_days: int,
+                             baseline_days: int, _v: float) -> pd.DataFrame:
+    return q.trend_regressions(DB, machine,
+                               recent_days=recent_days,
+                               baseline_days=baseline_days)
+
+
+def _series_label(row: pd.Series) -> str:
+    return (f"{row['model']} | {row['precision']} | "
+            f"in={row['in_token']} out={row['out_token']} | "
+            f"{row['exec_mode']} [{row['unit']}]")
+
+
+def _tab_regression(cfg: dict) -> None:
+    """Trend + regression in a single view.
+
+    The question this tab answers: 'is this series trending slower lately,
+    compared to its own recent past?' — not 'did today's single point miss
+    the band'. We compare the median of a recent window to the median of
+    an older baseline window, so ingest noise and one-off outliers get
+    averaged out.
+    """
+    st.subheader("Regression — trend comparison")
+
+    c1, c2 = st.columns(2)
+    recent_days = c1.slider("Recent window (days)", 3, 21, 7, 1,
+                            help="Last N days worth of points; their "
+                                 "median represents 'now'.")
+    baseline_days = c2.slider("Baseline window (days)", 7, 60, 21, 1,
+                              help="The N days before the recent window; "
+                                   "their median is the comparison point.")
+
+    df = cached_trend_regressions(cfg["machine"], recent_days,
+                                  baseline_days, cfg["v"])
+    if df.empty:
+        st.info("No data for this machine / window.")
         return
 
-    # Grab the set of distinct series from the latest run so the user
-    # doesn't have to type.
-    latest_run_id = runs.iloc[0]["run_id"]
-    import duckdb
-    with duckdb.connect(str(DB), read_only=True) as con:
-        series = con.execute("""
-            SELECT DISTINCT model, precision, in_token, out_token, exec_mode, unit
-            FROM perf
-            WHERE run_id = ?
-            ORDER BY model, precision, in_token, out_token, exec_mode
-        """, [latest_run_id]).fetchdf()
-    if series.empty:
-        st.info("No perf points in the latest run.")
+    valid = df[df["status"] == "ok"].copy()
+    noisy_count = int((valid["recent_cv"].fillna(0) >= cfg["cv"]).sum())
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Series tracked", len(valid))
+    # Worsening above pct threshold, regardless of noise — surfaces the
+    # strongest signals. The user should cross-check with the graph for
+    # series that are flagged noisy.
+    bad = valid[valid["worsening_pct"].fillna(0) >= cfg["pct"]]
+    m2.metric("Worsening ≥ threshold", len(bad))
+    better = valid[valid["worsening_pct"].fillna(0) <= -cfg["pct"]]
+    m3.metric("Improving ≥ threshold", len(better))
+    m4.metric("Noisy (recent CV high)", noisy_count)
+
+    # Build a compact, sortable table.
+    def _fmt(frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy()
+        out["series"] = out.apply(_series_label, axis=1)
+        out["worsening_%"] = (out["worsening_pct"] * 100).round(2)
+        out["recent_cv_%"] = (out["recent_cv"] * 100).round(2)
+        # Display-only columns that carry the unit suffix so SD pipelines
+        # (seconds) aren't mistaken for LLM latencies (ms) at a glance. The
+        # raw numeric recent_median / baseline_median columns remain intact
+        # below because the trend plot and caption need them as floats.
+        def _with_unit(val: float | None, unit: str | None) -> str:
+            if val is None or pd.isna(val):
+                return ""
+            return f"{val:.3f} {unit or ''}".rstrip()
+        out["recent"] = [_with_unit(v, u) for v, u in
+                         zip(out["recent_median"], out["unit"].fillna(""))]
+        out["baseline"] = [_with_unit(v, u) for v, u in
+                           zip(out["baseline_median"], out["unit"].fillna(""))]
+        return out[["series", "worsening_%", "recent", "baseline",
+                    "recent_n", "baseline_n", "recent_cv_%",
+                    "direction", "status",
+                    # keep these for downstream selection, hidden via
+                    # column_config below
+                    "model", "precision", "in_token", "out_token",
+                    "exec_mode", "unit",
+                    # raw numerics for the plot/caption code paths
+                    "recent_median", "baseline_median"]]
+
+    table = _fmt(valid)
+    insufficient = df[df["status"] == "insufficient_data"]
+
+    st.markdown("### Series ranked by worsening %")
+    st.caption("Positive values mean the recent window is slower / worse "
+               "than the baseline. Click a row to plot it below.")
+    event = st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        selection_mode="single-row",
+        on_select="rerun",
+        key="regression_table",
+        column_config={
+            # Hide columns we carry for row-selection / plotting only.
+            "model":           st.column_config.Column(width="small", disabled=True),
+            "precision":       None,
+            "in_token":        None,
+            "out_token":       None,
+            "exec_mode":       None,
+            "unit":            None,
+            "recent_median":   None,
+            "baseline_median": None,
+        },
+    )
+
+    # Default to the worst series (row 0) so the user sees something useful
+    # without clicking.
+    sel_rows = event.selection.rows if event and event.selection else []
+    sel_idx = sel_rows[0] if sel_rows else 0
+    if sel_idx >= len(table):
+        return
+    row = table.iloc[sel_idx]
+
+    st.markdown(
+        f"### Trend — {row['model']} / {row['precision']} / "
+        f"in={row['in_token']} out={row['out_token']} / {row['exec_mode']} "
+        f"[{row['unit']}]"
+    )
+
+    hist = cached_series(
+        cfg["machine"], row["model"], row["precision"],
+        int(row["in_token"]), int(row["out_token"]), row["exec_mode"],
+        cfg["days"], cfg["v"])
+    if hist.empty:
+        st.info("No history for this series in the selected window.")
         return
 
-    series["label"] = series.apply(
-        lambda r: f"{r['model']} | {r['precision']} | in={r['in_token']} "
-                  f"out={r['out_token']} | {r['exec_mode']} [{r['unit']}]",
-        axis=1)
-
-    picked = st.multiselect("Series", series["label"].tolist(),
-                            default=[series.iloc[0]["label"]])
-    if not picked:
-        return
-
+    unit = row["unit"] or ""
     fig = go.Figure()
-    for label in picked:
-        s = series.loc[series["label"] == label].iloc[0]
-        df = cached_series(
-            cfg["machine"], s["model"], s["precision"],
-            int(s["in_token"]), int(s["out_token"]), s["exec_mode"],
-            cfg["days"], cfg["v"])
-        if df.empty:
-            continue
-        unit = s["unit"] or ""
-        worse = _worse_direction(unit)
+    fig.add_trace(go.Scatter(
+        x=hist["ts"], y=hist["value"], mode="lines+markers",
+        name="value",
+        hovertemplate="%{x|%Y-%m-%d %H:%M}<br>value=%{y:.2f} "
+                      + unit + "<br>%{text}",
+        text=[f"ov={v}" for v in hist["ov_version"].fillna("")],
+    ))
+
+    # Horizontal reference lines drawn as Scatter traces (not add_hline)
+    # so they show up as proper legend entries. Each spans the full x range
+    # with a constant y.
+    x_span = [hist["ts"].min(), hist["ts"].max()]
+    if pd.notna(row["baseline_median"]):
         fig.add_trace(go.Scatter(
-            x=df["ts"], y=df["value"], mode="lines+markers",
-            name=f"{label}",
-            hovertemplate="%{x|%Y-%m-%d %H:%M}<br>value=%{y:.2f} "
-                          + unit + "<br>%{text}",
-            text=[f"ov={v}" for v in df["ov_version"].fillna("")],
+            x=x_span,
+            y=[float(row["baseline_median"])] * 2,
+            mode="lines",
+            line=dict(dash="dot", color="#1f77b4", width=2),
+            name=f"baseline median ({baseline_days}d prior)",
+            hovertemplate=f"baseline median = {row['baseline_median']:.2f} "
+                          + unit + "<extra></extra>",
         ))
-        if df["win_median"].notna().any():
-            band_hi = df["win_median"] + 2 * df["win_sigma"]
-            band_lo = df["win_median"] - 2 * df["win_sigma"]
-            fig.add_trace(go.Scatter(
-                x=df["ts"], y=df["win_median"], mode="lines",
-                name=f"median ({label})", line=dict(dash="dash", width=1),
-                opacity=0.6,
-            ))
-            fig.add_trace(go.Scatter(
-                x=pd.concat([df["ts"], df["ts"][::-1]]),
-                y=pd.concat([band_hi, band_lo[::-1]]),
-                fill="toself", mode="none", opacity=0.15,
-                name=f"±2σ ({label})", showlegend=False,
-            ))
-        _ = worse  # color handling can be added later (e.g. red dots when worse)
+    if pd.notna(row["recent_median"]):
+        fig.add_trace(go.Scatter(
+            x=x_span,
+            y=[float(row["recent_median"])] * 2,
+            mode="lines",
+            line=dict(dash="dash", color="firebrick", width=2),
+            name=f"recent median (last {recent_days}d)",
+            hovertemplate=f"recent median = {row['recent_median']:.2f} "
+                          + unit + "<extra></extra>",
+        ))
+
+    # Rolling ±2σ band around the series' own rolling median. Bumped the
+    # opacity and used a stronger fill colour so the envelope is actually
+    # visible on a bright monitor (the 0.12 default washed out).
+    if hist["win_median"].notna().any():
+        band_hi = hist["win_median"] + 2 * hist["win_sigma"]
+        band_lo = hist["win_median"] - 2 * hist["win_sigma"]
+        fig.add_trace(go.Scatter(
+            x=pd.concat([hist["ts"], hist["ts"][::-1]]),
+            y=pd.concat([band_hi, band_lo[::-1]]),
+            fill="toself",
+            fillcolor="rgba(99, 110, 250, 0.28)",
+            mode="none",
+            name="±2σ band (rolling)",
+            showlegend=True,
+            hoverinfo="skip",
+        ))
 
     fig.update_layout(
         height=450, hovermode="x unified",
-        xaxis_title="timestamp", yaxis_title="value",
+        xaxis_title="timestamp",
+        yaxis_title=f"value [{unit}]" if unit else "value",
+        xaxis=dict(autorange="reversed"),
         legend=dict(orientation="h", y=-0.2),
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    st.caption(
+        f"Recent median = {row['recent_median']:.3f} {unit} "
+        f"(n={int(row['recent_n'])}) vs baseline median = "
+        f"{row['baseline_median']:.3f} {unit} (n={int(row['baseline_n'])}). "
+        f"Worsening = {row['worsening_%']:+.2f}%. "
+        f"Direction: {row['direction']}. "
+        f"Recent CV = {row['recent_cv_%']:.2f}% "
+        + ("(noisy — interpret with care)."
+           if row["recent_cv_%"] >= cfg["cv"] * 100
+           else "(stable).")
+    )
 
-def _tab_regressions(cfg: dict) -> None:
-    st.subheader("Regressions — latest run")
-    runs = cached_runs(cfg["machine"], cfg["v"])
-    if runs.empty:
-        return
-
-    # Default to latest; allow override.
-    stamps = runs["stamp"].tolist()
-    idx = st.selectbox("Run", range(len(stamps)),
-                       format_func=lambda i: f"{stamps[i]}  ({runs.iloc[i]['ov_version']})")
-    run_id = runs.iloc[idx]["run_id"]
-
-    df = cached_regressions(run_id, cfg["z"], cfg["pct"], cfg["cv"], cfg["v"])
-    if df.empty:
-        st.info("No data.")
-        return
-
-    reg = df[df["status"] == "regression"]
-    imp = df[df["status"] == "improvement"]
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Regressions", len(reg))
-    c2.metric("Improvements", len(imp))
-    c3.metric("Noisy series",
-              int((df["is_noisy"].fillna(False)).sum()))
-    c4.metric("Tracked points", len(df))
-
-    def _fmt(frame: pd.DataFrame) -> pd.DataFrame:
-        out = frame.copy()
-        for col in ("value", "win_median", "win_sigma"):
-            if col in out:
-                out[col] = out[col].round(3)
-        if "pct_diff" in out:
-            out["pct_diff"] = (out["pct_diff"] * 100).round(2)
-        if "z_score" in out:
-            out["z_score"] = out["z_score"].round(2)
-        if "cv" in out:
-            out["cv"] = (out["cv"] * 100).round(2)
-        return out
-
-    st.markdown("### ❌ Regressions")
-    if reg.empty:
-        st.write("_none_")
-    else:
-        st.dataframe(_fmt(reg), use_container_width=True, hide_index=True)
-
-    st.markdown("### ✅ Improvements")
-    if imp.empty:
-        st.write("_none_")
-    else:
-        st.dataframe(_fmt(imp), use_container_width=True, hide_index=True)
-
-    with st.expander("All tracked series for this run"):
-        st.dataframe(_fmt(df), use_container_width=True, hide_index=True)
+    if not insufficient.empty:
+        with st.expander(f"{len(insufficient)} series with insufficient data"):
+            st.caption("Fewer points than min_recent/min_baseline in the "
+                       "chosen windows.")
+            st.dataframe(_fmt(insufficient), use_container_width=True,
+                         hide_index=True)
 
 
 def _tab_geomean(cfg: dict) -> None:
@@ -380,7 +483,7 @@ def _tab_geomean(cfg: dict) -> None:
     out_bucket = cols[1].selectbox("out bucket",
                                    [None, "short", "long", "0"],
                                    format_func=lambda v: v or "(any)")
-    days = cols[2].number_input("days", min_value=7, max_value=365,
+    days = cols[2].number_input("days", min_value=7, max_value=60,
                                 value=cfg["days"])
 
     df = cached_geomean(cfg["machine"], exec_mode, in_bucket, out_bucket,
@@ -431,7 +534,7 @@ def _tab_noise(cfg: dict) -> None:
     st.subheader("Noise diagnostics")
     st.caption("Series with high coefficient of variation (CV = σ / median) "
                "over the selected window. iGPU results often live here.")
-    days = st.number_input("Window (days)", min_value=7, max_value=365,
+    days = st.number_input("Window (days)", min_value=7, max_value=60,
                            value=cfg["days"], key="noise_days")
     df = cached_noise(cfg["machine"], int(days), cfg["v"])
     if df.empty:
@@ -458,16 +561,14 @@ def main() -> None:
 
     cfg = _sidebar()
 
-    tabs = st.tabs(["Excel", "Trend", "Regressions", "Geomean", "Noise"])
+    tabs = st.tabs(["Excel", "Regression", "Geomean", "Noise"])
     with tabs[0]:
         _tab_excel(cfg)
     with tabs[1]:
-        _tab_trend(cfg)
+        _tab_regression(cfg)
     with tabs[2]:
-        _tab_regressions(cfg)
-    with tabs[3]:
         _tab_geomean(cfg)
-    with tabs[4]:
+    with tabs[3]:
         _tab_noise(cfg)
 
 

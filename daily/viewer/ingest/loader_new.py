@@ -92,51 +92,13 @@ def _sd_dgfx_rows(m: dict) -> Iterable[PerfRow]:
         yield PerfRow(model, precision, 0, 0, "pipeline", float(sec), "s")
 
 
-def _qwen_usage_rows(m: dict) -> Iterable[PerfRow]:
-    for d in m.get("data", []) or []:
-        perf = d.get("perf") or []
-        in_tok = int(d.get("in_token") or 0)
-        out_tok = int(d.get("out_token") or 0)
-        if len(perf) > 0 and perf[0] is not None:
-            yield PerfRow("qwen_usage", "INT8", in_tok, out_tok, "1st",
-                          float(perf[0]), "ms")
-        if len(perf) > 1 and perf[1] is not None:
-            yield PerfRow("qwen_usage", "INT8", in_tok, out_tok, "2nd",
-                          float(perf[1]), "ms")
-    # Memory metrics are per-test, not per-data.
-    peak_mem_percent = m.get("peak_mem_percent")
-    peak_cpu_percent = m.get("peak_cpu_percent")
-    peak_mem_size = m.get("peak_mem_size")
-    if peak_mem_percent is not None:
-        yield PerfRow("qwen_usage", "INT8", 0, 0, "memory percent",
-                      float(peak_mem_percent), "%")
-    if peak_cpu_percent is not None:
-        yield PerfRow("qwen_usage", "INT8", 0, 0, "cpu percent",
-                      float(peak_cpu_percent), "%")
-    if peak_mem_size is not None:
-        try:
-            yield PerfRow("qwen_usage", "INT8", 0, 0, "memory size",
-                          float(peak_mem_size), "GB")
-        except (TypeError, ValueError):
-            pass
-
-
-def _whisper_base_rows(m: dict) -> Iterable[PerfRow]:
-    model = m.get("model", "")
-    precision = m.get("precision", "")
-    for d in m.get("data", []) or []:
-        perf = d.get("perf") or []
-        if perf:
-            yield PerfRow(model, precision, 0, 0, "tps", float(perf[0]), "tps")
-
-
 _TYPE_HANDLERS = {
     "llm_benchmark": _llm_rows,
     "benchmark_app": _benchmark_app_rows,
     "sd_genai":      _sd_genai_rows,
     "sd_dgfx":       _sd_dgfx_rows,
-    "qwen_usage":    _qwen_usage_rows,
-    "whisper_base":  _whisper_base_rows,
+    # Deliberately dropped: qwen_usage (TestMeasuredUsageCpp) and
+    # whisper_base (TestWhisperBase). No longer part of the daily signal.
     # chat_sample: no perf data.
 }
 

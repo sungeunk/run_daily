@@ -304,6 +304,122 @@ def noise_summary(db_path: Path, machine: str | None = None,
 
 
 # ---------------------------------------------------------------------------
+# Trend-based regression detection: recent window vs older baseline.
+# ---------------------------------------------------------------------------
+
+def trend_regressions(db_path: Path, machine: str,
+                      *, recent_days: int = 7,
+                      baseline_days: int = 21,
+                      min_recent_points: int = 3,
+                      min_baseline_points: int = 5) -> pd.DataFrame:
+    """Per-series regression signal based on median comparison between two
+    time windows.
+
+    We want to answer 'has this series drifted slower in the last N days
+    vs the N-days-before-that window?', not 'is today's point an outlier'.
+    Single-point outliers and ingest noise get washed out by the medians.
+
+    Rules:
+      - recent window:  last ``recent_days``, ending now.
+      - baseline window: the ``baseline_days`` preceding the recent window.
+      - both windows need enough points (>= min_*_points) to be meaningful;
+        otherwise ``status`` = 'insufficient_data'.
+
+    Direction handling: for 'ms', 's', '%', higher is worse; for 'FPS'/'tps',
+    lower is worse. ``pct_change`` is signed so that positive means "worse"
+    regardless of unit, making sort-by-worst trivial.
+    """
+    sql = """
+    WITH base AS (
+        SELECT machine, model, precision, in_token, out_token, exec_mode, unit,
+               ts, value
+        FROM perf_flat
+        WHERE machine = ?
+          AND ts >= current_date - ((? + ?) || ' DAY')::INTERVAL
+          AND value > 0
+    ),
+    tagged AS (
+        SELECT *,
+            CASE
+                WHEN ts >= current_date - (? || ' DAY')::INTERVAL THEN 'recent'
+                ELSE 'baseline'
+            END AS window_tag
+        FROM base
+    ),
+    recent_with_mad AS (
+        -- DuckDB can't mix GROUP BY with a named window that references
+        -- an aggregate. Compute recent MAD in a separate pass, per series,
+        -- using a self-join on the recent window median.
+        SELECT t.machine, t.model, t.precision, t.in_token, t.out_token,
+               t.exec_mode,
+               median(abs(t.value - rm.recent_median)) AS recent_mad
+        FROM tagged t
+        JOIN (
+            SELECT machine, model, precision, in_token, out_token, exec_mode,
+                   median(value) AS recent_median
+            FROM tagged
+            WHERE window_tag = 'recent'
+            GROUP BY machine, model, precision, in_token, out_token, exec_mode
+        ) rm USING (machine, model, precision, in_token, out_token, exec_mode)
+        WHERE t.window_tag = 'recent'
+        GROUP BY t.machine, t.model, t.precision, t.in_token, t.out_token, t.exec_mode
+    ),
+    agg AS (
+        SELECT t.machine, t.model, t.precision, t.in_token, t.out_token,
+               t.exec_mode, t.unit,
+               median(t.value) FILTER (WHERE window_tag = 'recent')   AS recent_median,
+               median(t.value) FILTER (WHERE window_tag = 'baseline') AS baseline_median,
+               count(*)        FILTER (WHERE window_tag = 'recent')   AS recent_n,
+               count(*)        FILTER (WHERE window_tag = 'baseline') AS baseline_n,
+               any_value(rm.recent_mad) AS recent_mad
+        FROM tagged t
+        LEFT JOIN recent_with_mad rm
+          USING (machine, model, precision, in_token, out_token, exec_mode)
+        GROUP BY t.machine, t.model, t.precision, t.in_token, t.out_token,
+                 t.exec_mode, t.unit
+    )
+    SELECT
+        machine, model, precision, in_token, out_token, exec_mode, unit,
+        recent_median, baseline_median, recent_n, baseline_n, recent_mad,
+        CASE WHEN unit IN ('ms', 's', '%') THEN 'lower_is_better'
+             ELSE 'higher_is_better' END AS direction,
+        CASE
+            WHEN baseline_median IS NULL OR recent_median IS NULL
+              OR baseline_median = 0 THEN NULL
+            -- pct_change is signed positive = worse for both directions,
+            -- so the UI can just sort DESC to surface regressions.
+            WHEN unit IN ('ms', 's', '%')
+              THEN (recent_median - baseline_median) / baseline_median
+            ELSE -((recent_median - baseline_median) / baseline_median)
+        END AS worsening_pct,
+        CASE
+            WHEN recent_median IS NULL OR recent_median = 0 THEN NULL
+            ELSE recent_mad / recent_median
+        END AS recent_cv
+    FROM agg
+    """
+    params = [machine, recent_days, baseline_days, recent_days]
+    with _read_only(db_path) as con:
+        df = con.execute(sql, params).fetchdf()
+
+    if df.empty:
+        return df
+
+    # Status derived in Python so we can thread sidebar thresholds through
+    # without re-running SQL (viewer caches on threshold tuple).
+    def _status(row: pd.Series) -> str:
+        if (pd.isna(row["recent_median"]) or pd.isna(row["baseline_median"])
+                or row["recent_n"] < min_recent_points
+                or row["baseline_n"] < min_baseline_points):
+            return "insufficient_data"
+        return "ok"
+
+    df["status"] = df.apply(_status, axis=1)
+    return df.sort_values("worsening_pct", ascending=False,
+                          na_position="last").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
 # Geomean trend: one number per run across a stable model set
 # ---------------------------------------------------------------------------
 
