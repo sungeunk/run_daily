@@ -46,6 +46,7 @@ def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
                    short_run,
                    source_format,
                    report_file,
+                     source_path,
                    rawlog_path
             FROM runs
             {where}

@@ -10,11 +10,10 @@ read-only consumer.
 
 Tabs
 ----
-1. Excel Paste  — wide matrix for a fixed display profile, selected runs
+1. Dashboard    — latest daily_CB run review from summary/report/raw log.
+2. Excel Paste  — wide matrix for a fixed display profile, selected runs
                   become columns.
-2. Trend        — time-series of one perf point with rolling baseline band.
-3. Regressions  — MAD-based regression list for the latest run of a
-                  machine. Noisy series are flagged.
+3. Regression   — trend comparison table plus one selected series chart.
 4. Geomean      — geometric-mean trend across a bucket (machine-wide health).
 5. Noise        — per-series coefficient of variation. Useful for iGPU
                   diagnostics where fluctuation is inherent.
@@ -23,9 +22,11 @@ Tabs
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -221,8 +222,276 @@ def _sidebar() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Run artifact review helpers
+# ---------------------------------------------------------------------------
+
+def _repo_root() -> Path:
+    return _HERE.parent.parent
+
+
+def _existing_path(value: object) -> Path | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    path = Path(text)
+    candidates = [path]
+    if not path.is_absolute():
+        root = _repo_root()
+        candidates.extend([root / path, root / "output" / path.name])
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _read_json_file(path: Path | None) -> dict:
+    if path is None:
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _read_text_file(path: Path | None, max_chars: int = 120_000) -> str:
+    if path is None:
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+    except OSError:
+        return ""
+
+
+# Artifact resolvers: `source_path` is the authoritative anchor (always
+# absolute, written by both loaders). Siblings are derived from its stem.
+# `report_file` stores the source filename, NOT a `.report` path — do not
+# feed it through `_existing_path` expecting a text report.
+_SOURCE_SUFFIXES = (".summary.json", ".pickle")
+
+
+def _source_path_for_run(run: pd.Series) -> Path | None:
+    return _existing_path(run.get("source_path"))
+
+
+def _source_stem(source_path: Path) -> str | None:
+    for suffix in _SOURCE_SUFFIXES:
+        if source_path.name.endswith(suffix):
+            return source_path.name.removesuffix(suffix)
+    return None
+
+
+def _sibling(run: pd.Series, suffix: str) -> Path | None:
+    source_path = _source_path_for_run(run)
+    if source_path is None:
+        return None
+    stem = _source_stem(source_path)
+    if stem is None:
+        return None
+    candidate = source_path.with_name(stem + suffix)
+    return candidate if candidate.exists() else None
+
+
+def _summary_path_for_run(run: pd.Series) -> Path | None:
+    """Return the `.summary.json` path, which exists for new-format runs and
+    occasionally alongside old-format pickles."""
+    if run.get("source_format") == "new":
+        return _source_path_for_run(run)
+    return _sibling(run, ".summary.json")
+
+
+def _report_path_for_run(run: pd.Series) -> Path | None:
+    """Return the `.report` text path. Same stem for both formats."""
+    return _sibling(run, ".report")
+
+
+def _pytest_json_path_for_run(run: pd.Series) -> Path | None:
+    """Return the sibling `.pytest.json` (raw pytest-json-report output)."""
+    return _sibling(run, ".pytest.json")
+
+
+def _rawlog_path_for_run(run: pd.Series) -> Path | None:
+    """Return the `.raw` pytest stdout/stderr text captured at run time."""
+    return _existing_path(run.get("rawlog_path"))
+
+
+def _metric_from_user_properties(test: dict, key: str) -> object | None:
+    """Look up ``key`` in the latest ``metrics`` user_property.
+
+    pytest-json-report serialises ``user_properties`` as either a list of
+    ``{name: value}`` dicts (>=1.5) or ``[name, value]`` pairs. Mirrors
+    ``daily/report/builder.py:_extract_metrics`` — last metrics entry wins.
+    """
+    for prop in reversed(test.get("user_properties", []) or []):
+        metrics: object | None = None
+        if isinstance(prop, dict):
+            metrics = prop.get("metrics")
+        elif isinstance(prop, (list, tuple)) and len(prop) == 2 and prop[0] == "metrics":
+            metrics = prop[1]
+        if isinstance(metrics, dict):
+            if key in metrics:
+                return metrics[key]
+            return None
+    fallback = test.get("metrics")
+    if isinstance(fallback, dict):
+        return fallback.get(key)
+    return None
+
+
+def _shorten(text: object, limit: int = 500) -> str:
+    if text is None:
+        return ""
+    clean = " ".join(str(text).split())
+    return clean if len(clean) <= limit else clean[:limit - 3] + "..."
+
+
+def _classify_failure(text: str) -> str:
+    lowered = text.lower()
+    if "no such file or directory" in lowered or "could not open the file" in lowered:
+        if "model" in lowered or ".xml" in lowered:
+            return "missing model/artifact path"
+        if "openvino.genai" in lowered or "benchmark.py" in lowered:
+            return "missing tool/script path"
+        return "missing file path"
+    if "modulenotfounderror" in lowered:
+        return "missing python package"
+    if "spawn failed" in lowered:
+        return "missing executable"
+    if "attributeerror" in lowered and "none" in lowered:
+        return "invalid cached/model state"
+    if "returncode" in lowered:
+        return "command returned non-zero"
+    return "test failure"
+
+
+def _extract_failures(summary: dict, pytest_log: dict) -> pd.DataFrame:
+    tests = pytest_log.get("tests") or summary.get("tests") or []
+    rows = []
+    for test in tests:
+        outcome = test.get("outcome")
+        if outcome not in {"failed", "error"}:
+            continue
+        call = test.get("call") or {}
+        crash = call.get("crash") or {}
+        message = (crash.get("message") or test.get("failure") or
+                   test.get("longrepr") or _metric_from_user_properties(test, "output") or "")
+        command = _metric_from_user_properties(test, "cmd")
+        returncode = _metric_from_user_properties(test, "returncode")
+        combined = f"{message} {command or ''}"
+        rows.append({
+            "test": test.get("nodeid", ""),
+            "outcome": outcome,
+            "cause": _classify_failure(combined),
+            "returncode": returncode,
+            "message": _shorten(message),
+            "command": _shorten(command, 220),
+        })
+    return pd.DataFrame(rows)
+
+
+def _latest_daily_run(runs: pd.DataFrame) -> pd.Series | None:
+    if runs.empty:
+        return None
+    text = (runs["purpose"].fillna("") + " " + runs["description"].fillna(""))
+    mask = text.str.contains(DEFAULT_RUN_FILTER, case=False, regex=False)
+    if not mask.any():
+        mask = text.str.contains("daily_CB", case=False, regex=False)
+    view = runs[mask]
+    if view.empty:
+        return None
+    return view.iloc[0]
+
+
+# ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
+
+def _tab_dashboard(cfg: dict) -> None:
+    st.subheader("Dashboard — latest daily_CB review")
+    runs = cached_runs(cfg["machine"], cfg["v"])
+    run = _latest_daily_run(runs)
+    if run is None:
+        st.info(f"No daily_CB run found for {cfg['machine']}.")
+        return
+
+    summary_path = _summary_path_for_run(run)
+    report_path = _report_path_for_run(run)
+    pytest_json_path = _pytest_json_path_for_run(run)
+    rawlog_path = _rawlog_path_for_run(run)
+    summary = _read_json_file(summary_path)
+    pytest_log = _read_json_file(pytest_json_path)
+    report_text = _read_text_file(report_path)
+    rawlog_text = _read_text_file(rawlog_path)
+    totals = summary.get("totals") or pytest_log.get("summary") or {}
+    failures = _extract_failures(summary, pytest_log)
+
+    total = int(totals.get("total") or 0)
+    passed = int(totals.get("passed") or 0)
+    failed = int(totals.get("failed") or 0)
+    errors = int(totals.get("error") or totals.get("errors") or 0)
+    skipped = int(totals.get("skipped") or 0)
+    duration = summary.get("duration_sec") or pytest_log.get("duration")
+
+    st.markdown(
+        f"**{run['stamp']}** · {run['ww'] or ''} · "
+        f"{run['ov_version'] or ''} · {run['purpose'] or run['description'] or ''}"
+    )
+    cols = st.columns(6)
+    cols[0].metric("Total", total)
+    cols[1].metric("Passed", passed)
+    cols[2].metric("Failed", failed)
+    cols[3].metric("Error", errors)
+    cols[4].metric("Skipped", skipped)
+    cols[5].metric("Duration", f"{float(duration):.0f}s" if duration else "-")
+
+    artifacts = {
+        "summary":     str(summary_path)     if summary_path     else "missing",
+        "report":      str(report_path)      if report_path      else "missing",
+        "pytest_json": str(pytest_json_path) if pytest_json_path else "missing",
+        "raw_log":     str(rawlog_path)      if rawlog_path      else "missing",
+    }
+    missing = [name for name, path in artifacts.items() if path == "missing"]
+    if failed or errors:
+        st.error(f"Run failed: {failed} failed, {errors} error.")
+    elif total and passed == total:
+        st.success("Run completed successfully.")
+    else:
+        st.warning("Run status is incomplete or summary data is missing.")
+    if missing:
+        st.warning("Missing artifacts: " + ", ".join(missing))
+
+    if failures.empty:
+        st.markdown("### Failure analysis")
+        st.caption("No failed/error tests found in summary or raw log.")
+    else:
+        cause_counts = Counter(failures["cause"])
+        st.markdown("### Failure analysis")
+        st.dataframe(
+            pd.DataFrame(cause_counts.items(), columns=["cause", "count"])
+              .sort_values("count", ascending=False),
+            width="stretch",
+            hide_index=True,
+        )
+        st.markdown("### Failed tests")
+        st.dataframe(failures, width="stretch", hide_index=True)
+
+    with st.expander("Run artifacts"):
+        st.json(artifacts)
+    if report_text:
+        with st.expander("Report"):
+            st.code(report_text, language="text")
+    if pytest_log:
+        with st.expander("pytest-json-report"):
+            st.json({
+                "exitcode": pytest_log.get("exitcode"),
+                "summary": pytest_log.get("summary"),
+                "failed_tests": failures.to_dict(orient="records"),
+            })
+    if rawlog_text:
+        with st.expander("Raw pytest log"):
+            st.code(rawlog_text, language="text")
+
 
 def _tab_excel(cfg: dict) -> None:
     st.subheader("Excel Paste")
@@ -615,14 +884,16 @@ def main() -> None:
 
     cfg = _sidebar()
 
-    tabs = st.tabs(["Excel", "Regression", "Geomean", "Noise"])
+    tabs = st.tabs(["Dashboard", "Excel", "Regression", "Geomean", "Noise"])
     with tabs[0]:
-        _tab_excel(cfg)
+        _tab_dashboard(cfg)
     with tabs[1]:
-        _tab_regression(cfg)
+        _tab_excel(cfg)
     with tabs[2]:
-        _tab_geomean(cfg)
+        _tab_regression(cfg)
     with tabs[3]:
+        _tab_geomean(cfg)
+    with tabs[4]:
         _tab_noise(cfg)
 
 
