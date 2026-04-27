@@ -240,7 +240,7 @@ def _raw_log_candidate(report_path: Path) -> Path | None:
     return candidate if candidate.exists() else None
 
 
-def load_report(report_path: Path) -> RunRecord:
+def load_report(report_path: Path, *, machine_override: str | None = None) -> RunRecord:
     """Parse an old ``.report`` + sibling ``.pickle`` into a RunRecord.
 
     ``report_path`` may be either the ``.report`` or the ``.pickle`` — we
@@ -263,7 +263,7 @@ def load_report(report_path: Path) -> RunRecord:
     if ts is None:
         ts = datetime.fromtimestamp(pickle_path.stat().st_mtime)
 
-    machine = pickle_path.parent.name  # e.g. /var/www/html/daily/<MACHINE>/...
+    machine = machine_override or pickle_path.parent.name  # e.g. /var/www/html/daily/<MACHINE>/...
 
     purpose, r_build, r_sha = _parse_report_text(text_report)
 

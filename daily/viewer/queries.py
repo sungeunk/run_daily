@@ -271,68 +271,6 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
                            ).fetchdf()
 
 
-def regressions_for_run(db_path: Path, run_id: str,
-                        z_threshold: float = 3.0,
-                        pct_threshold: float = 0.05,
-                        noisy_cv: float = 0.10) -> pd.DataFrame:
-    """Return regressed perf points for a specific run.
-
-    Direction handling: for 'ms' / 's' units, *up* is worse. For 'FPS' /
-    'tps', *down* is worse. The SQL emits a ``direction`` column so the UI
-    can colour accordingly.
-
-    A row is flagged as regression when either:
-      - |z_score| >= z_threshold AND sign matches a 'worse' move, OR
-      - |pct_diff| >= pct_threshold AND sign matches a 'worse' move.
-    Both conditions must pass when ``win_mad > 0``; if the series is
-    constant (mad=0) we fall back to pct only.
-    """
-    with _read_only(db_path) as con:
-        return con.execute("""
-            WITH t AS (
-                SELECT *,
-                    CASE
-                        WHEN unit IN ('ms', 's', '%') THEN 'lower_is_better'
-                        ELSE 'higher_is_better'
-                    END AS direction
-                FROM perf_stats
-                WHERE run_id = ?
-            )
-            SELECT
-                machine, model, precision, in_token, out_token, exec_mode,
-                value, unit, direction,
-                win_median, win_sigma, win_n,
-                z_score, pct_diff, cv,
-                (cv IS NOT NULL AND cv >= ?) AS is_noisy,
-                CASE
-                    WHEN direction = 'lower_is_better' AND
-                         ((z_score IS NOT NULL AND z_score >= ?)
-                           OR (pct_diff IS NOT NULL AND pct_diff >= ?))
-                      THEN 'regression'
-                    WHEN direction = 'higher_is_better' AND
-                         ((z_score IS NOT NULL AND z_score <= -?)
-                           OR (pct_diff IS NOT NULL AND pct_diff <= -?))
-                      THEN 'regression'
-                    WHEN direction = 'lower_is_better' AND
-                         z_score IS NOT NULL AND z_score <= -?
-                      THEN 'improvement'
-                    WHEN direction = 'higher_is_better' AND
-                         z_score IS NOT NULL AND z_score >= ?
-                      THEN 'improvement'
-                    ELSE 'ok'
-                END AS status
-            FROM t
-            ORDER BY
-                CASE
-                    WHEN direction = 'lower_is_better' THEN -COALESCE(z_score, 0)
-                    ELSE COALESCE(z_score, 0)
-                END DESC
-        """, [run_id, noisy_cv,
-              z_threshold, pct_threshold,
-              z_threshold, pct_threshold,
-              z_threshold, z_threshold]).fetchdf()
-
-
 # ---------------------------------------------------------------------------
 # Noise diagnostics: per-series CV across recent window
 # ---------------------------------------------------------------------------

@@ -205,7 +205,11 @@ def _sidebar() -> dict:
     machine = st.sidebar.selectbox("Machine", machines)
 
     profile_options = cached_profiles(v) or ["default"]
-    profile = st.sidebar.selectbox("Display profile", profile_options)
+    if len(profile_options) == 1:
+        profile = profile_options[0]
+        st.sidebar.caption(f"Display profile: `{profile}`")
+    else:
+        profile = st.sidebar.selectbox("Display profile", profile_options)
 
     st.sidebar.divider()
     st.sidebar.subheader("Regression thresholds")

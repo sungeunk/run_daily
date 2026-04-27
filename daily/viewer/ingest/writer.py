@@ -40,6 +40,13 @@ def already_ingested(con: duckdb.DuckDBPyConnection, file_hash: str) -> bool:
     return row is not None
 
 
+def profile_exists(con: duckdb.DuckDBPyConnection, profile: str) -> bool:
+    row = con.execute(
+        "SELECT 1 FROM display_rows WHERE profile = ? LIMIT 1", [profile]
+    ).fetchone()
+    return row is not None
+
+
 def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
     """Upsert a single RunRecord (runs + system_devices + perf) transactionally."""
     con.begin()
@@ -159,3 +166,10 @@ def load_display_profile(con: duckdb.DuckDBPyConnection, yaml_path: Path) -> int
         raise
 
     return len(rows)
+
+
+def profile_name_from_yaml(yaml_path: Path) -> str:
+    import yaml
+
+    data = yaml.safe_load(Path(yaml_path).read_text(encoding="utf-8"))
+    return str(data["profile"])

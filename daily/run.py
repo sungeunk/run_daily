@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import math
 import os
 import re
 import subprocess
@@ -31,6 +32,11 @@ from pathlib import Path
 
 DAILY_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DAILY_DIR.parent
+VIEWER_DB = DAILY_DIR / 'viewer' / 'bench.duckdb'
+REGRESSION_PCT_THRESHOLD = 0.05
+REGRESSION_Z_THRESHOLD = 3.0
+REGRESSION_NOISY_CV_THRESHOLD = 0.10
+REGRESSION_PURPOSE_FILTER = 'daily_CB timer'
 
 
 def _default_model_dir() -> str:
@@ -144,6 +150,97 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
+def _format_regression_alerts(frame) -> str:
+    if frame is None or frame.empty:
+        return '[ Regression alerts ]\nNo regression history available.'
+
+    valid = frame[frame['status'] == 'ok'].copy()
+    if valid.empty:
+        return '[ Regression alerts ]\nInsufficient historical data for regression analysis.'
+
+    valid['is_noisy'] = valid['recent_cv'].fillna(0) >= REGRESSION_NOISY_CV_THRESHOLD
+    alerts = valid[
+        (valid['worsening_pct'].fillna(0) >= REGRESSION_PCT_THRESHOLD)
+        | (valid['worsening_z'].fillna(0) >= REGRESSION_Z_THRESHOLD)
+    ].copy()
+    if alerts.empty:
+        return '[ Regression alerts ]\nNo series exceeded regression thresholds.'
+
+    alerts['severity'] = alerts[
+        ['worsening_pct', 'worsening_z']
+    ].fillna(0).max(axis=1)
+    alerts = alerts.sort_values('severity', ascending=False).head(10)
+
+    lines = [
+        '[ Regression alerts ]',
+        (f'Thresholds: worsening >= {REGRESSION_PCT_THRESHOLD * 100:.1f}% '
+         f'or z >= {REGRESSION_Z_THRESHOLD:.1f}; noisy CV >= '
+         f'{REGRESSION_NOISY_CV_THRESHOLD * 100:.1f}%'),
+    ]
+    for _, row in alerts.iterrows():
+        noisy = ' noisy' if row['is_noisy'] else ''
+        try:
+            z_value = float(row['worsening_z'])
+            if math.isnan(z_value):
+                z_value = 0.0
+        except (TypeError, ValueError):
+            z_value = 0.0
+        lines.append(
+            '- {model} | {precision} | in={in_token} out={out_token} | '
+            '{exec_mode} [{unit}]: {pct:+.2f}%, z={z:+.2f}, '
+            'recent={recent:.3f}, baseline={baseline:.3f}{noisy}'.format(
+                model=row['model'],
+                precision=row['precision'],
+                in_token=int(row['in_token']),
+                out_token=int(row['out_token']),
+                exec_mode=row['exec_mode'],
+                unit=row['unit'] or '',
+                pct=float(row['worsening_pct']) * 100,
+                z=z_value,
+                recent=float(row['recent_median']),
+                baseline=float(row['baseline_median']),
+                noisy=noisy,
+            )
+        )
+    return '\n'.join(lines)
+
+
+def _append_regression_alerts(text_report: Path, summary_json: Path,
+                              machine: str) -> bool:
+    """Best-effort append of trend regression alerts to the text report."""
+    if not VIEWER_DB.exists():
+        print(f'[run.py] regression alerts skipped: DB not found at {VIEWER_DB}')
+        return False
+    try:
+        from viewer.ingest.loader_new import load_summary
+        from viewer.ingest.writer import connect, ensure_schema, upsert_run
+        from viewer import queries
+
+        rec = load_summary(summary_json)
+        with connect(VIEWER_DB) as con:
+            ensure_schema(con)
+            upsert_run(con, rec)
+        frame = queries.trend_regressions(
+            VIEWER_DB,
+            machine,
+            recent_days=7,
+            baseline_days=21,
+            min_recent_points=5,
+            min_baseline_points=7,
+            purpose_filter=REGRESSION_PURPOSE_FILTER,
+        )
+        section = _format_regression_alerts(frame)
+        with open(text_report, 'a', encoding='utf-8') as report:
+            report.write('\n\n')
+            report.write(section)
+            report.write('\n')
+        print(f'[run.py] regression alerts appended to {text_report}')
+        return True
+    except Exception as exc:  # noqa: BLE001 — delivery must not fail the run
+        print(f'[run.py] regression alerts skipped: {exc}', file=sys.stderr)
+        return False
+
+
 def main() -> int:
     args, passthrough = _parse_args()
 
@@ -226,6 +323,7 @@ def main() -> int:
         scp_backup(to_upload)
 
     if args.mail:
+        _append_regression_alerts(text_report, summary_json, extra_meta['machine'])
         suffix = mail_title_suffix(summary)
         send_mail(text_report, args.mail, args.description,
                   suffix_title=suffix, now_stamp=stamp)

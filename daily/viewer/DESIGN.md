@@ -97,7 +97,7 @@ Single CLI; `--root` scans, `--input` handles one file.
 
 - **Auto-detect (`_classify`):** `*.summary.json` → new; `*.pickle` (with sibling `.report`) → old; `*.report` alone → old if sibling pickle exists, else skip.
 - **Progress:** Inline progress bar. Failures collected and reported at end; not fatal.
-- **Profile load:** Each run (re)loads `profiles/default.yaml` into `display_rows` unless `--skip-profile`.
+- **Profile load:** The default profile is additive: each ingest CLI invocation loads `profiles/default.yaml` only if that profile is missing. Explicit `--profile` or `--force` refreshes the named profile unless `--skip-profile` is set.
 
 ### `daily/viewer/queries.py`
 DuckDB helpers used by `app.py`. All return pandas DataFrames.
@@ -111,7 +111,6 @@ DuckDB helpers used by `app.py`. All return pandas DataFrames.
 | `extra_rows` | Perf rows in selected runs NOT covered by the display profile — QA aid |
 | `series_history` | Time series of one `(machine, model, precision, in_token, out_token, exec_mode)`, with rolling median / MAD recomputed from purpose-filtered `perf_flat` rows. Used for the trend plot in the Regression tab. |
 | `trend_regressions` | **NEW** — per-series comparison: median of recent window vs median of baseline window. `worsening_pct` is sign-normalised (positive = worse regardless of ms vs FPS). This is what the Regression tab drives off. |
-| `regressions_for_run` | **OLD** point-vs-band flags. Kept for possible mail-alert reuse but not wired into the UI any more. |
 | `noise_summary` | Per-series CV over a window |
 | `geomean_trend` | `exp(avg(ln(value)))` per run, filtered by `exec_mode` / `in_bucket` / `out_bucket` / `excluded_models` |
 
@@ -120,7 +119,7 @@ Streamlit entry. 5 tabs.
 
 | Tab | Purpose |
 |---|---|
-| Dashboard | First tab. Selects the latest run whose purpose/description matches `DEFAULT_RUN_FILTER` (fallback: `daily_CB`), then reviews summary / `.report` / `.pytest.json` / `.raw` artifacts to show whether tests actually ran, pass/fail totals, grouped failure causes, and per-test raw-log messages. Artifact siblings are derived from `source_path` stem (`.summary.json` / `.pickle` suffix stripped) — `report_file` is source-identity only, never fed to text/JSON readers. |
+| Dashboard | First tab. Selects the latest run whose purpose/description matches `DEFAULT_RUN_FILTER` (fallback: `daily_CB`), then reviews summary / `.report` / `.pytest.json` / `.raw` artifacts to show whether tests actually ran, pass/fail totals, grouped failure causes, per-test pytest-json/summary messages, and the raw pytest log text. Artifact siblings are derived from `source_path` stem (`.summary.json` / `.pickle` suffix stripped) — `report_file` is source-identity only, never fed to text/JSON readers. |
 | Excel | Select runs → wide matrix (profile rows × run stamps) + tab-separated paste block + "extra rows" expander |
 | Regression | MERGED tab (was separate Trend + Regressions). Shows a ranked table of series by worsening %, plus a one-series-at-a-time trend plot for the selected row. Baseline median + recent median rendered as Scatter traces with legend entries; rolling ±2σ band drawn with a visible fill (rgba 0.28) so it reads on bright monitors. |
 | Geomean | `exec_mode × in_bucket × out_bucket` geomean trend + band + latest-point alert (user-requested) |
@@ -170,12 +169,14 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
   - Single-point robust z-score — user feedback: they want to see whether the recent BLOCK is drifting, not whether today is an outlier. Single-point tests flip on any blip and are useless when data is noisy or occasionally corrupted.
   - mean/std z-score — too sensitive to iGPU outliers.
 - **Why:** iGPU runs are noisy and individual data points are sometimes contaminated. Comparing medians of two time windows (default: last 7d vs 21d prior) washes both out while still catching slow drift. Matches common benchmark tools (ASV / pytest-benchmark) which emphasize median-like robust summaries and percentage thresholds rather than reacting to a single point.
-- **Defaults:** `recent_days=7`, `baseline_days=21`, `min_recent_points=5`, `min_baseline_points=7`, `pct_threshold_from_sidebar=0.05`, `z_threshold_from_sidebar=3.0`, `noisy_cv_threshold=0.10`.
-  > Values mirror [`queries.trend_regressions`](queries.py) signature. Single source of truth.
+- **Window defaults:** `recent_days=7`, `baseline_days=21`, `min_recent_points=5`, `min_baseline_points=7`.
+  > These mirror [`queries.trend_regressions`](queries.py) signature. Keep the function signature as the single source of truth for window sizes and minimum sample counts.
+- **UI threshold defaults:** `pct_threshold_from_sidebar=0.05`, `z_threshold_from_sidebar=3.0`, `noisy_cv_threshold=0.10`.
+  > These are controlled by the Streamlit sidebar, not by `trend_regressions`.
 - **Direction normalisation:** `worsening_pct` is signed so positive always means "worse" — ms/s/%: `+pct` when recent>baseline; FPS/tps: `+pct` when recent<baseline. `worsening_z` uses baseline MAD (`sigma ≈ 1.4826 * MAD`) so recent noise does not hide or inflate the comparison. UI sorts by threshold-normalised severity = `max(worsening_pct / pct_threshold, worsening_z / z_threshold)`.
 - **Purpose filter:** regression summary and selected-series history are filtered to purpose containing `daily_CB timer` so personal PR runs do not pollute baseline/recent windows. The chart rolling band is recomputed from filtered `perf_flat` rows, not from `perf_stats`, because `perf_stats` is an all-purpose view.
 - **UI:** single merged "Regression" tab. Ranked table (worst first by threshold-normalised severity) + one trend chart per selected row. See `app.py:_tab_regression`.
-- **Supersedes:** earlier rolling z-score approach (`queries.regressions_for_run`) is still defined but unused by the UI.
+- **Supersedes:** the earlier rolling z-score point-vs-band helper was removed; `trend_regressions` is the single regression signal used by UI and mail alerts.
 
 ### One series per trend chart
 - **Choice:** enforce single-series plot in the Regression tab.
@@ -265,28 +266,28 @@ All three are OR'd. `TRY_CAST` returns `NULL` for non-integer strings, which cle
 
 ```bash
 # Ingest all
-cd daily && python -m viewer.ingest.cli --root /var/www/html/daily --db viewer/bench.duckdb
+cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db viewer/bench.duckdb
 
 # Ingest one (new format)
-cd daily && python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
+cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
 
 # Ingest one (old format)
-cd daily && python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.<ver>.pickle
+cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.<ver>.pickle
 
 # Force re-ingest
 # (append --force to any of the above)
 
 # Reload profile only
-python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
+conda run -n daily python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
 
 # Launch viewer
-cd daily && streamlit run viewer/app.py -- --db viewer/bench.duckdb
+cd daily && conda run -n daily streamlit run viewer/app.py -- --db viewer/bench.duckdb
 
 # Alternative DB via env var
-DAILY_DB=/path/to/bench.duckdb streamlit run viewer/app.py
+DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 ```
 
-**Python env:** use `/home/sungeunk/miniforge3/envs/daily/bin/python` (conda `daily` env). System `python3` doesn't have duckdb/streamlit.
+**Python env:** use conda env `daily` (`/home/sungeunk/miniforge3/envs/daily/bin/python`). System `python3` doesn't have duckdb/streamlit.
 
 ---
 
@@ -311,10 +312,8 @@ DAILY_DB=/path/to/bench.duckdb streamlit run viewer/app.py
 
 ## Known gaps & future work
 
-- **No unit tests.** All modules were smoke-tested against real data. If the codebase grows, pytest on `_common.py` (stamp/hash parsers), `loader_new` / `loader_old` (fixture files), and `queries` (synthetic DB) would be worth it.
-- **`perf_stats` still uses correlated subqueries (O(n·m) conceptually).** ~0.1s at current scale (27k rows, then 6006 runs on full tree). If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest.
-- **Email regression alerts from `run.py`.** Out of scope for this change. Hook would be: after `run.py`'s `send_mail`, run `queries.trend_regressions` for the latest machine and append a section to the mail body.
-- **`regressions_for_run` is defined but unused.** Might still be useful for mail alerts or a per-run QA view. If it hasn't been touched by 2026-Q3, delete it.
-- **Profile CLI currently always loads `default.yaml` on every ingest unless `--skip-profile`.** Make `--profile` additive by default — skip-if-exists semantics, or always upsert only the named profile without touching others.
-- **Machine name for pickles ingested from non-canonical locations.** `loader_old.py` derives machine from parent-dir name. If a pickle sits in a dir not named after the machine, the value is wrong (seen with `res/` fixture → `machine='res'`). Acceptable for real `/var/www/html/daily/<MACHINE>/` layout. If we need to rescue fixtures, add a `--machine` override to `cli.py`.
-- **Display profile dropdown shows only `default` today.** Only one YAML exists. Consider hiding the dropdown until a second profile lands, or pre-ship an iGPU-focused profile to motivate the machinery.
+- **Broaden unit-test coverage.** Focused pytest coverage now exists for viewer helpers/loaders/queries/mail-alert formatting. Future work: add more edge-case fixtures for old pickle variants and larger synthetic DuckDB histories.
+- **`perf_stats` still uses correlated subqueries (O(n·m) conceptually).** Measured ~0.57s for 322k `perf_stats` rows on 2026-04-27, so no cached table is needed yet. If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest.
+- **Email regression alerts from `run.py`.** Implemented as a best-effort report section before mail delivery. Future work: tune thresholds or add a dedicated HTML table if recipients want richer formatting.
+- **Machine name for pickles ingested from non-canonical locations.** `loader_old.py` derives machine from parent-dir name by default. Use `viewer.ingest.cli --machine <name>` when rescuing fixture or archive files stored outside `/var/www/html/daily/<MACHINE>/`.
+- **Additional display profiles.** The sidebar hides the profile dropdown when only one profile exists. Add an iGPU-focused profile when there is a real second display layout to choose from.

@@ -27,7 +27,8 @@ from typing import Iterable
 from .loader_new import load_summary
 from .loader_old import load_report
 from .writer import (already_ingested, connect, ensure_schema,
-                     load_display_profile, upsert_run)
+                     load_display_profile, profile_exists,
+                     profile_name_from_yaml, upsert_run)
 
 log = logging.getLogger("ingest")
 
@@ -82,7 +83,9 @@ def _progress(done: int, total: int, extra: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 def ingest_files(files: list[tuple[Path, str]], db_path: Path,
-                 *, force: bool = False) -> tuple[int, int, list[tuple[Path, str]]]:
+                 *, force: bool = False,
+                 machine_override: str | None = None
+                 ) -> tuple[int, int, list[tuple[Path, str]]]:
     """Ingest a list of (path, format) pairs. Returns (added, skipped, failures)."""
     con = connect(db_path)
     ensure_schema(con)
@@ -95,7 +98,7 @@ def ingest_files(files: list[tuple[Path, str]], db_path: Path,
             if fmt == "new":
                 rec = load_summary(path)
             elif fmt == "old":
-                rec = load_report(path)
+                rec = load_report(path, machine_override=machine_override)
             else:
                 raise ValueError(f"unknown format {fmt!r}")
 
@@ -141,25 +144,38 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--format", choices=("auto", "old", "new"), default="auto")
     ap.add_argument("--force", action="store_true",
                     help="Re-ingest files even if the hash matches.")
+    ap.add_argument("--machine", default=None,
+                    help="Override machine name for old-format pickle/report inputs.")
     ap.add_argument("--profile", type=Path, default=DEFAULT_PROFILE,
                     help="Display profile YAML to (re-)load into display_rows.")
     ap.add_argument("--skip-profile", action="store_true",
                     help="Don't touch display_rows.")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
+    profile_was_explicit = any(
+        arg == "--profile" or arg.startswith("--profile=")
+        for arg in (argv or sys.argv[1:])
+    )
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
-    # Profile load happens once per invocation.
+    # Profile load happens once per invocation. The default profile is
+    # additive: load it only if it is missing. Explicit --profile or --force
+    # requests a refresh of that profile.
     if not args.skip_profile and args.profile and args.profile.exists():
         con = connect(args.db)
         ensure_schema(con)
-        n = load_display_profile(con, args.profile)
+        profile_name = profile_name_from_yaml(args.profile)
+        should_load = args.force or profile_was_explicit or not profile_exists(con, profile_name)
+        n = load_display_profile(con, args.profile) if should_load else 0
         con.close()
-        log.info("Loaded %d display rows from %s", n, args.profile)
+        if should_load:
+            log.info("Loaded %d display rows from %s", n, args.profile)
+        else:
+            log.info("Profile %s already exists; use --profile or --force to reload", profile_name)
 
     if args.input:
         fmt = args.format
@@ -176,7 +192,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     t0 = time.time()
-    added, skipped, failures = ingest_files(files, args.db, force=args.force)
+    added, skipped, failures = ingest_files(
+        files, args.db, force=args.force, machine_override=args.machine,
+    )
     elapsed = time.time() - t0
 
     print(f"[ingest] added={added} skipped={skipped} "
