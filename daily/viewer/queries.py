@@ -439,7 +439,7 @@ def geomean_trend(db_path: Path, machine: str,
                   *, exec_mode: str = "2nd",
                   in_bucket: str | None = None,
                   out_bucket: str | None = None,
-                  exclude_models: tuple[str, ...] = ("qwen_usage",),
+                  exclude_models: tuple[str, ...] = (),
                   days: int = 90,
                   purpose_filter: str | None = None) -> pd.DataFrame:
     """Geomean of ``value`` per run for a bucket of perf rows.

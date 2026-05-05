@@ -123,39 +123,11 @@ def _sd_dgfx_rows(m: dict) -> Iterable[dict]:
                    value=float(sec), unit='s')
 
 
-def _qwen_usage_rows(m: dict) -> Iterable[dict]:
-    # Disabled on current rigs; still define the mapping so the row is ready
-    # when the binary comes back. Emits 1st/2nd inference plus memory.
-    for d in m.get('data', []) or []:
-        perf = d.get('perf') or []
-        in_cat = _classify(d.get('in_token'), IN_TOKEN_THRESHOLD)
-        out_tok = int(d.get('out_token') or 0)
-        if len(perf) > 0 and perf[0] is not None:
-            yield dict(model='qwen_usage', precision='INT8', in_cat=in_cat,
-                       out_cat=out_tok, exec_mode='1st',
-                       value=float(perf[0]), unit='ms')
-        if len(perf) > 1 and perf[1] is not None:
-            yield dict(model='qwen_usage', precision='INT8', in_cat=in_cat,
-                       out_cat=out_tok, exec_mode='2nd',
-                       value=float(perf[1]), unit='ms')
-
-
-def _whisper_base_rows(m: dict) -> Iterable[dict]:
-    for d in m.get('data', []) or []:
-        perf = d.get('perf') or []
-        if perf:
-            yield dict(model=m.get('model', ''), precision=m.get('precision', ''),
-                       in_cat=0, out_cat=0, exec_mode='tps',
-                       value=float(perf[0]), unit='tps')
-
-
 _TYPE_HANDLERS = {
     'llm_benchmark':  _llm_benchmark_rows,
     'benchmark_app':  _benchmark_app_rows,
     'sd_genai':       _sd_genai_rows,
     'sd_dgfx':        _sd_dgfx_rows,
-    'qwen_usage':     _qwen_usage_rows,
-    'whisper_base':   _whisper_base_rows,
     # chat_sample intentionally omitted — no perf data.
 }
 

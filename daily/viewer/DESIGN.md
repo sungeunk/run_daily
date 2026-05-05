@@ -65,7 +65,6 @@ Exports: `parse_stamp_from_name`, `workweek_of`, `split_ov_version`, `file_hash`
 `summary.json` → `RunRecord`. Raw token counts preserved.
 
 - **Test-type handlers:** `llm_benchmark`, `benchmark_app`, `sd_genai`, `sd_dgfx`.
-- **Dropped handlers:** `qwen_usage`, `whisper_base` — see [Dropped qwen_usage and Whisper base](#dropped-qwen_usage-and-whisper-base).
 - **Meta handling:** `summary.meta` is optional — falls back to filename stamp + parent-dir machine + `generated_at` ts. Early summary files (before meta landed) still work.
 
 ### `daily/viewer/ingest/loader_old.py`
@@ -82,7 +81,7 @@ Legacy `.pickle` + `.report` → `RunRecord`.
 | `TestStableDiffusionGenai` | `_sd_perf_sec` (pickle already seconds) |
 | `TestStableDiffusionDGfxE2eAi` | `_sd_perf_sec` (pickle already seconds) |
 
-- **Dropped handlers:** `TestMeasuredUsageCpp`, `TestWhisperBase` — see [Dropped qwen_usage and Whisper base](#dropped-qwen_usage-and-whisper-base).
+- **Dropped handlers:** `TestWhisperBase` is legacy; whisper-large-v3 is in GenAI pipeline.
 - **Version parsing:** OV version pulled from filename `daily.<stamp>.<ov_version>.pickle` AND from `.report` text (`Purpose` + `OpenVINO` line). Report text is preferred when present.
 - **SD unit normalization:** All SD pipelines land in the DB as `unit='s'` regardless of source class. Legacy ms pickles are divided by 1000 at load time. This removes the 1000× ambiguity that made SD-XL pipeline look like milliseconds in the viewer.
 
@@ -193,11 +192,6 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 - **Choice:** attach unit suffix to table cells, plot headings, and captions.
 - **Why:** raw numbers without units caused the SD-XL confusion above. User should never have to remember which test type is in which unit.
 - **Implementation:** regression table builds display-only `recent` / `baseline` columns like `8.060 s`; raw numeric columns hidden via `column_config` but retained for plot/caption code paths.
-
-### Dropped qwen_usage and Whisper base
-- **User request:** remove both entirely.
-- **Action:** removed handlers from `loader_new.py` + `loader_old.py`, deleted existing rows from DB.
-- **Note:** `whisper-large-v3` (NOT Whisper base) is a different model in the GenAI pipeline and is kept.
 
 ### Geomean alerting
 - **User request:** C — user explicitly wants geomean-level trend alerts (not just per-series).

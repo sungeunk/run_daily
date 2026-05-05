@@ -67,7 +67,6 @@ Exports: `parse_stamp_from_name`, `workweek_of`, `split_ov_version`, `file_hash`
 `summary.json` -> `RunRecord`. Raw token count를 보존합니다.
 
 - **Test-type handlers:** `llm_benchmark`, `benchmark_app`, `sd_genai`, `sd_dgfx`.
-- **Dropped handlers:** `qwen_usage`, `whisper_base` — [Dropped qwen_usage and Whisper base](#dropped-qwen_usage-and-whisper-base)를 참고하세요.
 - **Meta handling:** `summary.meta`는 optional입니다. 없으면 filename stamp + parent-dir machine + `generated_at` ts로 fallback합니다. meta가 추가되기 전의 초기 summary 파일도 동작합니다.
 
 ### `daily/viewer/ingest/loader_old.py`
@@ -84,7 +83,7 @@ legacy `.pickle` + `.report` -> `RunRecord`.
 | `TestStableDiffusionGenai` | `_sd_perf_sec` (pickle 값이 이미 seconds) |
 | `TestStableDiffusionDGfxE2eAi` | `_sd_perf_sec` (pickle 값이 이미 seconds) |
 
-- **Dropped handlers:** `TestMeasuredUsageCpp`, `TestWhisperBase` — [Dropped qwen_usage and Whisper base](#dropped-qwen_usage-and-whisper-base)를 참고하세요.
+- **Dropped handlers:** `TestWhisperBase`는 legacy입니다. whisper-large-v3는 GenAI pipeline에 있습니다.
 - **Version parsing:** OV version은 filename `daily.<stamp>.<ov_version>.pickle`과 `.report` text (`Purpose` + `OpenVINO` line)에서 가져옵니다. Report text가 있으면 그것을 우선합니다.
 - **SD unit normalization:** 모든 SD pipeline은 source class와 관계없이 DB에 `unit='s'`로 저장됩니다. Legacy ms pickle은 load 시점에 1000으로 나눕니다. 이로써 SD-XL pipeline이 viewer에서 8초가 아니라 8ms처럼 보이던 1000배 ambiguity를 제거했습니다.
 
@@ -195,11 +194,6 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **Choice:** table cell, plot heading, caption에 unit suffix를 붙입니다.
 - **Why:** unit 없는 raw number 때문에 SD-XL confusion이 생겼습니다. 사용자가 어떤 test type이 어떤 unit인지 외울 필요가 없어야 합니다.
 - **Implementation:** regression table은 `8.060 s` 같은 display-only `recent` / `baseline` column을 만듭니다. raw numeric column은 `column_config`로 숨기지만 plot/caption code path를 위해 유지합니다.
-
-### Dropped qwen_usage and Whisper base
-- **User request:** 둘 다 완전히 제거합니다.
-- **Action:** `loader_new.py` + `loader_old.py`에서 handler를 제거했고, DB의 기존 row도 삭제했습니다.
-- **Note:** `whisper-large-v3`는 Whisper base가 아니라 GenAI pipeline의 다른 model이므로 유지합니다.
 
 ### Geomean alerting
 - **User request:** C — per-series뿐 아니라 geomean-level trend alert도 명시적으로 원했습니다.

@@ -282,8 +282,6 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 - [x] chat_sample             (1 케이스)
 - [x] stable_diffusion_genai  (5 케이스, whisper + flux 포함)
 - [x] stable_diffusion_dgfx   (2 케이스)
-- [x] measured_usage_cpp      (8 케이스, 현재 장비에선 skip; `hw_tracker` 사용)
-- [x] whisper_base            (1 케이스, 현재 장비에선 skip; HF 캐시 필요)
 - [x] 백업 / 메일 (`--backup`, `--mail`)
 - [x] 공유 xlsx 업데이트 (`--xlsx-update`)
 - [ ] end-to-end 검증 후 `scripts/` 제거

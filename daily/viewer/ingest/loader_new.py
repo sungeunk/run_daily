@@ -98,9 +98,7 @@ _TYPE_HANDLERS = {
     "benchmark_app": _benchmark_app_rows,
     "sd_genai":      _sd_genai_rows,
     "sd_dgfx":       _sd_dgfx_rows,
-    # Deliberately dropped: qwen_usage (TestMeasuredUsageCpp) and
-    # whisper_base (TestWhisperBase). No longer part of the daily signal.
-    # chat_sample: no perf data.
+    # chat_sample has no perf data.
 }
 
 

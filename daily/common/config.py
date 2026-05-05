@@ -71,15 +71,6 @@ class DailyConfig:
         """
         return self.repo_root / 'scripts' / 'DGfx_E2E_AI' / 'tests'
 
-    @property
-    def whisper_base_script(self) -> Path:
-        """Whisper base optimum-notebook runner.
-
-        Also lives under ``scripts/`` today. Move alongside DGfx when pruning.
-        """
-        return (self.repo_root / 'scripts' / 'whisper' /
-                'optimum_notebook' / 'non_stateful' / 'run_model.py')
-
 
 def build_config(
     *,

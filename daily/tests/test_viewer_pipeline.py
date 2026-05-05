@@ -78,11 +78,6 @@ def test_load_summary_extracts_metadata_artifacts_and_perf(tmp_path: Path) -> No
                             ],
                         },
                     },
-                    {
-                        "nodeid": "test_dropped",
-                        "outcome": "passed",
-                        "metrics": {"test_type": "qwen_usage", "data": []},
-                    },
                 ],
             }
         ),

@@ -258,63 +258,6 @@ def _render_sd_dgfx(tests: list[dict]) -> str:
     ) + '\n'
 
 
-def _render_qwen_usage(tests: list[dict]) -> str:
-    subset = _filter(tests, 'qwen_usage')
-    if not subset:
-        return ''
-
-    rows = []
-    idx = 0
-    for t in subset:
-        m = t['metrics']
-        if t['outcome'] != 'passed':
-            rows.append([idx, '', '', 'FAIL', 'FAIL', '', '', ''])
-            idx += 1
-            continue
-        for d in m.get('data', []):
-            perf = d.get('perf', [])
-            rows.append([
-                idx,
-                d.get('in_token', ''), d.get('out_token', ''),
-                f'{perf[0]:.2f}' if len(perf) > 0 else '',
-                f'{perf[1]:.2f}' if len(perf) > 1 else '',
-                f"{m.get('peak_cpu_percent', 0):.2f}",
-                m.get('peak_mem_size', ''),
-                f"{m.get('peak_mem_percent', 0):.2f}",
-            ])
-            idx += 1
-
-    return '[RESULT] measured_usage(cpp)\n' + tabulate(
-        rows,
-        headers=['index', 'in token', 'out token', '1st inf (ms)',
-                 '2nd inf (ms)', 'CPU (%)', 'Memory', 'Memory (%)'],
-        tablefmt='github', stralign='right',
-    ) + '\n'
-
-
-def _render_whisper_base(tests: list[dict]) -> str:
-    subset = _filter(tests, 'whisper_base')
-    if not subset:
-        return ''
-
-    rows = []
-    for t in subset:
-        m = t['metrics']
-        if t['outcome'] != 'passed':
-            rows.append([m.get('model', ''), m.get('precision', ''), 'FAIL'])
-            continue
-        for d in m.get('data', []):
-            perf = d.get('perf', [])
-            tps = f'{perf[0]:.2f}' if perf else ''
-            rows.append([m['model'], m.get('precision', ''), tps])
-
-    return '[RESULT] whisper_base\n' + tabulate(
-        rows,
-        headers=['model', 'precision', 'tps'],
-        tablefmt='github', stralign='right',
-    ) + '\n'
-
-
 def _render_chat_sample(tests: list[dict]) -> str:
     subset = _filter(tests, 'chat_sample')
     if not subset:
@@ -340,8 +283,6 @@ _SECTION_RENDERERS = [
     _render_benchmark_app,
     _render_sd_genai,
     _render_sd_dgfx,
-    _render_qwen_usage,
-    _render_whisper_base,
     _render_chat_sample,
 ]
 

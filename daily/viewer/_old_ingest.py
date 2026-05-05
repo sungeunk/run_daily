@@ -176,12 +176,6 @@ def build_perf_rows_from_pickle(pickle_path: Path, run_id: str) -> list[dict]:
             continue
         model, precision, in_token, out_token, exec_mode, value = item
 
-        if model == 'qwen_usage':
-            if exec_mode == 'memory percent' and is_float(value):
-                value = float(value)
-            elif exec_mode == 'memory size' and is_float(value):
-                value = float(value) / (1024**3)
-
         if not is_float(value):
             continue
 
