@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from common import delivery
 import run
 from viewer import app
 from viewer import queries
@@ -324,3 +325,46 @@ def test_format_regression_alerts_handles_no_hits() -> None:
     )
 
     assert "No series exceeded" in run._format_regression_alerts(frame)
+
+
+def test_html_report_body_preserves_lines_and_escapes(tmp_path: Path) -> None:
+    report = tmp_path / "daily.report"
+    report.write_text("[ Summary ]\nA < B\n| col | value |\n", encoding="utf-8")
+
+    body = delivery._html_report_body(report)
+
+    assert "<pre" in body
+    assert "[ Summary ]\nA &lt; B\n| col | value |" in body
+
+
+def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> None:
+    report = tmp_path / "daily.report"
+    report.write_text("line 1\nline 2\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd: list[str], input: str, text: bool):
+        captured["cmd"] = cmd
+        captured["input"] = input
+        captured["text"] = text
+        return _Result()
+
+    monkeypatch.setattr(delivery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(delivery.platform, "node", lambda: "TESTNODE")
+    monkeypatch.setattr(delivery.subprocess, "run", _fake_run)
+
+    ok = delivery.send_mail(report, "user@example.com", "daily report", now_stamp="20260505_2253")
+
+    assert ok is True
+    assert captured["cmd"] == [
+        "mail",
+        "--content-type=text/html",
+        "-s",
+        "[TESTNODE/20260505_2253] daily report",
+        "user@example.com",
+    ]
+    assert captured["text"] is True
+    assert "<pre" in str(captured["input"])
+    assert "line 1\nline 2\n" in str(captured["input"])

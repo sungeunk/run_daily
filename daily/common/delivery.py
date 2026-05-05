@@ -13,11 +13,13 @@ Two upstream bugs are corrected during the port:
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import platform
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -34,6 +36,20 @@ DEFAULT_BACKUP_HOST = 'dg2raptorlake.ikor.intel.com'
 # from the legacy ``/var/www/html/daily`` path so the new pytest-based pipeline
 # can coexist with the old one without mixing files.
 REMOTE_BASE_DIR = '/var/www/html/daily2'
+
+
+def _html_report_body(report_path: Path) -> str:
+    """Return an HTML body that preserves the text report formatting."""
+    report_text = report_path.read_text(encoding='utf-8')
+    escaped = html.escape(report_text)
+    return (
+        '<html><body>'
+        '<pre style="font-family:Consolas,Monaco,monospace;'
+        'white-space:pre-wrap;line-height:1.35;margin:0">'
+        f'{escaped}'
+        '</pre>'
+        '</body></html>'
+    )
 
 
 def _resolve_host(relay_server: str | None) -> str:
@@ -119,6 +135,7 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         return False
 
     full_title = f'[{platform.node()}/{now_stamp}] {title} {suffix_title}'.strip()
+    body = _html_report_body(report_path)
 
     if platform.system() == 'Windows':
         user_profile = os.environ.get('USERPROFILE')
@@ -132,15 +149,29 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         quoted_to = shlex.quote(recipients)
         remote_cmd = (f'mail --content-type=text/html -s {quoted_title} '
                       f'{quoted_to}')
+        with tempfile.NamedTemporaryFile('w', encoding='utf-8',
+                                         suffix='.html', delete=False) as tmp:
+            tmp.write(body)
+            body_file = Path(tmp.name)
         cmd = (f'ssh -i "{id_rsa}" {relay} "{remote_cmd}" '
-               f'< "{report_path}"')
+               f'< "{body_file}"')
+        log.info('send_mail: %s → %s', full_title, recipients)
+        try:
+            return subprocess.call(cmd, shell=True) == 0
+        finally:
+            body_file.unlink(missing_ok=True)
     else:
-        cmd = (f'cat {shlex.quote(str(report_path))} | '
-               f'mail --content-type=text/html '
-               f'-s {shlex.quote(full_title)} {shlex.quote(recipients)}')
+        cmd = [
+            'mail',
+            '--content-type=text/html',
+            '-s',
+            full_title,
+            recipients,
+        ]
 
     log.info('send_mail: %s → %s', full_title, recipients)
-    return subprocess.call(cmd, shell=True) == 0
+    result = subprocess.run(cmd, input=body, text=True)
+    return result.returncode == 0
 
 
 def write_pip_freeze(output_path: Path) -> None:

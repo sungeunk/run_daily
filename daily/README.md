@@ -77,6 +77,19 @@ python daily/run.py \
 을 사용. 다른 서버로 보내려면 환경변수로 오버라이드. Linux 에서는 메일
 자체는 로컬 `mail(1)` 로 발송.
 
+### 메일 포맷 빠른 검증 (전체 daily 없이)
+
+Jenkins 전체 LLM daily 를 돌리지 않고, 메일 본문 포맷 회귀만 빠르게 확인하려면
+아래 단위테스트 2개만 실행.
+
+```bash
+conda run -n daily pytest daily/tests/test_viewer_pipeline.py \
+  -k "html_report_body or send_mail_pipes_preformatted_html_body"
+```
+
+- 검증 범위: HTML 본문 생성 시 줄바꿈/특수문자 보존, 메일 명령 호출 시 본문 파이프 전달
+- 권장: Jenkins 에 별도 경량 stage/job 로 붙여서 수십 초 내 회귀 체크
+
 백업은 `/var/www/html/daily2/<hostname>/` 아래에 저장 — 기존
 `/var/www/html/daily/` (구 스크립트) 와 분리되어 파일이 섞이지 않음.
 `<hostname>` 디렉토리는 첫 백업 시 자동 생성 시도.
