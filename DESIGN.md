@@ -31,6 +31,21 @@
   - `daily/common/delivery.py`를 통해 메일 발송과 scp 백업을 수행한다.
 - 기본 파이프라인 테스트
   - `daily/tests/test_viewer_pipeline.py`에서 ingest, query, regression 계산 경로를 검증한다.
+- 독립 분석 엔진 분리 (P0 완료)
+  - `daily/analysis` 패키지(`types/baseline/verdict/functional/engine/report/persistence`)가 추가되었다.
+  - `AnalysisResult` contract 기반으로 판정/요약/저장을 공통화했다.
+- run-to-analysis 오케스트레이션 정리
+  - `daily/run.py`는 내부 분석 헬퍼를 제거하고 분석 엔진 호출 경로로 통합되었다.
+  - DB 파일이 없는 첫 실행에서도 분석이 부트스트랩되도록 수정되었다.
+- summary/report/DB 동시 반영
+  - `summary.json`에 `analysis` block을 기록한다.
+  - report 최상단에 `[ Analysis summary ]`를 prepend한다.
+  - `analysis_results`, `analysis_comparisons`, `functional_issues` 집계 테이블이 추가되었다.
+- 분석 저장 안정화
+  - 분석 DB 저장은 트랜잭션 단위로 처리되며 실패 시 rollback한다.
+  - rerun 시 stale row 정리, `threshold_pct` 저장, legacy DB 컬럼 마이그레이션(`ADD COLUMN IF NOT EXISTS`)이 반영되었다.
+- 분석 테스트 확대
+  - `daily/tests/test_analysis_engine.py`에서 verdict 경계값, baseline 우선순위, invalid/NaN, green-only baseline, rollback, schema migration 등을 검증한다.
 
 ### 부분 구현
 
@@ -38,19 +53,19 @@
   - 최신 run의 실패 원인 표시는 가능하지만, 버전별 functional 추세/집계용 구조화 데이터와 전용 뷰는 부족하다.
 - OpenVINO 버전별 성능 변화 분석
   - `ov_version`, `ov_build`, `ov_sha` 저장과 시각화는 가능하지만, 버전-버전 직접 비교와 자동 판정 엔진은 분리되어 있지 않다.
-- report 상단 analysis summary
-  - `daily/run.py` 내부 함수로 baseline 비교와 summary prepend가 구현되어 있으나, 독립 엔진이 아니어서 summary JSON, mail, dashboard가 재사용하기 어렵다.
+- report/summary/DB 재사용 체계
+  - 분석 contract와 저장 경로는 분리 완료되었으나, mail/dashboard/bisect가 `AnalysisResult`를 전면 재사용하도록 통합하는 작업은 남아 있다.
 - 메일 요약
   - 현재 report 본문 중심 발송은 가능하지만, 모델별 변화/상위 regression/functional 상태를 구조화한 메일 템플릿은 아직 부족하다.
 
 ### 미구현
 
-- 독립 분석 엔진 CLI/API
-- `summary.json`의 `analysis` block 기록
-- `regressions`, `build_health` 성격의 구조화 집계 저장
+- 메일 본문 구조화 요약 템플릿 (`AnalysisResult` 기반)
+- Streamlit functional 히스토리/집계 전용 패널
+- run-to-run 직접 비교 전용 패널
 - regression/functional 발생 시 마지막 성공 build 탐색
 - bisect 보조 메일 템플릿과 자동 발송
-- functional 히스토리/집계 dashboard 패널
+- noisy/insufficient dual gate 고도화 판정
 
 ## 핵심 설계 방향
 
@@ -405,27 +420,27 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 - [x] DuckDB schema와 ingest 경로 구현
 - [x] run/file_hash 기반 중복 처리 구현
 - [x] new/old 포맷 ingestion CLI 구현
-- [ ] `analysis_results` 테이블 추가
-- [ ] `analysis_comparisons` 테이블 추가
-- [ ] `functional_issues` 테이블 추가
+- [x] `analysis_results` 테이블 추가
+- [x] `analysis_comparisons` 테이블 추가
+- [x] `functional_issues` 테이블 추가
 - [ ] backfill 운영 스크립트 추가
 
 ### 분석 엔진
 
 - [x] trend 기반 median/MAD regression query 구현
 - [x] run-to-run improved/same/regressed 1차 로직 구현
-- [ ] `daily/analysis` 패키지로 분석 로직 분리
-- [ ] `AnalysisResult` 구조 정의
-- [ ] `summary.json` analysis block 생성기 추가
-- [ ] functional issue list와 overall status 계산 로직 정규화
+- [x] `daily/analysis` 패키지로 분석 로직 분리
+- [x] `AnalysisResult` 구조 정의
+- [x] `summary.json` analysis block 생성기 추가
+- [x] functional issue list와 overall status 계산 로직 정규화 (MVP)
 - [ ] noisy/insufficient verdict 고도화
 
 ### 비교/요약 자동화
 
 - [x] report 상단 comparison summary 1차 구현
-- [ ] report 렌더러를 `daily/analysis/report.py`로 분리
+- [x] report 렌더러를 `daily/analysis/report.py`로 분리
 - [ ] mail summary 템플릿 고도화
-- [ ] manual/daily run 공통 orchestration 정리
+- [x] manual/daily run 공통 orchestration 정리
 
 ### Dashboard
 
@@ -438,7 +453,7 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 
 ### Bisect 지원
 
-- [ ] last known good 탐색 API 구현
+- [~] last known good 탐색 API 구현 (`baseline.find_last_known_good` 구현, 운영 경로 연동 남음)
 - [ ] issue run vs last good run delta 생성
 - [ ] bisect 보조 메일 템플릿 작성
 - [ ] bisect 경로 테스트 추가
@@ -448,7 +463,7 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 - [~] CLI/env 혼합 설정을 중앙 설정으로 정리
 - [x] 기본 로깅/에러 핸들링/계속 진행 정책 일부 구현
 - [~] ingest/query/viewer 테스트 존재
-- [ ] analysis engine unit test 추가
+- [x] analysis engine unit test 추가
 - [ ] 샘플 데이터 기반 E2E rehearsal 추가
 - [ ] 실제 daily 머신 1대에서 shadow mode 운영
 
@@ -478,31 +493,20 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 
 ## 다음 작업 (착수 순서)
 
-P0부터 실행 가능한 단위 작업 순으로 정리한다.
+P0(분석 엔진 분리)는 완료되었고, 현재는 P1/P2 항목을 순차 진행한다.
 
-### P0 — 분석 엔진 분리 (M1·M2)
+### P0 — 분석 엔진 분리 (M1·M2) 완료
 
-1. **`daily/analysis` 패키지 골격 생성**
-   `types.py`에 `AnalysisConfig`, `SeriesKey`, `ComparisonRow`, `AnalysisResult` dataclass를 정의한다.
-
-2. **`run.py` 내부 로직 이동**
-   `_select_baseline_run`, `_trend_verdict`, `_format_model_deltas`, `_prepend_run_analysis_summary`를 각각 `baseline.py`, `verdict.py`, `engine.py`, `report.py`로 옮긴다.
-
-3. **`engine.analyze_run()` API 확정**
-   `summary.json` + `db_path` + `AnalysisConfig`를 받아 `AnalysisResult`를 반환하는 단일 진입점을 만든다.
-
-4. **`summary.json` analysis block 기록**
-   `persistence.write_analysis_to_summary()`를 구현해서 분석 결과를 파일에 저장한다.
-
-5. **`run.py` orchestration 정리**
-   분석 세부 구현을 제거하고, `engine.analyze_run()` 호출 → `persistence` 기록 → `report.render()` 순서로 연결한다.
-
-6. **analysis engine unit test 추가**
-   `daily/tests/test_analysis_engine.py`에 verdict 경계값, baseline 선택 우선순위, functional fail 우선순위, no-baseline 케이스를 커버한다.
+1. **`daily/analysis` 패키지 골격 생성** (완료)
+2. **`run.py` 내부 로직 이동** (완료)
+3. **`engine.analyze_run()` API 확정** (완료)
+4. **`summary.json` analysis block 기록** (완료)
+5. **`run.py` orchestration 정리** (완료)
+6. **analysis engine unit test 추가** (완료)
 
 ### P1 — DB 집계·메일·Dashboard (M3·M4)
 
-P0 완료 후 진행한다.
+현재 착수 우선순위.
 
 7. **DB 집계 테이블 추가**
    `schema.sql`에 `analysis_results`, `analysis_comparisons`, `functional_issues`를 추가하고 backfill 스크립트를 작성한다.
