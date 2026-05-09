@@ -29,6 +29,21 @@ def ensure_schema(con: duckdb.DuckDBPyConnection,
                   schema_path: Path | None = None) -> None:
     schema_path = Path(schema_path or DEFAULT_SCHEMA_PATH)
     con.execute(schema_path.read_text(encoding="utf-8"))
+    _apply_schema_migrations(con)
+
+
+def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
+    """Apply idempotent column migrations for long-lived existing DBs."""
+    migrations = [
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now()",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS threshold_pct DOUBLE",
+    ]
+    for sql in migrations:
+        try:
+            con.execute(sql)
+        except Exception:
+            # Keep schema setup best-effort for mixed-version deployments.
+            log.debug("schema migration skipped: %s", sql)
 
 
 def already_ingested(con: duckdb.DuckDBPyConnection, file_hash: str) -> bool:

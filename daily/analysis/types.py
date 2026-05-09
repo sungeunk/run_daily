@@ -1,0 +1,149 @@
+"""Shared data types for the analysis engine.
+
+All modules within ``daily/analysis`` import from here; nothing outside
+``analysis`` should depend on these types except for reading results.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AnalysisConfig:
+    """Tunable parameters for one analysis run.
+
+    Attributes:
+        pct_threshold:       Minimum absolute improvement_pct to be labelled
+                             improved or regressed (default 5 %).
+        z_threshold:         MAD-based z-score gate used in dual-gate mode
+                             (default 3.0, i.e. Shewhart 3σ).
+        noisy_cv_threshold:  Series with CV above this value are labelled
+                             *noisy* and excluded from regression verdicts
+                             (default 10 %).
+        top_regressions:     How many worst regressions to surface in the
+                             report (default 5).
+        baseline_green_only: When True only consider baseline runs with
+                             overall_status = 'green'; used for bisect mode.
+    """
+
+    pct_threshold: float = 0.05
+    z_threshold: float = 3.0
+    noisy_cv_threshold: float = 0.10
+    top_regressions: int = 5
+    baseline_green_only: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Keys and row types
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SeriesKey:
+    """Uniquely identifies one performance series across runs."""
+
+    model: str
+    precision: str
+    in_token: int
+    out_token: int
+    exec_mode: str
+
+
+Verdict = Literal["improved", "same", "regressed", "noisy", "unavailable"]
+OverallStatus = Literal["green", "yellow", "red", "gray"]
+
+
+@dataclass
+class ComparisonRow:
+    """Per-series comparison result between current run and baseline run."""
+
+    key: SeriesKey
+    unit: str | None
+    current_value: float
+    baseline_value: float
+    improvement_pct: float | None   # positive = better, None = unavailable
+    verdict: Verdict
+
+
+@dataclass
+class FunctionalIssue:
+    """One failing or erroring test from the current run."""
+
+    nodeid: str
+    outcome: str          # 'failed' | 'error' | 'timeout'
+    message: str          # short normalised message
+
+
+# ---------------------------------------------------------------------------
+# Sub-result blocks
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BaselineInfo:
+    """Metadata about the baseline run that was selected for comparison."""
+
+    status: Literal["found", "not_found"]
+    run_id: str | None = None
+    stamp: str | None = None
+    ov_version: str | None = None
+    selection_reason: str | None = None   # human-readable why this run was picked
+
+
+@dataclass
+class FunctionalResult:
+    """Aggregate of functional test outcomes for the current run."""
+
+    total: int
+    passed: int
+    failed: int
+    error: int
+    skipped: int
+    issues: list[FunctionalIssue] = field(default_factory=list)
+
+
+@dataclass
+class PerformanceResult:
+    """Aggregate of run-to-run performance comparisons."""
+
+    compared: int
+    improved: int
+    same: int
+    regressed: int
+    unavailable: int
+
+
+@dataclass
+class ModelSummary:
+    """Per-model aggregate across all series."""
+
+    model: str
+    avg_improvement_pct: float | None
+    improved: int
+    same: int
+    regressed: int
+
+
+# ---------------------------------------------------------------------------
+# Top-level result
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AnalysisResult:
+    """Complete analysis result for one run.
+
+    This is the contract between the engine and all consumers: report
+    renderer, persistence layer, mail template, and dashboard queries.
+    """
+
+    overall_status: OverallStatus
+    baseline: BaselineInfo
+    functional: FunctionalResult
+    performance: PerformanceResult
+    models: list[ModelSummary]
+    top_regressions: list[ComparisonRow]
+    rows: list[ComparisonRow]           # full comparison table (not in JSON output)

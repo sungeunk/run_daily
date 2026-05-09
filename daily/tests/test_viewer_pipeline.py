@@ -18,6 +18,16 @@ from viewer.ingest.loader_new import load_summary
 from viewer.ingest.loader_old import load_report
 from viewer.ingest.record import PerfRow, RunRecord
 from viewer.ingest.writer import connect, ensure_schema, load_display_profile, upsert_run
+from analysis.report import render_analysis_summary
+from analysis.types import (
+    AnalysisResult,
+    BaselineInfo,
+    ComparisonRow,
+    FunctionalResult,
+    ModelSummary,
+    PerformanceResult,
+    SeriesKey,
+)
 
 
 class TestBenchmark:
@@ -243,6 +253,61 @@ rows:
     assert row["worsening_pct"] == 0.2
 
 
+def test_ensure_schema_upgrades_legacy_analysis_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.duckdb"
+    with connect(db_path) as con:
+        # Simulate older DB that already has analysis tables but misses new columns.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_results (
+                run_id TEXT PRIMARY KEY,
+                baseline_run_id TEXT,
+                overall_status TEXT NOT NULL,
+                compared_count INTEGER NOT NULL DEFAULT 0,
+                improved_count INTEGER NOT NULL DEFAULT 0,
+                same_count INTEGER NOT NULL DEFAULT 0,
+                regressed_count INTEGER NOT NULL DEFAULT 0,
+                functional_fail_count INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_comparisons (
+                run_id TEXT NOT NULL,
+                baseline_run_id TEXT,
+                model TEXT NOT NULL,
+                precision TEXT NOT NULL,
+                in_token INTEGER NOT NULL,
+                out_token INTEGER NOT NULL,
+                exec_mode TEXT NOT NULL,
+                unit TEXT,
+                current_value DOUBLE,
+                baseline_value DOUBLE,
+                improvement_pct DOUBLE,
+                verdict TEXT NOT NULL,
+                PRIMARY KEY (run_id, model, precision, in_token, out_token, exec_mode)
+            )
+            """
+        )
+
+        ensure_schema(con)
+
+        cols_results = {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'analysis_results'"
+            ).fetchall()
+        }
+        cols_comparisons = {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'analysis_comparisons'"
+            ).fetchall()
+        }
+
+    assert "updated_at" in cols_results
+    assert "threshold_pct" in cols_comparisons
+
+
 def test_dashboard_artifact_helpers_use_source_path_as_anchor(tmp_path: Path) -> None:
     source_path = tmp_path / "daily.20260421_2234.summary.json"
     report_path = tmp_path / "daily.20260421_2234.report"
@@ -271,60 +336,46 @@ def test_dashboard_artifact_helpers_use_source_path_as_anchor(tmp_path: Path) ->
     ) == 7
 
 
-def test_format_regression_alerts_reports_threshold_hits() -> None:
-    frame = pd.DataFrame(
-        [
-            {
-                "status": "ok",
-                "model": "llama",
-                "precision": "FP16",
-                "in_token": 32,
-                "out_token": 128,
-                "exec_mode": "2nd",
-                "unit": "ms",
-                "worsening_pct": 0.12,
-                "worsening_z": 3.5,
-                "recent_median": 12.0,
-                "baseline_median": 10.0,
-                "recent_cv": 0.04,
-            },
-            {
-                "status": "ok",
-                "model": "stable",
-                "precision": "FP16",
-                "in_token": 0,
-                "out_token": 0,
-                "exec_mode": "pipeline",
-                "unit": "s",
-                "worsening_pct": 0.01,
-                "worsening_z": 0.5,
-                "recent_median": 8.1,
-                "baseline_median": 8.0,
-                "recent_cv": 0.02,
-            },
-        ]
+def test_render_analysis_summary_includes_top_regressions() -> None:
+    key = SeriesKey("llama", "FP16", 32, 128, "2nd")
+    row = ComparisonRow(
+        key=key,
+        unit="ms",
+        current_value=12.0,
+        baseline_value=10.0,
+        improvement_pct=-0.2,
+        verdict="regressed",
+    )
+    result = AnalysisResult(
+        overall_status="yellow",
+        baseline=BaselineInfo(status="found", run_id="r0", stamp="20260501_0100"),
+        functional=FunctionalResult(total=1, passed=1, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=1, improved=0, same=0, regressed=1, unavailable=0),
+        models=[ModelSummary(model="llama", avg_improvement_pct=-0.2, improved=0, same=0, regressed=1)],
+        top_regressions=[row],
+        rows=[row],
     )
 
-    section = run._format_regression_alerts(frame)
+    section = render_analysis_summary(result)
 
-    assert "[ Regression alerts ]" in section
+    assert "[ Analysis summary ]" in section
+    assert "Top regressions:" in section
     assert "llama | FP16" in section
-    assert "stable | FP16" not in section
 
 
-def test_format_regression_alerts_handles_no_hits() -> None:
-    frame = pd.DataFrame(
-        [
-            {
-                "status": "ok",
-                "recent_cv": 0.02,
-                "worsening_pct": 0.01,
-                "worsening_z": 0.5,
-            }
-        ]
+def test_render_analysis_summary_without_baseline() -> None:
+    result = AnalysisResult(
+        overall_status="gray",
+        baseline=BaselineInfo(status="not_found"),
+        functional=FunctionalResult(total=1, passed=1, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=0, improved=0, same=0, regressed=0, unavailable=0),
+        models=[],
+        top_regressions=[],
+        rows=[],
     )
 
-    assert "No series exceeded" in run._format_regression_alerts(frame)
+    section = render_analysis_summary(result)
+    assert "Baseline comparison: no older run found for this machine." in section
 
 
 def test_html_report_body_preserves_lines_and_escapes(tmp_path: Path) -> None:
@@ -368,3 +419,94 @@ def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> 
     assert captured["text"] is True
     assert "<pre" in str(captured["input"])
     assert "line 1\nline 2\n" in str(captured["input"])
+
+
+def test_run_analysis_compares_with_baseline(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    assert not db_path.exists()
+    monkeypatch.setattr(run, "VIEWER_DB", db_path)
+
+    # Baseline run
+    baseline_summary = tmp_path / "daily.20260501_0100.summary.json"
+    baseline_summary.write_text(
+        json.dumps(
+            {
+                "generated_at": 1776810000.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260501_0100",
+                    "workweek": "2026.WW18.4",
+                    "ov_version": "2026.2.0-21664-ad5d8e0f99b",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_base",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.0, 2.0]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Current run (slower second-token latency => regression)
+    current_summary = tmp_path / "daily.20260502_0100.summary.json"
+    current_summary.write_text(
+        json.dumps(
+            {
+                "generated_at": 1776896400.0,
+                "duration_sec": 11.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260502_0100",
+                    "workweek": "2026.WW18.5",
+                    "ov_version": "2026.2.1-21680-bbbbbbb1234",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_cur",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.1, 2.4]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Insert baseline first.
+    report_base = tmp_path / "daily.20260501_0100.report"
+    report_base.write_text("[ Summary ]\nbase\n", encoding="utf-8")
+    run._run_analysis(report_base, baseline_summary)
+    assert db_path.exists()
+    baseline_data = json.loads(baseline_summary.read_text(encoding="utf-8"))
+    assert "analysis" in baseline_data
+
+    # Compare current against baseline.
+    report_cur = tmp_path / "daily.20260502_0100.report"
+    report_cur.write_text("[ Summary ]\ncurrent\n", encoding="utf-8")
+    run._run_analysis(report_cur, current_summary)
+
+    text = report_cur.read_text(encoding="utf-8")
+    assert text.startswith("[ Analysis summary ]")
+    assert "Model deltas:" in text
+    assert "llama" in text
+    assert "Overall verdict: Performance regression detected." in text

@@ -78,6 +78,43 @@ CREATE TABLE IF NOT EXISTS display_rows (
     PRIMARY KEY (profile, seq)
 );
 
+CREATE TABLE IF NOT EXISTS analysis_results (
+    run_id                TEXT PRIMARY KEY,
+    baseline_run_id       TEXT,
+    overall_status        TEXT NOT NULL,
+    compared_count        INTEGER NOT NULL DEFAULT 0,
+    improved_count        INTEGER NOT NULL DEFAULT 0,
+    same_count            INTEGER NOT NULL DEFAULT 0,
+    regressed_count       INTEGER NOT NULL DEFAULT 0,
+    functional_fail_count INTEGER NOT NULL DEFAULT 0,
+    updated_at            TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS analysis_comparisons (
+    run_id          TEXT NOT NULL,
+    baseline_run_id TEXT,
+    model           TEXT NOT NULL,
+    precision       TEXT NOT NULL,
+    in_token        INTEGER NOT NULL,
+    out_token       INTEGER NOT NULL,
+    exec_mode       TEXT NOT NULL,
+    unit            TEXT,
+    current_value   DOUBLE,
+    baseline_value  DOUBLE,
+    improvement_pct DOUBLE,
+    verdict         TEXT NOT NULL,
+    threshold_pct   DOUBLE,
+    PRIMARY KEY (run_id, model, precision, in_token, out_token, exec_mode)
+);
+
+CREATE TABLE IF NOT EXISTS functional_issues (
+    run_id   TEXT NOT NULL,
+    nodeid   TEXT NOT NULL,
+    outcome  TEXT NOT NULL,
+    message  TEXT,
+    PRIMARY KEY (run_id, nodeid, outcome)
+);
+
 -- Viewer-tunable knobs stored in-DB so a single UI restart picks them up.
 -- Kept separate from schema defaults so a user can override without editing
 -- SQL files.
@@ -102,6 +139,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_ts_machine   ON runs(ts, machine);
 CREATE INDEX IF NOT EXISTS idx_runs_machine_ts   ON runs(machine, ts);
 CREATE INDEX IF NOT EXISTS idx_perf_series       ON perf(model, precision, in_token, out_token, exec_mode);
 CREATE INDEX IF NOT EXISTS idx_sys_run           ON system_devices(run_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_status   ON analysis_results(overall_status, run_id);
 
 -- ---------------------------------------------------------------------------
 -- Views
