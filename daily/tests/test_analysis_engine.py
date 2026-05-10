@@ -41,7 +41,7 @@ from analysis.engine import (
 )
 from analysis.report import render_analysis_summary, prepend_to_report
 from analysis.persistence import write_analysis_to_summary, _result_to_dict, write_analysis_to_db
-from analysis.baseline import select_baseline
+from analysis.baseline import find_last_known_good, select_baseline
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +306,64 @@ class TestSelectBaseline:
 
         assert baseline.status == "found"
         assert baseline.run_id == "old-green"
+
+
+class TestFindLastKnownGood:
+    def test_filters_same_run_profile(self):
+        duckdb = pytest.importorskip("duckdb")
+        from viewer.ingest.record import RunRecord
+
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """
+            CREATE TABLE runs (
+                run_id TEXT,
+                machine TEXT,
+                ts TIMESTAMP,
+                short_run BOOLEAN,
+                purpose TEXT,
+                ov_version TEXT
+            )
+            """
+        )
+        con.execute("CREATE TABLE analysis_results (run_id TEXT, overall_status TEXT)")
+
+        now = datetime(2026, 1, 2, 0, 0)
+        # Should be ignored: wrong purpose.
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            ["old-green-wrong-purpose", "M1", now - timedelta(hours=3), True, "adhoc", "ov-x"],
+        )
+        con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green-wrong-purpose", "green"])
+
+        # Should be ignored: wrong short_run.
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            ["old-green-wrong-short", "M1", now - timedelta(hours=2), False, "nightly", "ov-y"],
+        )
+        con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green-wrong-short", "green"])
+
+        # Should be selected: same profile + green.
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            ["old-green-match", "M1", now - timedelta(hours=1), True, "nightly", "ov-z"],
+        )
+        con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green-match", "green"])
+
+        rec = RunRecord(
+            run_id="current",
+            source_format="new",
+            report_file="r",
+            machine="M1",
+            ts=now,
+            short_run=True,
+            purpose="nightly",
+        )
+
+        lkg = find_last_known_good(con, rec)
+
+        assert lkg.status == "found"
+        assert lkg.run_id == "old-green-match"
 
 
 class TestOverallStatus:

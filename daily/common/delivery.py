@@ -75,12 +75,28 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
 
     overall = str(analysis.get('overall_status', 'unknown'))
     baseline = analysis.get('baseline') if isinstance(analysis.get('baseline'), dict) else {}
+    last_known_good = (
+        analysis.get('last_known_good') if isinstance(analysis.get('last_known_good'), dict) else {}
+    )
     functional = analysis.get('functional') if isinstance(analysis.get('functional'), dict) else {}
     performance = analysis.get('performance') if isinstance(analysis.get('performance'), dict) else {}
 
     baseline_text = 'not found'
     if baseline.get('status') == 'found':
         baseline_text = f"{baseline.get('stamp', '')} / {baseline.get('ov_version', 'unknown')}"
+
+    lkg_text = None
+    if last_known_good:
+        lkg_text = 'not found'
+    if last_known_good.get('status') == 'found':
+        lkg_text = (
+            f"{last_known_good.get('stamp', '')} / "
+            f"{last_known_good.get('ov_version', 'unknown')}"
+        )
+
+    lkg_line = ''
+    if lkg_text is not None:
+        lkg_line = f'<li>last known good: {html.escape(str(lkg_text))}</li>'
 
     # Keep this intentionally compact so the full report still remains the source of detail.
     return (
@@ -89,6 +105,7 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
         '<ul style="margin:6px 0 0 18px;padding:0">'
         f'<li>overall: {html.escape(overall)}</li>'
         f'<li>baseline: {html.escape(str(baseline_text))}</li>'
+        f'{lkg_line}'
         f'<li>functional: failed={_safe_int(functional.get("failed", 0))} '
         f'error={_safe_int(functional.get("error", 0))}</li>'
         f'<li>performance: compared={_safe_int(performance.get("compared", 0))} '

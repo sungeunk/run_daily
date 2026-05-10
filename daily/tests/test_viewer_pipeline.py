@@ -377,6 +377,64 @@ def test_fetch_run_comparison_fallback_uses_coalesced_unit_direction(tmp_path: P
     assert df.iloc[0]["improvement_pct"] == 0.1
 
 
+def test_fetch_analysis_overview_returns_baseline_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    with connect(db_path) as con:
+        ensure_schema(con)
+        ts_base = datetime(2026, 5, 8, 9, 0, 0)
+        ts_cur = datetime(2026, 5, 9, 9, 0, 0)
+        base = RunRecord(
+            run_id="run-base",
+            source_format="new",
+            report_file="daily.base.summary.json",
+            machine="LNL-03",
+            ts=ts_base,
+            purpose="daily_CB timer",
+            description="daily",
+            ww=workweek_of(ts_base),
+            ov_version="2026.2.0-11111-aaaaaaaaaaa",
+            source_path=str(tmp_path / "daily.base.summary.json"),
+            file_hash="hash-base",
+            perf=[PerfRow("llama", "FP16", 32, 128, "2nd", 10.0, "ms")],
+        )
+        cur = RunRecord(
+            run_id="run-cur",
+            source_format="new",
+            report_file="daily.cur.summary.json",
+            machine="LNL-03",
+            ts=ts_cur,
+            purpose="daily_CB timer",
+            description="daily",
+            ww=workweek_of(ts_cur),
+            ov_version="2026.2.0-22222-bbbbbbbbbbb",
+            source_path=str(tmp_path / "daily.cur.summary.json"),
+            file_hash="hash-cur",
+            perf=[PerfRow("llama", "FP16", 32, 128, "2nd", 11.0, "ms")],
+        )
+        upsert_run(con, base)
+        upsert_run(con, cur)
+
+        con.execute(
+            """
+            INSERT INTO analysis_results (
+                run_id, baseline_run_id, overall_status,
+                compared_count, improved_count, same_count,
+                regressed_count, functional_fail_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ["run-cur", "run-base", "yellow", 10, 1, 7, 2, 0],
+        )
+
+    df = queries.fetch_analysis_overview(db_path, "run-cur")
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["overall_status"] == "yellow"
+    assert row["regressed_count"] == 2
+    assert row["baseline_run_id"] == "run-base"
+    assert row["baseline_stamp"] == "20260508_0900"
+
+
 def test_ensure_schema_upgrades_legacy_analysis_columns(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.duckdb"
     with connect(db_path) as con:
@@ -555,6 +613,7 @@ def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) 
                 "analysis": {
                     "overall_status": "yellow",
                     "baseline": {"status": "found", "stamp": "20260505_1200", "ov_version": "2026.2"},
+                    "last_known_good": {"status": "found", "stamp": "20260501_1200", "ov_version": "2026.1"},
                     "functional": {"failed": 1, "error": 0},
                     "performance": {"compared": 10, "regressed": 2},
                 }
@@ -589,6 +648,7 @@ def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) 
     body = str(captured["input"])
     assert "Analysis summary" in body
     assert "overall: yellow" in body
+    assert "last known good: 20260501_1200 / 2026.1" in body
     assert "performance: compared=10 regressed=2" in body
 
 

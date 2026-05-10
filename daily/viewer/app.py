@@ -451,6 +451,33 @@ def _tab_dashboard(cfg: dict) -> None:
     cols[4].metric("Skipped", skipped)
     cols[5].metric("Duration", f"{float(duration):.0f}s" if duration else "-")
 
+    analysis_df = q.fetch_analysis_overview(DB, str(run["run_id"]))
+    if not analysis_df.empty:
+        analysis_row = analysis_df.iloc[0]
+        status = str(analysis_row.get("overall_status") or "unknown")
+        status_icon = {
+            "green": "🟢",
+            "yellow": "🟡",
+            "red": "🔴",
+            "gray": "⚫",
+        }.get(status, "❓")
+
+        st.markdown("### Build health")
+        health_cols = st.columns(5)
+        health_cols[0].metric("Overall", f"{status_icon} {status}")
+        health_cols[1].metric("Compared", int(analysis_row.get("compared_count") or 0))
+        health_cols[2].metric("Regressed", int(analysis_row.get("regressed_count") or 0))
+        health_cols[3].metric("Functional fail", int(analysis_row.get("functional_fail_count") or 0))
+
+        baseline_stamp = analysis_row.get("baseline_stamp")
+        baseline_ov = analysis_row.get("baseline_ov_version")
+        baseline_text = "not found"
+        if pd.notna(baseline_stamp):
+            baseline_text = str(baseline_stamp)
+            if pd.notna(baseline_ov):
+                baseline_text = f"{baseline_text} / {baseline_ov}"
+        health_cols[4].metric("Baseline", baseline_text)
+
     artifacts = {
         "summary":     str(summary_path)     if summary_path     else "missing",
         "report":      str(report_path)      if report_path      else "missing",

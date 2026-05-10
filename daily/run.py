@@ -28,6 +28,10 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from analysis.types import BaselineInfo
 
 
 DAILY_DIR = Path(__file__).resolve().parent
@@ -150,15 +154,56 @@ def _run_analysis(text_report: Path, summary_json: Path) -> None:
     """Best-effort: run the analysis engine and update report + summary.json."""
     try:
         from analysis.engine import analyze_run
+        from analysis.baseline import find_last_known_good
         from analysis.report import prepend_to_report
         from analysis.persistence import write_analysis_to_summary
+        from viewer.ingest.loader_new import load_summary
+        from viewer.ingest.writer import connect
 
         result = analyze_run(summary_json, VIEWER_DB)
         write_analysis_to_summary(summary_json, result)
+
+        # For issue runs, also store the most recent green run as bisect hint.
+        if result.overall_status in {"red", "yellow"}:
+            rec = load_summary(summary_json)
+            with connect(VIEWER_DB) as con:
+                lkg = find_last_known_good(con, rec)
+            _write_last_known_good_to_summary(summary_json, lkg)
+
         prepend_to_report(text_report, result)
         print(f'[run.py] analysis summary prepended to {text_report}')
     except Exception as exc:  # noqa: BLE001 — analysis must not fail the run
         print(f'[run.py] analysis skipped: {exc}', file=sys.stderr)
+
+
+def _write_last_known_good_to_summary(summary_json: Path, lkg: "BaselineInfo") -> None:
+    """Persist last-known-good hint under ``analysis.last_known_good``."""
+    try:
+        payload = json.loads(summary_json.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return
+
+    if not isinstance(payload, dict):
+        return
+    analysis = payload.get('analysis')
+    if not isinstance(analysis, dict):
+        return
+
+    analysis['last_known_good'] = {
+        'status': lkg.status,
+        'run_id': lkg.run_id,
+        'stamp': lkg.stamp,
+        'ov_version': lkg.ov_version,
+        'selection_reason': lkg.selection_reason,
+    }
+
+    try:
+        summary_json.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+    except OSError:
+        return
 
 
 def main() -> int:

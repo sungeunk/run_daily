@@ -656,3 +656,35 @@ def fetch_run_comparison(
             WHERE a.run_id = ? OR b.run_id = ?
             ORDER BY model, precision, in_token, out_token, exec_mode
         """, [run_id_a, run_id_b, run_id_a, run_id_b]).fetchdf()
+
+
+def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
+    """Return analysis summary row for one run, enriched with baseline metadata.
+
+    Returns empty DataFrame when analysis tables are unavailable or the run
+    has not been analyzed yet.
+    """
+    with _read_only(db_path) as con:
+        tables = {r[0] for r in con.execute(
+            "SELECT table_name FROM information_schema.tables"
+        ).fetchall()}
+        if "analysis_results" not in tables:
+            return pd.DataFrame()
+
+        return con.execute("""
+            SELECT
+                ar.run_id,
+                ar.overall_status,
+                ar.compared_count,
+                ar.improved_count,
+                ar.same_count,
+                ar.regressed_count,
+                ar.functional_fail_count,
+                ar.baseline_run_id,
+                strftime(rb.ts, '%Y%m%d_%H%M') AS baseline_stamp,
+                rb.ov_version AS baseline_ov_version
+            FROM analysis_results ar
+            LEFT JOIN runs rb ON rb.run_id = ar.baseline_run_id
+            WHERE ar.run_id = ?
+            LIMIT 1
+        """, [run_id]).fetchdf()

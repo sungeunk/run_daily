@@ -98,11 +98,13 @@ def find_last_known_good(
             WHERE r.machine = ?
               AND r.run_id  <> ?
               AND r.ts      < ?
+                            AND r.short_run IS NOT DISTINCT FROM ?
+                            AND COALESCE(r.purpose, '') = COALESCE(?, '')
               AND ar.overall_status = 'green'
             ORDER BY r.ts DESC
             LIMIT 1
             """,
-            [rec.machine, rec.run_id, rec.ts],
+                        [rec.machine, rec.run_id, rec.ts, rec.short_run, rec.purpose],
         ).fetchone()
     except Exception:  # noqa: BLE001 — table may not exist yet
         return BaselineInfo(status="not_found")
