@@ -114,6 +114,7 @@ def analyze_run(
             rec.run_id,
             result,
             threshold_pct=config.pct_threshold,
+            config=config,
         )
         return result
 

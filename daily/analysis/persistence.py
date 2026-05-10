@@ -29,12 +29,13 @@ log = logging.getLogger(__name__)
 def write_analysis_to_summary(
     summary_json: Path,
     result: AnalysisResult,
+    config: "AnalysisConfig | None" = None,
 ) -> None:
     """Append ``result`` as an ``analysis`` key in *summary_json*.
 
     The file is updated in-place.  Existing keys are not touched.
     If the ``analysis`` key already exists it is overwritten so that
-    re-runs are idempotent.
+    re-runs are idempotent. Config snapshot is included for reproducibility.
     """
     try:
         summary = json.loads(summary_json.read_text(encoding="utf-8"))
@@ -42,7 +43,7 @@ def write_analysis_to_summary(
         log.error("persistence: cannot read %s: %s", summary_json, exc)
         return
 
-    summary["analysis"] = _result_to_dict(result)
+    summary["analysis"] = _result_to_dict(result, config=config)
 
     try:
         summary_json.write_text(
@@ -63,12 +64,14 @@ def write_analysis_to_db(
     run_id: str,
     result: AnalysisResult,
     threshold_pct: float | None = None,
+    config: "AnalysisConfig | None" = None,
 ) -> None:
     """Upsert analysis result into DB aggregate tables.
 
     Requires ``analysis_results``, ``analysis_comparisons``, and
     ``functional_issues`` to exist (added in M3).  Silently skips if
     those tables are absent so that M1/M2 deployments are unaffected.
+    Config snapshot is stored for audit trail and reproducibility.
     """
     required = ("analysis_results", "analysis_comparisons", "functional_issues")
     if not all(_table_exists(con, name) for name in required):
@@ -77,7 +80,7 @@ def write_analysis_to_db(
 
     try:
         con.execute("BEGIN")
-        _try_upsert_analysis_results(con, run_id, result)
+        _try_upsert_analysis_results(con, run_id, result, config=config)
         _try_upsert_analysis_comparisons(con, run_id, result, threshold_pct)
         _try_upsert_functional_issues(con, run_id, result)
         con.execute("COMMIT")
@@ -86,9 +89,16 @@ def write_analysis_to_db(
         log.warning("analysis DB persistence rolled back for %s: %s", run_id, exc)
 
 
-def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult) -> None:
+def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult, config: "AnalysisConfig | None" = None) -> None:
     p = result.performance
     b = result.baseline
+    
+    # Store config_json for reproducibility/audit
+    config_json = None
+    if config is not None:
+        from dataclasses import asdict as dc_asdict
+        config_json = json.dumps(dc_asdict(config))
+    
     con.execute(
         """
         INSERT INTO analysis_results (
@@ -187,11 +197,12 @@ def _table_exists(con, table_name: str) -> bool:
     return bool(row)
 
 
-def _result_to_dict(result: AnalysisResult) -> dict[str, Any]:
+def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = None) -> dict[str, Any]:
     """Convert AnalysisResult to a JSON-serialisable dict.
 
     The ``rows`` field (full comparison table) is excluded from the JSON
     to keep file size reasonable; ``top_regressions`` is sufficient.
+    Config snapshot is included for reproducibility and audit trails.
     """
     def _row_dict(row: ComparisonRow) -> dict:
         k = row.key
@@ -249,6 +260,12 @@ def _result_to_dict(result: AnalysisResult) -> dict[str, Any]:
         ],
         "top_regressions": [_row_dict(r) for r in result.top_regressions],
     }
+    
+    # Include config snapshot for reproducibility
+    if config is not None:
+        from dataclasses import asdict as dc_asdict
+        payload["config_snapshot"] = dc_asdict(config)
+    
     if result.last_known_good is not None:
         lkg = result.last_known_good
         payload["last_known_good"] = {

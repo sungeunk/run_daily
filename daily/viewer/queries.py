@@ -8,6 +8,8 @@ per-call connection cost is paid once per cache bucket.
 from __future__ import annotations
 
 from pathlib import Path
+import logging
+import time
 
 import duckdb
 import pandas as pd
@@ -15,60 +17,86 @@ import pandas as pd
 from analysis.types import AnalysisConfig
 from analysis.verdict import improvement_pct, verdict_from_pct
 
+log = logging.getLogger(__name__)
+
 
 _COMPARE_CONFIG = AnalysisConfig()
+
+# Cache table existence per connection lifecycle to avoid repeated information_schema scans
+_table_cache: dict[int, set[str]] = {}
 
 
 def _read_only(db_path: Path) -> duckdb.DuckDBPyConnection:
     return duckdb.connect(str(db_path), read_only=True)
 
 
+def _cached_tables(con) -> set[str]:
+    """Return set of existing tables for this connection, cached per connection."""
+    con_id = id(con)
+    if con_id not in _table_cache:
+        _table_cache[con_id] = {r[0] for r in con.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+        ).fetchall()}
+    return _table_cache[con_id]
+
+
 def _fill_missing_verdicts(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill missing verdicts with the canonical analysis threshold logic."""
+    """Fill missing verdicts with the canonical analysis threshold logic using vectorization."""
     if df.empty:
         return df
     if "verdict" not in df.columns:
         df["verdict"] = pd.NA
 
-    def _classify(value) -> str:
-        pct = None if pd.isna(value) else float(value)
-        return verdict_from_pct(pct, _COMPARE_CONFIG)
-
-    df["verdict"] = df["verdict"].where(df["verdict"].notna(), df["improvement_pct"].apply(_classify))
+    # Vectorized verdict classification: improved -> same -> regressed based on threshold
+    mask_missing = df["verdict"].isna()
+    if mask_missing.any():
+        pct = df.loc[mask_missing, "improvement_pct"]
+        improved = (pct >= _COMPARE_CONFIG.pct_threshold)
+        regressed = (pct <= -_COMPARE_CONFIG.pct_threshold)
+        df.loc[mask_missing & improved.values, "verdict"] = "improved"
+        df.loc[mask_missing & regressed.values, "verdict"] = "regressed"
+        df.loc[mask_missing & ~(improved | regressed).values, "verdict"] = "same"
+        df.loc[mask_missing & pct.isna(), "verdict"] = "unavailable"
     return df
 
 
 def _apply_fallback_metrics(df: pd.DataFrame) -> pd.DataFrame:
-    """Derive improvement_pct/verdict for raw fallback rows via canonical helpers."""
+    """Derive improvement_pct/verdict for raw fallback rows using vectorized operations."""
     if df.empty:
         return df
 
-    def _to_float(value) -> float | None:
-        if pd.isna(value):
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+    # Vectorized float conversion
+    value_a = pd.to_numeric(df.get("value_a", pd.Series(dtype=float)), errors="coerce")
+    value_b = pd.to_numeric(df.get("value_b", pd.Series(dtype=float)), errors="coerce")
+    current_unit = df.get("current_unit", None)
+    baseline_unit = df.get("baseline_unit", None)
+    unit = df.get("unit", None)
 
-    def _row_metrics(row: pd.Series) -> tuple[float | None, str]:
-        current_unit = row.get("current_unit")
-        baseline_unit = row.get("baseline_unit")
-        unit = row.get("unit")
-        cur = _to_float(row.get("value_a"))
-        base = _to_float(row.get("value_b"))
-
-        if current_unit is not None and baseline_unit is not None and current_unit != baseline_unit:
-            return None, "unavailable"
-
-        pct = improvement_pct(cur, base, unit)
-        return pct, verdict_from_pct(pct, _COMPARE_CONFIG)
-
-    metrics = df.apply(_row_metrics, axis=1)
-    df["improvement_pct"] = [m[0] for m in metrics]
+    # Unit mismatch: unavailable
+    unit_mismatch = (current_unit.notna() & baseline_unit.notna() & (current_unit != baseline_unit))
+    
+    # Vectorized improvement_pct calculation (positive = better for all directions handled by unit)
+    pct = value_b.copy()
+    pct[:] = None
+    valid = ~(value_a.isna() | value_b.isna() | unit_mismatch)
+    for idx in valid[valid].index:
+        pct.loc[idx] = improvement_pct(value_a.loc[idx], value_b.loc[idx], unit.loc[idx])
+    
+    df["improvement_pct"] = pct
+    
+    # Vectorized verdict classification
     if "verdict" not in df.columns:
         df["verdict"] = pd.NA
-    df["verdict"] = df["verdict"].where(df["verdict"].notna(), [m[1] for m in metrics])
+    mask_missing = df["verdict"].isna()
+    if mask_missing.any():
+        pct_val = df.loc[mask_missing, "improvement_pct"]
+        df.loc[unit_mismatch, "verdict"] = "unavailable"
+        df.loc[mask_missing & pct_val.isna(), "verdict"] = "unavailable"
+        improved = (pct_val >= _COMPARE_CONFIG.pct_threshold)
+        regressed = (pct_val <= -_COMPARE_CONFIG.pct_threshold)
+        df.loc[mask_missing & improved.values, "verdict"] = "improved"
+        df.loc[mask_missing & regressed.values, "verdict"] = "regressed"
+        df.loc[mask_missing & ~(improved | regressed).values, "verdict"] = "same"
     return df
 
 
@@ -261,9 +289,10 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
                    days: int = 60,
                    purpose_filter: str | None = None) -> pd.DataFrame:
     """Time-series of one perf point with rolling baseline stats."""
-    purpose_like = f"%{purpose_filter}%" if purpose_filter else None
+    start = time.time()
+    purpose_like = f\"%{purpose_filter}%\" if purpose_filter else None
     with _read_only(db_path) as con:
-        return con.execute("""
+        result = con.execute(\"\"\"
             WITH base AS (
                 SELECT ts, date, ov_version, ov_build, ww,
                        value, unit
@@ -324,6 +353,9 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
         """, [machine, model, precision, in_token, out_token, exec_mode,
                purpose_filter, purpose_like, days]
                            ).fetchdf()
+        elapsed = time.time() - start
+        log.debug(f"series_history({model}, {precision}, {in_token}, {out_token}) took {elapsed:.2f}s")
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +413,7 @@ def trend_regressions(db_path: Path, machine: str,
     lower is worse. ``pct_change`` is signed so that positive means "worse"
     regardless of unit, making sort-by-worst trivial.
     """
+    start = time.time()
     purpose_like = f"%{purpose_filter}%" if purpose_filter else None
     sql = """
     WITH base AS (
@@ -469,21 +502,24 @@ def trend_regressions(db_path: Path, machine: str,
 
     # Status derived in Python so we can thread sidebar thresholds through
     # without re-running SQL (viewer caches on threshold tuple).
-    def _status(row: pd.Series) -> str:
-        if (pd.isna(row["recent_median"]) or pd.isna(row["baseline_median"])
-                or row["recent_n"] < min_recent_points
-                or row["baseline_n"] < min_baseline_points):
-            return "insufficient_data"
-        return "ok"
+    # Vectorized status check
+    insufficient = (df["recent_median"].isna() | df["baseline_median"].isna() |
+                    (df["recent_n"] < min_recent_points) |
+                    (df["baseline_n"] < min_baseline_points))
+    df["status"] = "ok"
+    df.loc[insufficient, "status"] = "insufficient_data"
 
-    df["status"] = df.apply(_status, axis=1)
+    # Vectorized direction sign (1 for lower_is_better units, -1 otherwise)
     direction_sign = df["unit"].apply(lambda unit: 1 if unit in ("ms", "s", "%") else -1)
     sigma = 1.4826 * df["baseline_mad"]
     df["worsening_z"] = (direction_sign
                           * (df["recent_median"] - df["baseline_median"])
                           / sigma.where(sigma > 0))
-    return df.sort_values("worsening_pct", ascending=False,
-                          na_position="last").reset_index(drop=True)
+    result = df.sort_values("worsening_pct", ascending=False,
+                            na_position="last").reset_index(drop=True)
+    elapsed = time.time() - start
+    log.debug(f"trend_regressions(machine={machine}, recent_days={recent_days}) returned {len(result)} rows in {elapsed:.2f}s")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -555,10 +591,7 @@ def fetch_functional_history(
     Returns an empty DataFrame when the table does not exist (pre-migration DB).
     """
     with _read_only(db_path) as con:
-        tables = {r[0] for r in con.execute(
-            "SELECT table_name FROM information_schema.tables"
-        ).fetchall()}
-        if "functional_issues" not in tables:
+        if "functional_issues" not in _cached_tables(con):
             return pd.DataFrame()
 
         machine_filter = "AND r.machine = ?" if machine else ""
@@ -596,10 +629,7 @@ def fetch_functional_summary(
     Returns an empty DataFrame when analysis tables do not exist.
     """
     with _read_only(db_path) as con:
-        tables = {r[0] for r in con.execute(
-            "SELECT table_name FROM information_schema.tables"
-        ).fetchall()}
-        if "analysis_results" not in tables:
+        if "analysis_results" not in _cached_tables(con):
             return pd.DataFrame()
 
         machine_filter = "AND r.machine = ?" if machine else ""
@@ -644,11 +674,7 @@ def fetch_run_comparison(
     Falls back to a direct perf join when analysis_comparisons lacks one run.
     """
     with _read_only(db_path) as con:
-        tables = {r[0] for r in con.execute(
-            "SELECT table_name FROM information_schema.tables"
-        ).fetchall()}
-
-        if "analysis_comparisons" in tables:
+        if "analysis_comparisons" in _cached_tables(con):
             # Try to use pre-computed comparisons (run_a is current, run_b is baseline).
             df = con.execute("""
                 SELECT
@@ -705,10 +731,7 @@ def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
     has not been analyzed yet.
     """
     with _read_only(db_path) as con:
-        tables = {r[0] for r in con.execute(
-            "SELECT table_name FROM information_schema.tables"
-        ).fetchall()}
-        if "analysis_results" not in tables:
+        if "analysis_results" not in _cached_tables(con):
             return pd.DataFrame()
 
         return con.execute("""
