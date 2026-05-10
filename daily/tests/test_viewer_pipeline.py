@@ -322,6 +322,7 @@ def test_functional_queries_with_machine_filter_and_missing_category(tmp_path: P
 
     summary = queries.fetch_functional_summary(db_path, machine="LNL-03", days=30)
     assert summary["run_id"].tolist() == ["run-a"]
+    assert int(summary.iloc[0]["functional_issue_count"]) == 1
 
     history = queries.fetch_functional_history(db_path, machine="LNL-03", days=30)
     assert history["run_id"].tolist() == ["run-a"]
@@ -456,6 +457,7 @@ def test_fetch_analysis_overview_returns_baseline_metadata(tmp_path: Path) -> No
     row = df.iloc[0]
     assert row["overall_status"] == "yellow"
     assert row["regressed_count"] == 2
+    assert row["functional_issue_count"] == 0
     assert row["baseline_run_id"] == "run-base"
     assert row["baseline_stamp"] == "20260508_0900"
 
@@ -639,6 +641,18 @@ def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) 
                     "overall_status": "yellow",
                     "baseline": {"status": "found", "stamp": "20260505_1200", "ov_version": "2026.2"},
                     "last_known_good": {"status": "found", "stamp": "20260501_1200", "ov_version": "2026.1"},
+                    "bisect_delta": {
+                        "status": "available",
+                        "issue_stamp": "20260505_1200",
+                        "issue_ov_version": "2026.2",
+                        "last_good_stamp": "20260501_1200",
+                        "last_good_ov_version": "2026.1",
+                        "compared_count": 10,
+                        "regressed_count": 2,
+                        "functional_issue_count": 1,
+                        "build_changed": True,
+                        "sha_changed": True,
+                    },
                     "functional": {"failed": 1, "error": 0},
                     "performance": {"compared": 10, "regressed": 2},
                 }
@@ -674,6 +688,9 @@ def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) 
     assert "Analysis summary" in body
     assert "overall: yellow" in body
     assert "last known good: 20260501_1200 / 2026.1" in body
+    assert "bisect delta: issue=20260505_1200 / 2026.2" in body
+    assert "functional_issues=1" in body
+    assert "build=True sha=True" in body
     assert "functional: issues=1 failed=1 error=0" in body
     assert "performance: compared=10 regressed=2" in body
 
@@ -968,6 +985,9 @@ def test_run_analysis_writes_last_known_good_when_prior_green_exists(tmp_path: P
     assert d3["analysis"]["overall_status"] == "yellow"
     assert d3["analysis"]["last_known_good"]["status"] == "found"
     assert d3["analysis"]["last_known_good"]["stamp"] == "20260502_0100"
+    assert d3["analysis"]["bisect_delta"]["status"] == "available"
+    assert d3["analysis"]["bisect_delta"]["last_good_run_id"] is not None
+    assert d3["analysis"]["bisect_delta"]["regressed_count"] >= 1
 
 
 def test_run_analysis_reports_lkg_when_baseline_not_found(tmp_path: Path, monkeypatch) -> None:
@@ -1083,6 +1103,9 @@ def test_run_analysis_reports_lkg_when_baseline_not_found(tmp_path: Path, monkey
     assert d3["analysis"]["baseline"]["status"] == "not_found"
     assert d3["analysis"]["last_known_good"]["status"] == "found"
     assert d3["analysis"]["last_known_good"]["stamp"] == "20260502_0100"
+    assert d3["analysis"]["bisect_delta"]["status"] == "unavailable"
+    assert d3["analysis"]["bisect_delta"]["compared_count"] == 0
+    assert d3["analysis"]["bisect_delta"]["functional_issue_count"] == 1
 
     text = r3.read_text(encoding="utf-8")
     assert "Baseline comparison: no older run found for this machine." in text

@@ -258,4 +258,24 @@ def _result_to_dict(result: AnalysisResult) -> dict[str, Any]:
             "ov_version": lkg.ov_version,
             "selection_reason": lkg.selection_reason,
         }
+    if result.bisect_delta is not None:
+        delta = result.bisect_delta
+        payload["bisect_delta"] = {
+            "status": delta.status,
+            "issue_run_id": delta.issue_run_id,
+            "issue_stamp": delta.issue_stamp,
+            "issue_ov_version": delta.issue_ov_version,
+            "issue_ov_build": delta.issue_ov_build,
+            "issue_ov_sha": delta.issue_ov_sha,
+            "last_good_run_id": delta.last_good_run_id,
+            "last_good_stamp": delta.last_good_stamp,
+            "last_good_ov_version": delta.last_good_ov_version,
+            "last_good_ov_build": delta.last_good_ov_build,
+            "last_good_ov_sha": delta.last_good_ov_sha,
+            "compared_count": delta.compared_count,
+            "regressed_count": delta.regressed_count,
+            "functional_issue_count": delta.functional_issue_count,
+            "build_changed": delta.build_changed,
+            "sha_changed": delta.sha_changed,
+        }
     return payload

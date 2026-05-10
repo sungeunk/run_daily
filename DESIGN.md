@@ -453,9 +453,9 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 ### Bisect 지원
 
 - [x] last known good 탐색 API 구현 (`baseline.find_last_known_good` 구현 + issue run 경로 연동)
-- [ ] issue run vs last good run delta 생성
-- [ ] bisect 보조 메일 템플릿 작성
-- [ ] bisect 경로 테스트 추가
+- [x] issue run vs last good run delta 생성
+- [x] bisect 보조 메일 템플릿 작성
+- [x] bisect 경로 테스트 추가
 
 ### 운영/품질
 
@@ -463,7 +463,7 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 - [x] performance 방향성/threshold 판정 로직 단일화 (Compare 탭 hard-coded threshold 제거 + canonical verdict 재사용 반영)
 - [x] `AnalysisResult` contract 기반 last-known-good 재사용 구조 정리 (LKG를 `AnalysisResult`/summary contract로 승격, `run.py` JSON 후처리 제거)
 - [x] baseline/last-known-good candidate query 정책 공통화 (공통 candidate predicate 도입 + comparable-series overlap 정책 공유)
-- [ ] functional issue count 명칭 정리(`functional_fail_count` 호환 유지)
+- [x] functional issue count 명칭 정리(`functional_fail_count` 호환 유지)
 - [x] 기본 로깅/에러 핸들링/계속 진행 정책 일부 구현
 - [~] ingest/query/viewer 테스트 존재
 - [x] analysis engine unit test 추가
@@ -543,7 +543,7 @@ P2 bisect와 noisy dual gate를 추가하기 전에, 이미 구현된 분석/조
 13. **baseline/LKG candidate query 정책 공통화**
   baseline 선택과 last-known-good 탐색은 모두 machine, short_run, purpose, older timestamp, green-only, comparable-series 조건을 조합한다. 중복 SQL이 늘어나지 않도록 작은 policy/helper를 만들고, `same profile`, `require overlap`, `green only` 조건을 명시적으로 조합하게 한다.
 
-14. **functional issue count 명칭 정리**
+14. **functional issue count 명칭 정리** (완료)
   timeout까지 포함한 실제 의미는 `functional issue count`다. 기존 DB column `functional_fail_count`는 호환성 때문에 유지하되, UI label과 DESIGN 설명은 `Functional issues`로 맞추고, summary JSON에는 `issue_count`를 canonical field로 유지한다.
 
 15. **정리 후 회귀 검증**
@@ -555,7 +555,7 @@ P2 bisect와 noisy dual gate를 추가하기 전에, 이미 구현된 분석/조
   `baseline.py`에 `overall_status = green` 기반 탐색 함수를 추가하고,
   issue run(`red`/`yellow`) summary에 bisect hint로 연동했다. (완료)
 
-17. **bisect 보조 메일 템플릿**
+17. **bisect 보조 메일 템플릿** (완료)
     issue run과 last good run의 delta를 구조화해서 메일에 포함한다.
 
 18. **noisy series dual gate 고도화**

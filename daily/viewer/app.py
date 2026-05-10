@@ -460,7 +460,12 @@ def _tab_dashboard(cfg: dict) -> None:
         health_cols[0].metric("Overall", f"{status_icon} {status}")
         health_cols[1].metric("Compared", int(analysis_row.get("compared_count") or 0))
         health_cols[2].metric("Regressed", int(analysis_row.get("regressed_count") or 0))
-        health_cols[3].metric("Functional fail", int(analysis_row.get("functional_fail_count") or 0))
+        issue_count = int(
+            analysis_row.get("functional_issue_count")
+            or analysis_row.get("functional_fail_count")
+            or 0
+        )
+        health_cols[3].metric("Functional issues", issue_count)
 
         baseline_stamp = analysis_row.get("baseline_stamp")
         baseline_ov = analysis_row.get("baseline_ov_version")
@@ -938,12 +943,12 @@ def _tab_functional(cfg: dict) -> None:
     st.markdown("#### Run health summary")
     st.dataframe(
         summary_df[["stamp", "ov_version", "status",
-                     "functional_fail_count", "regressed_count",
+                     "functional_issue_count", "regressed_count",
                      "compared_count"]].rename(columns={
             "stamp": "Stamp",
             "ov_version": "OV Version",
             "status": "Status",
-            "functional_fail_count": "Fail+Error",
+            "functional_issue_count": "Functional issues",
             "regressed_count": "Regressions",
             "compared_count": "Compared",
         }),
@@ -971,12 +976,12 @@ def _tab_functional(cfg: dict) -> None:
     )
 
     # Stacked bar: fail count per run
-    if not summary_df.empty and "functional_fail_count" in summary_df.columns:
+    if not summary_df.empty and "functional_issue_count" in summary_df.columns:
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=summary_df["stamp"],
-            y=summary_df["functional_fail_count"],
-            name="Fail+Error",
+            y=summary_df["functional_issue_count"],
+            name="Functional issues",
             marker_color="#EF5350",
         ))
         fig.add_trace(go.Bar(

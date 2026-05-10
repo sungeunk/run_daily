@@ -22,6 +22,7 @@ from .types import (
     AnalysisConfig,
     AnalysisResult,
     BaselineInfo,
+    BisectDelta,
     ComparisonRow,
     ModelSummary,
     OverallStatus,
@@ -82,8 +83,16 @@ def analyze_run(
         top_regressions = _top_regressions(rows, config.top_regressions)
         overall_status = _overall_status(functional, performance, baseline_info)
         last_known_good = None
+        bisect_delta = None
         if overall_status in {"red", "yellow"}:
             last_known_good = find_last_known_good(con, rec)
+            bisect_delta = _build_bisect_delta(
+                con,
+                current_run_id=rec.run_id,
+                lkg=last_known_good,
+                functional_issue_count=functional.issue_count,
+                config=config,
+            )
 
         result = AnalysisResult(
             overall_status=overall_status,
@@ -93,6 +102,7 @@ def analyze_run(
             models=models,
             top_regressions=top_regressions,
             last_known_good=last_known_good,
+            bisect_delta=bisect_delta,
             rows=rows,
         )
 
@@ -254,6 +264,105 @@ def _top_regressions(
 ) -> list[ComparisonRow]:
     regressed = [r for r in rows if r.verdict == "regressed" and r.improvement_pct is not None]
     return sorted(regressed, key=lambda r: r.improvement_pct)[:n]  # type: ignore[arg-type]
+
+
+def _build_bisect_delta(
+    con,
+    *,
+    current_run_id: str,
+    lkg: BaselineInfo,
+    functional_issue_count: int,
+    config: AnalysisConfig,
+) -> BisectDelta:
+    issue_meta = _fetch_run_meta(con, current_run_id)
+
+    if lkg.status != "found" or not lkg.run_id:
+        return BisectDelta(
+            status="unavailable",
+            issue_run_id=current_run_id,
+            issue_stamp=issue_meta.get("stamp"),
+            issue_ov_version=issue_meta.get("ov_version"),
+            issue_ov_build=issue_meta.get("ov_build"),
+            issue_ov_sha=issue_meta.get("ov_sha"),
+            last_good_run_id=None,
+            last_good_stamp=None,
+            last_good_ov_version=None,
+            last_good_ov_build=None,
+            last_good_ov_sha=None,
+            compared_count=0,
+            regressed_count=0,
+            functional_issue_count=functional_issue_count,
+            build_changed=None,
+            sha_changed=None,
+        )
+
+    lkg_rows = _fetch_comparison_rows(con, current_run_id, lkg, config)
+    comparable_rows = [
+        row for row in lkg_rows
+        if row.improvement_pct is not None and row.verdict != "unavailable"
+    ]
+    lkg_perf = _aggregate_performance(comparable_rows)
+    lkg_meta = _fetch_run_meta(con, lkg.run_id)
+
+    build_changed = _changed(issue_meta.get("ov_build"), lkg_meta.get("ov_build"))
+    sha_changed = _changed(issue_meta.get("ov_sha"), lkg_meta.get("ov_sha"))
+
+    status = "available" if lkg_perf.compared > 0 else "unavailable"
+
+    return BisectDelta(
+        status=status,
+        issue_run_id=current_run_id,
+        issue_stamp=issue_meta.get("stamp"),
+        issue_ov_version=issue_meta.get("ov_version"),
+        issue_ov_build=issue_meta.get("ov_build"),
+        issue_ov_sha=issue_meta.get("ov_sha"),
+        last_good_run_id=lkg.run_id,
+        last_good_stamp=lkg_meta.get("stamp") or lkg.stamp,
+        last_good_ov_version=lkg_meta.get("ov_version") or lkg.ov_version,
+        last_good_ov_build=lkg_meta.get("ov_build"),
+        last_good_ov_sha=lkg_meta.get("ov_sha"),
+        compared_count=lkg_perf.compared,
+        regressed_count=lkg_perf.regressed,
+        functional_issue_count=functional_issue_count,
+        build_changed=build_changed,
+        sha_changed=sha_changed,
+    )
+
+
+def _fetch_run_meta(con, run_id: str) -> dict[str, str | None]:
+    row = con.execute(
+        """
+        SELECT
+            strftime(ts, '%Y%m%d_%H%M') AS stamp,
+            ov_version,
+            ov_build,
+            ov_sha
+        FROM runs
+        WHERE run_id = ?
+        LIMIT 1
+        """,
+        [run_id],
+    ).fetchone()
+    if not row:
+        return {
+            "stamp": None,
+            "ov_version": None,
+            "ov_build": None,
+            "ov_sha": None,
+        }
+    stamp, ov_version, ov_build, ov_sha = row
+    return {
+        "stamp": stamp,
+        "ov_version": ov_version,
+        "ov_build": ov_build,
+        "ov_sha": ov_sha,
+    }
+
+
+def _changed(current: str | None, previous: str | None) -> bool | None:
+    if not current or not previous:
+        return None
+    return current != previous
 
 
 def _overall_status(

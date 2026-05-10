@@ -78,6 +78,9 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
     last_known_good = (
         analysis.get('last_known_good') if isinstance(analysis.get('last_known_good'), dict) else {}
     )
+    bisect_delta = (
+        analysis.get('bisect_delta') if isinstance(analysis.get('bisect_delta'), dict) else {}
+    )
     functional = analysis.get('functional') if isinstance(analysis.get('functional'), dict) else {}
     performance = analysis.get('performance') if isinstance(analysis.get('performance'), dict) else {}
 
@@ -102,6 +105,31 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
     if lkg_text is not None:
         lkg_line = f'<li>last known good: {html.escape(str(lkg_text))}</li>'
 
+    bisect_lines = ''
+    if bisect_delta:
+        status = str(bisect_delta.get('status', 'unavailable'))
+        if status == 'available':
+            issue_ref = (
+                f"{bisect_delta.get('issue_stamp', '')} / "
+                f"{bisect_delta.get('issue_ov_version', 'unknown')}"
+            )
+            good_ref = (
+                f"{bisect_delta.get('last_good_stamp', '')} / "
+                f"{bisect_delta.get('last_good_ov_version', 'unknown')}"
+            )
+            bisect_lines = (
+                f'<li>bisect delta: issue={html.escape(issue_ref)} '
+                f'vs last-good={html.escape(good_ref)}</li>'
+                f'<li>bisect counts: compared={_safe_int(bisect_delta.get("compared_count", 0))} '
+                f'regressed={_safe_int(bisect_delta.get("regressed_count", 0))} '
+                f'functional_issues={_safe_int(bisect_delta.get("functional_issue_count", 0))}</li>'
+                f'<li>build/sha changed: '
+                f'build={html.escape(str(bisect_delta.get("build_changed")))} '
+                f'sha={html.escape(str(bisect_delta.get("sha_changed")))}</li>'
+            )
+        else:
+            bisect_lines = '<li>bisect delta: unavailable</li>'
+
     # Keep this intentionally compact so the full report still remains the source of detail.
     return (
         '<div style="margin-bottom:12px">'
@@ -110,6 +138,7 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
         f'<li>overall: {html.escape(overall)}</li>'
         f'<li>baseline: {html.escape(str(baseline_text))}</li>'
         f'{lkg_line}'
+        f'{bisect_lines}'
         f'<li>functional: issues={issue_count} failed={failed} error={error}</li>'
         f'<li>performance: compared={_safe_int(performance.get("compared", 0))} '
         f'regressed={_safe_int(performance.get("regressed", 0))}</li>'

@@ -134,6 +134,28 @@ class ModelSummary:
     regressed: int
 
 
+@dataclass
+class BisectDelta:
+    """Issue-run vs last-known-good summary for bisect assistance."""
+
+    status: Literal["available", "unavailable"]
+    issue_run_id: str
+    issue_stamp: str | None
+    issue_ov_version: str | None
+    issue_ov_build: str | None
+    issue_ov_sha: str | None
+    last_good_run_id: str | None
+    last_good_stamp: str | None
+    last_good_ov_version: str | None
+    last_good_ov_build: str | None
+    last_good_ov_sha: str | None
+    compared_count: int
+    regressed_count: int
+    functional_issue_count: int
+    build_changed: bool | None
+    sha_changed: bool | None
+
+
 # ---------------------------------------------------------------------------
 # Top-level result
 # ---------------------------------------------------------------------------
@@ -154,3 +176,4 @@ class AnalysisResult:
     top_regressions: list[ComparisonRow]
     rows: list[ComparisonRow]           # full comparison table (not in JSON output)
     last_known_good: BaselineInfo | None = None
+    bisect_delta: BisectDelta | None = None
