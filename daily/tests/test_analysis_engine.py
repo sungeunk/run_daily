@@ -278,6 +278,20 @@ class TestSelectBaseline:
             """
         )
         con.execute("CREATE TABLE analysis_results (run_id TEXT, overall_status TEXT)")
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
 
         now = datetime(2026, 1, 2, 0, 0)
         con.execute(
@@ -290,6 +304,14 @@ class TestSelectBaseline:
         )
         con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green", "green"])
         con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-yellow", "yellow"])
+        con.executemany(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("old-green", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                ("old-yellow", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                ("current", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+            ],
+        )
 
         rec = RunRecord(
             run_id="current",
@@ -306,6 +328,69 @@ class TestSelectBaseline:
 
         assert baseline.status == "found"
         assert baseline.run_id == "old-green"
+
+    def test_skips_newer_run_without_comparable_series(self):
+        duckdb = pytest.importorskip("duckdb")
+        from viewer.ingest.record import RunRecord
+
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """
+            CREATE TABLE runs (
+                run_id TEXT,
+                machine TEXT,
+                ts TIMESTAMP,
+                short_run BOOLEAN,
+                purpose TEXT,
+                ov_version TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
+
+        now = datetime(2026, 1, 2, 0, 0)
+        con.executemany(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("old-match", "M1", now - timedelta(hours=3), True, "nightly", "ov-match"),
+                ("old-no-overlap", "M1", now - timedelta(hours=1), True, "nightly", "ov-no-overlap"),
+            ],
+        )
+        con.executemany(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("old-match", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                ("old-no-overlap", "bert", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                ("current", "llama", "FP16", 32, 128, "2nd", 11.0, "ms"),
+            ],
+        )
+        rec = RunRecord(
+            run_id="current",
+            source_format="new",
+            report_file="r",
+            machine="M1",
+            ts=now,
+            short_run=True,
+            purpose="nightly",
+        )
+
+        baseline = select_baseline(con, rec, AnalysisConfig())
+
+        assert baseline.status == "found"
+        assert baseline.run_id == "old-match"
 
 
 class TestFindLastKnownGood:
@@ -370,8 +455,8 @@ class TestOverallStatus:
     def _perf(self, regressed=0, compared=5):
         return PerformanceResult(compared=compared, improved=0, same=max(compared - regressed, 0), regressed=regressed, unavailable=0)
 
-    def _func(self, failed=0):
-        return FunctionalResult(total=5, passed=5 - failed, failed=failed, error=0, skipped=0)
+    def _func(self, failed=0, issues=None):
+        return FunctionalResult(total=5, passed=5 - failed, failed=failed, error=0, skipped=0, issues=issues or [])
 
     def _baseline(self, found=True):
         return BaselineInfo(status="found" if found else "not_found")
@@ -391,6 +476,10 @@ class TestOverallStatus:
     def test_functional_fail_beats_regression(self):
         # Both issues present: red wins over yellow.
         assert _overall_status(self._func(failed=1), self._perf(regressed=2), self._baseline()) == "red"
+
+    def test_timeout_issue_is_red(self):
+        issues = [FunctionalIssue(nodeid="test_timeout", outcome="timeout", message="timed out")]
+        assert _overall_status(self._func(issues=issues), self._perf(), self._baseline()) == "red"
 
     def test_baseline_found_but_no_comparison_is_gray(self):
         assert _overall_status(self._func(), self._perf(compared=0), self._baseline()) == "gray"
@@ -621,6 +710,26 @@ class TestWriteAnalysisToDb:
             rows=[],
         )
 
+    def _timeout_only(self) -> "AnalysisResult":
+        from analysis.types import AnalysisResult
+
+        return AnalysisResult(
+            overall_status="red",
+            baseline=BaselineInfo(status="found", run_id="base"),
+            functional=FunctionalResult(
+                total=1,
+                passed=0,
+                failed=0,
+                error=0,
+                skipped=0,
+                issues=[FunctionalIssue(nodeid="t", outcome="timeout", message="timed out")],
+            ),
+            performance=PerformanceResult(compared=1, improved=0, same=1, regressed=0, unavailable=0),
+            models=[],
+            top_regressions=[],
+            rows=[ComparisonRow(_KEY, "ms", 10.0, 10.0, 0.0, "same")],
+        )
+
     def test_cleans_stale_comparisons_on_empty_rerun(self, tmp_path):
         duckdb = pytest.importorskip("duckdb")
         con = duckdb.connect(":memory:")
@@ -694,6 +803,21 @@ class TestWriteAnalysisToDb:
 
         assert stored is not None
         assert abs(stored[0] - 0.07) < 1e-12
+
+    def test_timeout_issue_counts_as_functional_issue(self):
+        duckdb = pytest.importorskip("duckdb")
+        con = duckdb.connect(":memory:")
+        schema = (Path(__file__).resolve().parents[1] / "viewer" / "schema.sql").read_text(encoding="utf-8")
+        con.execute(schema)
+
+        write_analysis_to_db(con, "run-timeout", self._timeout_only(), threshold_pct=0.05)
+        stored = con.execute(
+            "SELECT functional_fail_count FROM analysis_results WHERE run_id = ?",
+            ["run-timeout"],
+        ).fetchone()
+
+        assert stored is not None
+        assert stored[0] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +925,7 @@ class TestAnalyzeRunIntegration:
 
         s2 = self._make_summary(tmp_path, "20260102_0000", value=100.0)
         data = json.loads(s2.read_text(encoding="utf-8"))
-        data["tests"][0]["metrics"]["data"][0]["perf"] = [None, None]
+        data["tests"][0]["metrics"]["data"][0]["perf"] = ["nan", "nan"]
         s2.write_text(json.dumps(data), encoding="utf-8")
 
         r2 = analyze_run(s2, db)

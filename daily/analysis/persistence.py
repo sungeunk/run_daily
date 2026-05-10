@@ -111,7 +111,7 @@ def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult) -> No
             b.run_id if b.status == "found" else None,
             result.overall_status,
             p.compared, p.improved, p.same, p.regressed,
-            result.functional.failed + result.functional.error,
+            result.functional.issue_count,
         ],
     )
 
@@ -224,6 +224,7 @@ def _result_to_dict(result: AnalysisResult) -> dict[str, Any]:
             "failed":  result.functional.failed,
             "error":   result.functional.error,
             "skipped": result.functional.skipped,
+            "issue_count": result.functional.issue_count,
             "issues": [
                 {"nodeid": i.nodeid, "outcome": i.outcome, "message": i.message}
                 for i in result.functional.issues

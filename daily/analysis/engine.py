@@ -258,7 +258,7 @@ def _overall_status(
     baseline: BaselineInfo,
 ) -> OverallStatus:
     # Functional failures take priority over performance signals.
-    if functional.failed > 0 or functional.error > 0:
+    if functional.issue_count > 0:
         return "red"
     if baseline.status != "found":
         return "gray"

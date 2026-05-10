@@ -85,6 +85,10 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
     if baseline.get('status') == 'found':
         baseline_text = f"{baseline.get('stamp', '')} / {baseline.get('ov_version', 'unknown')}"
 
+    failed = _safe_int(functional.get('failed', 0))
+    error = _safe_int(functional.get('error', 0))
+    issue_count = _safe_int(functional.get('issue_count', failed + error))
+
     lkg_text = None
     if last_known_good:
         lkg_text = 'not found'
@@ -106,8 +110,7 @@ def _html_analysis_summary_block(summary_json: Path) -> str:
         f'<li>overall: {html.escape(overall)}</li>'
         f'<li>baseline: {html.escape(str(baseline_text))}</li>'
         f'{lkg_line}'
-        f'<li>functional: failed={_safe_int(functional.get("failed", 0))} '
-        f'error={_safe_int(functional.get("error", 0))}</li>'
+        f'<li>functional: issues={issue_count} failed={failed} error={error}</li>'
         f'<li>performance: compared={_safe_int(performance.get("compared", 0))} '
         f'regressed={_safe_int(performance.get("regressed", 0))}</li>'
         '</ul>'

@@ -649,6 +649,7 @@ def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) 
     assert "Analysis summary" in body
     assert "overall: yellow" in body
     assert "last known good: 20260501_1200 / 2026.1" in body
+    assert "functional: issues=1 failed=1 error=0" in body
     assert "performance: compared=10 regressed=2" in body
 
 
@@ -692,7 +693,7 @@ def test_send_mail_handles_malformed_analysis_values(tmp_path: Path, monkeypatch
     assert ok is True
     body = str(captured["input"])
     assert "Analysis summary" in body
-    assert "functional: failed=0 error=0" in body
+    assert "functional: issues=0 failed=0 error=0" in body
     assert "performance: compared=0 regressed=0" in body
 
 

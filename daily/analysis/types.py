@@ -105,6 +105,12 @@ class FunctionalResult:
     skipped: int
     issues: list[FunctionalIssue] = field(default_factory=list)
 
+    @property
+    def issue_count(self) -> int:
+        """Return failures/errors plus explicit timeout-only issues."""
+        timeout_count = sum(1 for issue in self.issues if issue.outcome == "timeout")
+        return self.failed + self.error + timeout_count
+
 
 @dataclass
 class PerformanceResult:

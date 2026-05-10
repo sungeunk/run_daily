@@ -45,6 +45,7 @@ def select_baseline(
             con,
             extra_where="AND COALESCE(r.purpose, '') = ?",
             extra_params=[*common_params, rec.short_run, rec.purpose],
+            current_run_id=rec.run_id,
             green_join=green_join,
         )
         if row:
@@ -55,6 +56,7 @@ def select_baseline(
         con,
         extra_where="",
         extra_params=[*common_params, rec.short_run],
+        current_run_id=rec.run_id,
         green_join=green_join,
     )
     if row:
@@ -65,6 +67,7 @@ def select_baseline(
         con,
         extra_where="",
         extra_params=common_params,
+        current_run_id=rec.run_id,
         green_join=green_join,
         skip_short_run=True,
     )
@@ -133,6 +136,7 @@ def _query_baseline(
     *,
     extra_where: str,
     extra_params: list,
+    current_run_id: str,
     green_join: str,
     skip_short_run: bool = False,
 ) -> tuple | None:
@@ -148,10 +152,23 @@ def _query_baseline(
           AND r.ts       < ?
           {short_run_clause}
           {extra_where}
+          AND EXISTS (
+              SELECT 1
+              FROM perf c
+              JOIN perf p
+                ON p.model     = c.model
+               AND p.precision = c.precision
+               AND p.in_token  = c.in_token
+               AND p.out_token = c.out_token
+               AND p.exec_mode = c.exec_mode
+              WHERE c.run_id = ?
+                AND p.run_id = r.run_id
+              LIMIT 1
+          )
         ORDER BY r.ts DESC
         LIMIT 1
     """
-    return con.execute(sql, extra_params).fetchone()
+    return con.execute(sql, [*extra_params, current_run_id]).fetchone()
 
 
 def _make_info(row: tuple, reason: str) -> BaselineInfo:
