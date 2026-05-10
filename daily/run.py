@@ -247,7 +247,8 @@ def main() -> int:
     if args.mail:
         suffix = mail_title_suffix(summary)
         send_mail(text_report, args.mail, args.description,
-                  suffix_title=suffix, now_stamp=stamp)
+                  suffix_title=suffix, now_stamp=stamp,
+                  summary_json=summary_json)
 
     if args.xlsx_update:
         from viewer.perf_rows import flatten, as_lookup

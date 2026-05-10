@@ -483,3 +483,176 @@ def geomean_trend(db_path: Path, machine: str,
             GROUP BY f.run_id, f.ts, f.date, f.ov_version, f.ov_build, f.ww
             ORDER BY f.ts
         """, params).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# Functional issue history
+# ---------------------------------------------------------------------------
+
+def fetch_functional_history(
+    db_path: Path,
+    machine: str | None = None,
+    days: int = 30,
+) -> pd.DataFrame:
+    """Return functional_issues joined with run metadata, newest first.
+
+    Each row represents one failed/errored test in a run.
+    Returns an empty DataFrame when the table does not exist (pre-migration DB).
+    """
+    with _read_only(db_path) as con:
+        tables = {r[0] for r in con.execute(
+            "SELECT table_name FROM information_schema.tables"
+        ).fetchall()}
+        if "functional_issues" not in tables:
+            return pd.DataFrame()
+
+        machine_filter = "AND r.machine = ?" if machine else ""
+        params: list[object] = [str(days)]
+        if machine:
+            params.append(machine)
+
+        return con.execute(f"""
+            SELECT
+                fi.run_id,
+                r.machine,
+                strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                r.ts,
+                r.ov_version,
+                fi.nodeid,
+                fi.outcome,
+                CAST(NULL AS TEXT) AS category,
+                fi.message
+            FROM functional_issues fi
+            JOIN runs r ON r.run_id = fi.run_id
+            WHERE r.ts >= current_date - (? || ' DAY')::INTERVAL
+              {machine_filter}
+            ORDER BY r.ts DESC, fi.nodeid
+        """, params).fetchdf()
+
+
+def fetch_functional_summary(
+    db_path: Path,
+    machine: str | None = None,
+    days: int = 30,
+) -> pd.DataFrame:
+    """Return per-run functional counts joined with analysis_results.
+
+    Useful for building the functional health history chart.
+    Returns an empty DataFrame when analysis tables do not exist.
+    """
+    with _read_only(db_path) as con:
+        tables = {r[0] for r in con.execute(
+            "SELECT table_name FROM information_schema.tables"
+        ).fetchall()}
+        if "analysis_results" not in tables:
+            return pd.DataFrame()
+
+        machine_filter = "AND r.machine = ?" if machine else ""
+        params: list[object] = [str(days)]
+        if machine:
+            params.append(machine)
+
+        return con.execute(f"""
+            SELECT
+                r.run_id,
+                r.machine,
+                strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                r.ts,
+                r.ov_version,
+                ar.overall_status,
+                ar.functional_fail_count,
+                ar.regressed_count,
+                ar.compared_count,
+                ar.improved_count,
+                ar.same_count
+            FROM analysis_results ar
+            JOIN runs r ON r.run_id = ar.run_id
+            WHERE r.ts >= current_date - (? || ' DAY')::INTERVAL
+              {machine_filter}
+            ORDER BY r.ts
+        """, params).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# Run-to-run comparison
+# ---------------------------------------------------------------------------
+
+def fetch_run_comparison(
+    db_path: Path,
+    run_id_a: str,
+    run_id_b: str,
+) -> pd.DataFrame:
+    """Compare two runs at the series level using analysis_comparisons.
+
+    Returns rows for run_id_a enriched with matching rows from run_id_b.
+    Falls back to a direct perf join when analysis_comparisons lacks one run.
+    """
+    with _read_only(db_path) as con:
+        tables = {r[0] for r in con.execute(
+            "SELECT table_name FROM information_schema.tables"
+        ).fetchall()}
+
+        if "analysis_comparisons" in tables:
+            # Try to use pre-computed comparisons (run_a is current, run_b is baseline).
+            df = con.execute("""
+                SELECT
+                    ac.model,
+                    ac.precision,
+                    ac.in_token,
+                    ac.out_token,
+                    ac.exec_mode,
+                    ac.unit,
+                    ac.current_value  AS value_a,
+                    ac.baseline_value AS value_b,
+                    ac.improvement_pct,
+                    ac.verdict
+                FROM analysis_comparisons ac
+                WHERE ac.run_id          = ?
+                  AND ac.baseline_run_id = ?
+                ORDER BY model, precision, in_token, out_token, exec_mode
+            """, [run_id_a, run_id_b]).fetchdf()
+            if not df.empty:
+                return df
+
+        # Fallback: direct perf join on series key.
+        return con.execute("""
+            SELECT
+                COALESCE(a.model,     b.model)     AS model,
+                COALESCE(a.precision, b.precision) AS precision,
+                COALESCE(a.in_token,  b.in_token)  AS in_token,
+                COALESCE(a.out_token, b.out_token) AS out_token,
+                COALESCE(a.exec_mode, b.exec_mode) AS exec_mode,
+                COALESCE(a.unit,      b.unit)       AS unit,
+                a.unit AS current_unit,
+                b.unit AS baseline_unit,
+                a.value AS value_a,
+                b.value AS value_b,
+                CASE
+                    WHEN a.value IS NULL OR b.value IS NULL THEN NULL
+                    WHEN b.value = 0                        THEN NULL
+                    WHEN a.unit IS NOT NULL
+                     AND b.unit IS NOT NULL
+                     AND a.unit != b.unit                   THEN NULL
+                    WHEN COALESCE(a.unit, b.unit) IN ('ms', 's', '%')
+                        THEN (b.value - a.value) / b.value
+                    ELSE (a.value - b.value) / b.value
+                END AS improvement_pct,
+                CASE
+                    WHEN a.value IS NULL OR b.value IS NULL THEN 'unavailable'
+                    WHEN a.unit IS NOT NULL
+                     AND b.unit IS NOT NULL
+                     AND a.unit != b.unit                   THEN 'unavailable'
+                    ELSE NULL
+                END AS verdict
+            FROM perf a
+            FULL OUTER JOIN perf b
+              ON a.model     = b.model
+             AND a.precision = b.precision
+             AND a.in_token  = b.in_token
+             AND a.out_token = b.out_token
+             AND a.exec_mode = b.exec_mode
+             AND a.run_id    = ?
+             AND b.run_id    = ?
+            WHERE a.run_id = ? OR b.run_id = ?
+            ORDER BY model, precision, in_token, out_token, exec_mode
+        """, [run_id_a, run_id_b, run_id_a, run_id_b]).fetchdf()

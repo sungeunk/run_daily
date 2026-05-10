@@ -253,6 +253,130 @@ rows:
     assert row["worsening_pct"] == 0.2
 
 
+def test_functional_queries_with_machine_filter_and_missing_category(tmp_path: Path) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    with connect(db_path) as con:
+        ensure_schema(con)
+
+        ts_a = datetime(2026, 5, 9, 10, 0, 0)
+        ts_b = datetime(2026, 5, 9, 11, 0, 0)
+
+        rec_a = RunRecord(
+            run_id="run-a",
+            source_format="new",
+            report_file="daily.a.summary.json",
+            machine="LNL-03",
+            ts=ts_a,
+            purpose="daily_CB timer",
+            description="daily",
+            ww=workweek_of(ts_a),
+            ov_version="2026.2.0-21664-ad5d8e0f99b",
+            source_path=str(tmp_path / "daily.a.summary.json"),
+            file_hash="hash-a",
+            perf=[PerfRow("llama", "FP16", 32, 128, "2nd", 10.0, "ms")],
+        )
+        rec_b = RunRecord(
+            run_id="run-b",
+            source_format="new",
+            report_file="daily.b.summary.json",
+            machine="BMG-02",
+            ts=ts_b,
+            purpose="daily_CB timer",
+            description="daily",
+            ww=workweek_of(ts_b),
+            ov_version="2026.2.0-21664-ad5d8e0f99b",
+            source_path=str(tmp_path / "daily.b.summary.json"),
+            file_hash="hash-b",
+            perf=[PerfRow("llama", "FP16", 32, 128, "2nd", 11.0, "ms")],
+        )
+        upsert_run(con, rec_a)
+        upsert_run(con, rec_b)
+
+        con.execute(
+            """
+            INSERT INTO analysis_results (
+                run_id, baseline_run_id, overall_status,
+                compared_count, improved_count, same_count,
+                regressed_count, functional_fail_count
+            )
+            VALUES (?, NULL, ?, 1, 0, 1, 0, ?)
+            """,
+            ["run-a", "red", 1],
+        )
+        con.execute(
+            """
+            INSERT INTO analysis_results (
+                run_id, baseline_run_id, overall_status,
+                compared_count, improved_count, same_count,
+                regressed_count, functional_fail_count
+            )
+            VALUES (?, NULL, ?, 1, 1, 0, 0, ?)
+            """,
+            ["run-b", "green", 0],
+        )
+
+        con.execute(
+            "INSERT INTO functional_issues (run_id, nodeid, outcome, message) VALUES (?, ?, ?, ?)",
+            ["run-a", "test_case_a", "failed", "assertion"],
+        )
+
+    summary = queries.fetch_functional_summary(db_path, machine="LNL-03", days=30)
+    assert summary["run_id"].tolist() == ["run-a"]
+
+    history = queries.fetch_functional_history(db_path, machine="LNL-03", days=30)
+    assert history["run_id"].tolist() == ["run-a"]
+    assert "category" in history.columns
+    assert pd.isna(history.iloc[0]["category"])
+
+
+def test_fetch_run_comparison_fallback_handles_unit_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    with connect(db_path) as con:
+        ensure_schema(con)
+        con.execute(
+            """
+            INSERT INTO perf (
+                run_id, model, precision, in_token, out_token, exec_mode, value, unit
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "run-a", "llama", "FP16", 32, 128, "2nd", 10.0, "ms",
+                "run-b", "llama", "FP16", 32, 128, "2nd", 100.0, "tps",
+            ],
+        )
+
+    # No analysis_comparisons rows for this pair -> direct perf fallback path.
+    df = queries.fetch_run_comparison(db_path, "run-a", "run-b")
+    assert len(df) == 1
+    assert pd.isna(df.iloc[0]["improvement_pct"])
+    assert df.iloc[0]["verdict"] == "unavailable"
+
+
+def test_fetch_run_comparison_fallback_uses_coalesced_unit_direction(tmp_path: Path) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    with connect(db_path) as con:
+        ensure_schema(con)
+        con.execute(
+            """
+            INSERT INTO perf (
+                run_id, model, precision, in_token, out_token, exec_mode, value, unit
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                # Run A has NULL unit; Run B has latency unit -> must use latency direction.
+                "run-a", "llama", "FP16", 32, 128, "2nd", 9.0, None,
+                "run-b", "llama", "FP16", 32, 128, "2nd", 10.0, "ms",
+            ],
+        )
+
+    df = queries.fetch_run_comparison(db_path, "run-a", "run-b")
+    assert len(df) == 1
+    # Latency improved from 10 -> 9 => +10%
+    assert df.iloc[0]["improvement_pct"] == 0.1
+
+
 def test_ensure_schema_upgrades_legacy_analysis_columns(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.duckdb"
     with connect(db_path) as con:
@@ -419,6 +543,131 @@ def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> 
     assert captured["text"] is True
     assert "<pre" in str(captured["input"])
     assert "line 1\nline 2\n" in str(captured["input"])
+
+
+def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) -> None:
+    report = tmp_path / "daily.report"
+    report.write_text("line 1\n", encoding="utf-8")
+    summary_json = tmp_path / "daily.summary.json"
+    summary_json.write_text(
+        json.dumps(
+            {
+                "analysis": {
+                    "overall_status": "yellow",
+                    "baseline": {"status": "found", "stamp": "20260505_1200", "ov_version": "2026.2"},
+                    "functional": {"failed": 1, "error": 0},
+                    "performance": {"compared": 10, "regressed": 2},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd: list[str], input: str, text: bool):
+        captured["cmd"] = cmd
+        captured["input"] = input
+        captured["text"] = text
+        return _Result()
+
+    monkeypatch.setattr(delivery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(delivery.platform, "node", lambda: "TESTNODE")
+    monkeypatch.setattr(delivery.subprocess, "run", _fake_run)
+
+    ok = delivery.send_mail(
+        report,
+        "user@example.com",
+        "daily report",
+        now_stamp="20260505_2253",
+        summary_json=summary_json,
+    )
+
+    assert ok is True
+    body = str(captured["input"])
+    assert "Analysis summary" in body
+    assert "overall: yellow" in body
+    assert "performance: compared=10 regressed=2" in body
+
+
+def test_send_mail_handles_malformed_analysis_values(tmp_path: Path, monkeypatch) -> None:
+    report = tmp_path / "daily.report"
+    report.write_text("line 1\n", encoding="utf-8")
+    summary_json = tmp_path / "daily.summary.json"
+    summary_json.write_text(
+        json.dumps(
+            {
+                "analysis": {
+                    "overall_status": "yellow",
+                    "functional": {"failed": "N/A", "error": None},
+                    "performance": {"compared": "oops", "regressed": "oops"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd: list[str], input: str, text: bool):
+        captured["input"] = input
+        return _Result()
+
+    monkeypatch.setattr(delivery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(delivery.platform, "node", lambda: "TESTNODE")
+    monkeypatch.setattr(delivery.subprocess, "run", _fake_run)
+
+    ok = delivery.send_mail(
+        report,
+        "user@example.com",
+        "daily report",
+        now_stamp="20260505_2253",
+        summary_json=summary_json,
+    )
+
+    assert ok is True
+    body = str(captured["input"])
+    assert "Analysis summary" in body
+    assert "functional: failed=0 error=0" in body
+    assert "performance: compared=0 regressed=0" in body
+
+
+def test_send_mail_handles_non_dict_json_payload(tmp_path: Path, monkeypatch) -> None:
+    """summary.json that parses to a list (not dict) must not crash."""
+    report = tmp_path / "daily.report"
+    report.write_text("line 1\n", encoding="utf-8")
+    summary_json = tmp_path / "daily.summary.json"
+    summary_json.write_text("[]", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd: list[str], input: str, text: bool):
+        captured["input"] = input
+        return _Result()
+
+    monkeypatch.setattr(delivery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(delivery.platform, "node", lambda: "TESTNODE")
+    monkeypatch.setattr(delivery.subprocess, "run", _fake_run)
+
+    ok = delivery.send_mail(
+        report,
+        "user@example.com",
+        "daily report",
+        now_stamp="20260505_2253",
+        summary_json=summary_json,
+    )
+
+    assert ok is True
+    body = str(captured["input"])
+    # No Analysis summary block when payload is not a dict.
+    assert "Analysis summary" not in body
 
 
 def test_run_analysis_compares_with_baseline(tmp_path: Path, monkeypatch) -> None:

@@ -119,21 +119,29 @@ def _fetch_comparison_rows(
 
     db_rows = con.execute(
         """
-        SELECT c.model, c.precision, c.in_token, c.out_token, c.exec_mode,
-               c.unit, c.value AS current_value, b.value AS baseline_value
+        SELECT
+            COALESCE(c.model, b.model) AS model,
+            COALESCE(c.precision, b.precision) AS precision,
+            COALESCE(c.in_token, b.in_token) AS in_token,
+            COALESCE(c.out_token, b.out_token) AS out_token,
+            COALESCE(c.exec_mode, b.exec_mode) AS exec_mode,
+            c.unit AS current_unit,
+            b.unit AS baseline_unit,
+            c.value AS current_value,
+            b.value AS baseline_value
         FROM perf c
-        JOIN perf b
-          ON  b.run_id    = ?
-          AND c.model     = b.model
-          AND c.precision = b.precision
-          AND c.in_token  = b.in_token
-          AND c.out_token = b.out_token
-          AND c.exec_mode = b.exec_mode
-                    AND c.unit IS NOT DISTINCT FROM b.unit
-        WHERE c.run_id = ?
-        ORDER BY c.model, c.precision, c.in_token, c.out_token, c.exec_mode
+        FULL OUTER JOIN perf b
+          ON c.model     = b.model
+         AND c.precision = b.precision
+         AND c.in_token  = b.in_token
+         AND c.out_token = b.out_token
+         AND c.exec_mode = b.exec_mode
+         AND c.run_id = ?
+         AND b.run_id = ?
+        WHERE c.run_id = ? OR b.run_id = ?
+        ORDER BY model, precision, in_token, out_token, exec_mode
         """,
-        [baseline_info.run_id, run_id],
+        [run_id, baseline_info.run_id, run_id, baseline_info.run_id],
     ).fetchall()
 
     result: list[ComparisonRow] = []
@@ -147,7 +155,7 @@ def _fetch_comparison_rows(
             return None
         return num if math.isfinite(num) else None
 
-    for model, precision, in_token, out_token, exec_mode, unit, cur, base in db_rows:
+    for model, precision, in_token, out_token, exec_mode, current_unit, baseline_unit, cur, base in db_rows:
         key = SeriesKey(
             model=model,
             precision=precision,
@@ -155,8 +163,23 @@ def _fetch_comparison_rows(
             out_token=int(out_token),
             exec_mode=exec_mode,
         )
+        unit = current_unit or baseline_unit
         current_value = _as_finite_float(cur)
         baseline_value = _as_finite_float(base)
+
+        # Unit mismatch: treat as unavailable to avoid comparing apples to oranges.
+        if current_unit is not None and baseline_unit is not None and current_unit != baseline_unit:
+            result.append(
+                ComparisonRow(
+                    key=key,
+                    unit=unit,
+                    current_value=float("nan"),
+                    baseline_value=float("nan"),
+                    improvement_pct=None,
+                    verdict=verdict_from_pct(None, config),
+                )
+            )
+            continue
 
         if current_value is None or baseline_value is None:
             result.append(

@@ -414,7 +414,49 @@ class TestFetchComparisonRows:
         cfg = AnalysisConfig()
         rows = _fetch_comparison_rows(con, "cur", baseline, cfg)
 
-        assert rows == []
+        # Unit mismatch should produce exactly ONE unavailable row (merged).
+        assert len(rows) == 1
+        assert rows[0].verdict == "unavailable"
+
+    def test_missing_current_series_is_marked_unavailable(self):
+        duckdb = pytest.importorskip("duckdb")
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
+        # Baseline has two series, current has only one.
+        con.execute(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ["base", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"],
+        )
+        con.execute(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ["base", "llama", "FP16", 64, 128, "2nd", 11.0, "ms"],
+        )
+        con.execute(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ["cur", "llama", "FP16", 32, 128, "2nd", 9.5, "ms"],
+        )
+
+        baseline = BaselineInfo(status="found", run_id="base")
+        cfg = AnalysisConfig()
+        rows = _fetch_comparison_rows(con, "cur", baseline, cfg)
+
+        assert len(rows) == 2
+        unavailable = [r for r in rows if r.verdict == "unavailable"]
+        assert len(unavailable) == 1
+        assert unavailable[0].key.in_token == 64
 
 
 # ---------------------------------------------------------------------------
@@ -706,5 +748,6 @@ class TestAnalyzeRunIntegration:
 
         r2 = analyze_run(s2, db)
         assert r2.baseline.status == "found"
-        assert r2.performance.compared == 0
+        assert r2.performance.compared == 2
+        assert r2.performance.unavailable == 2
         assert r2.overall_status == "gray"

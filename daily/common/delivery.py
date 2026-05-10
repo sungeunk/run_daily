@@ -14,6 +14,7 @@ Two upstream bugs are corrected during the port:
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import platform
@@ -49,6 +50,51 @@ def _html_report_body(report_path: Path) -> str:
         f'{escaped}'
         '</pre>'
         '</body></html>'
+    )
+
+
+def _html_analysis_summary_block(summary_json: Path) -> str:
+    """Return a small HTML summary from ``summary.json`` analysis block."""
+    def _safe_int(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        payload = json.loads(summary_json.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return ''
+
+    if not isinstance(payload, dict):
+        return ''
+
+    analysis = payload.get('analysis')
+    if not isinstance(analysis, dict):
+        return ''
+
+    overall = str(analysis.get('overall_status', 'unknown'))
+    baseline = analysis.get('baseline') if isinstance(analysis.get('baseline'), dict) else {}
+    functional = analysis.get('functional') if isinstance(analysis.get('functional'), dict) else {}
+    performance = analysis.get('performance') if isinstance(analysis.get('performance'), dict) else {}
+
+    baseline_text = 'not found'
+    if baseline.get('status') == 'found':
+        baseline_text = f"{baseline.get('stamp', '')} / {baseline.get('ov_version', 'unknown')}"
+
+    # Keep this intentionally compact so the full report still remains the source of detail.
+    return (
+        '<div style="margin-bottom:12px">'
+        '<strong>Analysis summary</strong>'
+        '<ul style="margin:6px 0 0 18px;padding:0">'
+        f'<li>overall: {html.escape(overall)}</li>'
+        f'<li>baseline: {html.escape(str(baseline_text))}</li>'
+        f'<li>functional: failed={_safe_int(functional.get("failed", 0))} '
+        f'error={_safe_int(functional.get("error", 0))}</li>'
+        f'<li>performance: compared={_safe_int(performance.get("compared", 0))} '
+        f'regressed={_safe_int(performance.get("regressed", 0))}</li>'
+        '</ul>'
+        '</div>'
     )
 
 
@@ -125,6 +171,7 @@ def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
 
 def send_mail(report_path: Path, recipients: str, title: str, *,
               suffix_title: str = '', now_stamp: str = '',
+              summary_json: Path | None = None,
               relay_server: str | None = None) -> bool:
     """Send ``report_path`` as an HTML email to ``recipients``.
 
@@ -135,7 +182,10 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         return False
 
     full_title = f'[{platform.node()}/{now_stamp}] {title} {suffix_title}'.strip()
+    analysis_block = _html_analysis_summary_block(summary_json) if summary_json else ''
     body = _html_report_body(report_path)
+    if analysis_block:
+        body = body.replace('<html><body>', f'<html><body>{analysis_block}', 1)
 
     if platform.system() == 'Windows':
         user_profile = os.environ.get('USERPROFILE')

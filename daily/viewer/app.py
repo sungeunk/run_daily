@@ -17,6 +17,8 @@ Tabs
 4. Geomean      — geometric-mean trend across a bucket (machine-wide health).
 5. Noise        — per-series coefficient of variation. Useful for iGPU
                   diagnostics where fluctuation is inherent.
+6. Functional   — functional issue history and per-run health summary.
+7. Compare      — run-to-run direct comparison at the series level.
 """
 
 from __future__ import annotations
@@ -877,6 +879,176 @@ def _tab_noise(cfg: dict) -> None:
     )
 
 
+def _tab_functional(cfg: dict) -> None:
+    st.subheader("Functional issue history")
+    st.caption("Failed / errored test cases across recent runs. "
+               "Requires the analysis pipeline to have been run at least once.")
+
+    days = st.number_input("Window (days)", min_value=1, max_value=90,
+                           value=cfg["days"], key="functional_days")
+
+    db_path: Path = DB
+    machine: str | None = cfg.get("machine") or None
+
+    summary_df = q.fetch_functional_summary(db_path, machine, int(days))
+    if summary_df.empty:
+        st.info("No analysis_results data found. "
+                "Run the analysis pipeline to populate this view.")
+        return
+
+    # Health status colour map
+    _STATUS_COLOUR = {"green": "🟢", "yellow": "🟡", "red": "🔴", "gray": "⚫"}
+    summary_df["status"] = summary_df["overall_status"].map(
+        lambda s: f"{_STATUS_COLOUR.get(s, '❓')} {s}"
+    )
+
+    st.markdown("#### Run health summary")
+    st.dataframe(
+        summary_df[["stamp", "ov_version", "status",
+                     "functional_fail_count", "regressed_count",
+                     "compared_count"]].rename(columns={
+            "stamp": "Stamp",
+            "ov_version": "OV Version",
+            "status": "Status",
+            "functional_fail_count": "Fail+Error",
+            "regressed_count": "Regressions",
+            "compared_count": "Compared",
+        }),
+        width="stretch", hide_index=True,
+    )
+
+    issues_df = q.fetch_functional_history(db_path, machine, int(days))
+    if issues_df.empty:
+        st.info("No functional issues recorded in the selected window.")
+        return
+
+    st.markdown("#### Individual failures")
+    st.dataframe(
+        issues_df[["stamp", "ov_version", "outcome", "nodeid", "category", "message"]].rename(
+            columns={
+                "stamp": "Stamp",
+                "ov_version": "OV Version",
+                "outcome": "Outcome",
+                "nodeid": "Test",
+                "category": "Category",
+                "message": "Message",
+            }
+        ),
+        width="stretch", hide_index=True,
+    )
+
+    # Stacked bar: fail count per run
+    if not summary_df.empty and "functional_fail_count" in summary_df.columns:
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=summary_df["stamp"],
+            y=summary_df["functional_fail_count"],
+            name="Fail+Error",
+            marker_color="#EF5350",
+        ))
+        fig.add_trace(go.Bar(
+            x=summary_df["stamp"],
+            y=summary_df["regressed_count"],
+            name="Regressions",
+            marker_color="#FFA726",
+        ))
+        fig.update_layout(
+            barmode="stack",
+            title="Failures and regressions per run",
+            xaxis_title="Run stamp",
+            yaxis_title="Count",
+            height=300,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def _tab_compare(cfg: dict) -> None:
+    st.subheader("Run-to-run comparison")
+    st.caption("Compare any two runs at the series level. "
+               "Select Run A (current) and Run B (baseline reference).")
+
+    db_path: Path = DB
+    machine: str | None = cfg.get("machine") or None
+
+    runs_df = q.list_runs(db_path, machine)
+    if runs_df.empty:
+        st.info("No runs found.")
+        return
+
+    run_options = runs_df["run_id"].tolist()
+    stamp_map = dict(zip(runs_df["run_id"], runs_df.get("stamp", runs_df["run_id"])))
+    display_options = [f"{stamp_map.get(r, r)} ({r})" for r in run_options]
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        idx_a = st.selectbox("Run A (current)", options=range(len(run_options)),
+                             format_func=lambda i: display_options[i],
+                             key="compare_run_a")
+    with col_b:
+        idx_b = st.selectbox("Run B (reference)", options=range(len(run_options)),
+                             format_func=lambda i: display_options[i],
+                             index=min(1, len(run_options) - 1),
+                             key="compare_run_b")
+
+    run_a = run_options[idx_a]
+    run_b = run_options[idx_b]
+
+    if run_a == run_b:
+        st.warning("Select two different runs to compare.")
+        return
+
+    df = q.fetch_run_comparison(db_path, run_a, run_b)
+    if df.empty:
+        st.info("No overlapping series found between the two runs.")
+        return
+
+    # Preserve DB-provided verdict when available; derive only missing ones.
+    def _verdict(pct: float | None) -> str:
+        if pd.isna(pct):
+            return "unavailable"
+        if pct >= 0.05:
+            return "improved"
+        if pct <= -0.05:
+            return "regressed"
+        return "same"
+
+    if "verdict" not in df.columns:
+        df["verdict"] = pd.NA
+    df["verdict"] = df["verdict"].where(df["verdict"].notna(), df["improvement_pct"].apply(_verdict))
+    df["pct"] = df["improvement_pct"].apply(
+        lambda x: f"{x * 100:+.1f}%" if not pd.isna(x) else "—"
+    )
+
+    verdict_filter = st.multiselect(
+        "Filter by verdict",
+        options=["improved", "same", "regressed", "unavailable"],
+        default=["improved", "same", "regressed", "unavailable"],
+        key="compare_verdict_filter",
+    )
+    df_show = df[df["verdict"].isin(verdict_filter)] if verdict_filter else df
+
+    # Summary counts
+    vc = df["verdict"].value_counts().to_dict()
+    cols = st.columns(4)
+    for col, label, colour in zip(
+        cols,
+        ["improved", "same", "regressed", "unavailable"],
+        ["🟢", "🔵", "🔴", "⚫"],
+    ):
+        col.metric(f"{colour} {label.capitalize()}", vc.get(label, 0))
+
+    st.dataframe(
+        df_show[["model", "precision", "in_token", "out_token", "exec_mode",
+                 "unit", "value_a", "value_b", "pct", "verdict"]].rename(columns={
+            "model": "Model", "precision": "Prec",
+            "in_token": "In", "out_token": "Out", "exec_mode": "Mode",
+            "unit": "Unit", "value_a": "A", "value_b": "B",
+            "pct": "Change", "verdict": "Verdict",
+        }),
+        width="stretch", hide_index=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
@@ -888,7 +1060,8 @@ def main() -> None:
 
     cfg = _sidebar()
 
-    tabs = st.tabs(["Dashboard", "Excel", "Regression", "Geomean", "Noise"])
+    tabs = st.tabs(["Dashboard", "Excel", "Regression", "Geomean", "Noise",
+                    "Functional", "Compare"])
     with tabs[0]:
         _tab_dashboard(cfg)
     with tabs[1]:
@@ -899,6 +1072,10 @@ def main() -> None:
         _tab_geomean(cfg)
     with tabs[4]:
         _tab_noise(cfg)
+    with tabs[5]:
+        _tab_functional(cfg)
+    with tabs[6]:
+        _tab_compare(cfg)
 
 
 if __name__ == "__main__":
