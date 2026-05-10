@@ -12,9 +12,64 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from analysis.types import AnalysisConfig
+from analysis.verdict import improvement_pct, verdict_from_pct
+
+
+_COMPARE_CONFIG = AnalysisConfig()
+
 
 def _read_only(db_path: Path) -> duckdb.DuckDBPyConnection:
     return duckdb.connect(str(db_path), read_only=True)
+
+
+def _fill_missing_verdicts(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing verdicts with the canonical analysis threshold logic."""
+    if df.empty:
+        return df
+    if "verdict" not in df.columns:
+        df["verdict"] = pd.NA
+
+    def _classify(value) -> str:
+        pct = None if pd.isna(value) else float(value)
+        return verdict_from_pct(pct, _COMPARE_CONFIG)
+
+    df["verdict"] = df["verdict"].where(df["verdict"].notna(), df["improvement_pct"].apply(_classify))
+    return df
+
+
+def _apply_fallback_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """Derive improvement_pct/verdict for raw fallback rows via canonical helpers."""
+    if df.empty:
+        return df
+
+    def _to_float(value) -> float | None:
+        if pd.isna(value):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _row_metrics(row: pd.Series) -> tuple[float | None, str]:
+        current_unit = row.get("current_unit")
+        baseline_unit = row.get("baseline_unit")
+        unit = row.get("unit")
+        cur = _to_float(row.get("value_a"))
+        base = _to_float(row.get("value_b"))
+
+        if current_unit is not None and baseline_unit is not None and current_unit != baseline_unit:
+            return None, "unavailable"
+
+        pct = improvement_pct(cur, base, unit)
+        return pct, verdict_from_pct(pct, _COMPARE_CONFIG)
+
+    metrics = df.apply(_row_metrics, axis=1)
+    df["improvement_pct"] = [m[0] for m in metrics]
+    if "verdict" not in df.columns:
+        df["verdict"] = pd.NA
+    df["verdict"] = df["verdict"].where(df["verdict"].notna(), [m[1] for m in metrics])
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -612,10 +667,10 @@ def fetch_run_comparison(
                 ORDER BY model, precision, in_token, out_token, exec_mode
             """, [run_id_a, run_id_b]).fetchdf()
             if not df.empty:
-                return df
+                return _fill_missing_verdicts(df)
 
         # Fallback: direct perf join on series key.
-        return con.execute("""
+        df = con.execute("""
             SELECT
                 COALESCE(a.model,     b.model)     AS model,
                 COALESCE(a.precision, b.precision) AS precision,
@@ -626,24 +681,7 @@ def fetch_run_comparison(
                 a.unit AS current_unit,
                 b.unit AS baseline_unit,
                 a.value AS value_a,
-                b.value AS value_b,
-                CASE
-                    WHEN a.value IS NULL OR b.value IS NULL THEN NULL
-                    WHEN b.value = 0                        THEN NULL
-                    WHEN a.unit IS NOT NULL
-                     AND b.unit IS NOT NULL
-                     AND a.unit != b.unit                   THEN NULL
-                    WHEN COALESCE(a.unit, b.unit) IN ('ms', 's', '%')
-                        THEN (b.value - a.value) / b.value
-                    ELSE (a.value - b.value) / b.value
-                END AS improvement_pct,
-                CASE
-                    WHEN a.value IS NULL OR b.value IS NULL THEN 'unavailable'
-                    WHEN a.unit IS NOT NULL
-                     AND b.unit IS NOT NULL
-                     AND a.unit != b.unit                   THEN 'unavailable'
-                    ELSE NULL
-                END AS verdict
+                b.value AS value_b
             FROM perf a
             FULL OUTER JOIN perf b
               ON a.model     = b.model
@@ -656,6 +694,7 @@ def fetch_run_comparison(
             WHERE a.run_id = ? OR b.run_id = ?
             ORDER BY model, precision, in_token, out_token, exec_mode
         """, [run_id_a, run_id_b, run_id_a, run_id_b]).fetchdf()
+        return _apply_fallback_metrics(df)
 
 
 def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
@@ -682,9 +721,11 @@ def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
                 ar.functional_fail_count,
                 ar.baseline_run_id,
                 strftime(rb.ts, '%Y%m%d_%H%M') AS baseline_stamp,
-                rb.ov_version AS baseline_ov_version
+                rb.ov_version AS baseline_ov_version,
+                rs.source_path AS run_source_path
             FROM analysis_results ar
             LEFT JOIN runs rb ON rb.run_id = ar.baseline_run_id
+            LEFT JOIN runs rs ON rs.run_id = ar.run_id
             WHERE ar.run_id = ?
             LIMIT 1
         """, [run_id]).fetchdf()

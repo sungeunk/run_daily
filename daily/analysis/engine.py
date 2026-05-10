@@ -16,7 +16,7 @@ import logging
 import math
 from pathlib import Path
 
-from .baseline import select_baseline
+from .baseline import find_last_known_good, select_baseline
 from .functional import aggregate_functional
 from .types import (
     AnalysisConfig,
@@ -81,6 +81,9 @@ def analyze_run(
         models = _aggregate_models(rows)
         top_regressions = _top_regressions(rows, config.top_regressions)
         overall_status = _overall_status(functional, performance, baseline_info)
+        last_known_good = None
+        if overall_status in {"red", "yellow"}:
+            last_known_good = find_last_known_good(con, rec)
 
         result = AnalysisResult(
             overall_status=overall_status,
@@ -89,6 +92,7 @@ def analyze_run(
             performance=performance,
             models=models,
             top_regressions=top_regressions,
+            last_known_good=last_known_good,
             rows=rows,
         )
 

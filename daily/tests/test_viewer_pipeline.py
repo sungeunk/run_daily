@@ -375,6 +375,31 @@ def test_fetch_run_comparison_fallback_uses_coalesced_unit_direction(tmp_path: P
     assert len(df) == 1
     # Latency improved from 10 -> 9 => +10%
     assert df.iloc[0]["improvement_pct"] == 0.1
+    assert df.iloc[0]["verdict"] == "improved"
+
+
+def test_fetch_run_comparison_fallback_applies_canonical_thresholds(tmp_path: Path) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    with connect(db_path) as con:
+        ensure_schema(con)
+        con.execute(
+            """
+            INSERT INTO perf (
+                run_id, model, precision, in_token, out_token, exec_mode, value, unit
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                # +4% throughput gain => below default 5% threshold => same
+                "run-a", "llama", "FP16", 32, 128, "2nd", 104.0, "tps",
+                "run-b", "llama", "FP16", 32, 128, "2nd", 100.0, "tps",
+            ],
+        )
+
+    df = queries.fetch_run_comparison(db_path, "run-a", "run-b")
+    assert len(df) == 1
+    assert df.iloc[0]["improvement_pct"] == 0.04
+    assert df.iloc[0]["verdict"] == "same"
 
 
 def test_fetch_analysis_overview_returns_baseline_metadata(tmp_path: Path) -> None:
@@ -820,3 +845,245 @@ def test_run_analysis_compares_with_baseline(tmp_path: Path, monkeypatch) -> Non
     assert "Model deltas:" in text
     assert "llama" in text
     assert "Overall verdict: Performance regression detected." in text
+
+    current_data = json.loads(current_summary.read_text(encoding="utf-8"))
+    assert current_data["analysis"]["overall_status"] == "yellow"
+    assert "last_known_good" in current_data["analysis"]
+    assert current_data["analysis"]["last_known_good"]["status"] == "not_found"
+
+
+def test_run_analysis_writes_last_known_good_when_prior_green_exists(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    monkeypatch.setattr(run, "VIEWER_DB", db_path)
+
+    # run1: first run -> gray
+    s1 = tmp_path / "daily.20260501_0100.summary.json"
+    s1.write_text(
+        json.dumps(
+            {
+                "generated_at": 1.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260501_0100",
+                    "workweek": "2026.WW18.4",
+                    "ov_version": "2026.2.0-11111-aaaaaaaaaaa",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_r1",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.0, 2.0]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    r1 = tmp_path / "daily.20260501_0100.report"
+    r1.write_text("[ Summary ]\nrun1\n", encoding="utf-8")
+    run._run_analysis(r1, s1)
+
+    # run2: same perf -> green
+    s2 = tmp_path / "daily.20260502_0100.summary.json"
+    s2.write_text(
+        json.dumps(
+            {
+                "generated_at": 2.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260502_0100",
+                    "workweek": "2026.WW18.5",
+                    "ov_version": "2026.2.0-22222-bbbbbbbbbbb",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_r2",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.0, 2.0]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    r2 = tmp_path / "daily.20260502_0100.report"
+    r2.write_text("[ Summary ]\nrun2\n", encoding="utf-8")
+    run._run_analysis(r2, s2)
+
+    # run3: regression -> yellow and should carry LKG(found=run2)
+    s3 = tmp_path / "daily.20260503_0100.summary.json"
+    s3.write_text(
+        json.dumps(
+            {
+                "generated_at": 3.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260503_0100",
+                    "workweek": "2026.WW18.6",
+                    "ov_version": "2026.2.1-33333-ccccccccccc",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_r3",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.0, 2.4]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    r3 = tmp_path / "daily.20260503_0100.report"
+    r3.write_text("[ Summary ]\nrun3\n", encoding="utf-8")
+    run._run_analysis(r3, s3)
+
+    d3 = json.loads(s3.read_text(encoding="utf-8"))
+    assert d3["analysis"]["overall_status"] == "yellow"
+    assert d3["analysis"]["last_known_good"]["status"] == "found"
+    assert d3["analysis"]["last_known_good"]["stamp"] == "20260502_0100"
+
+
+def test_run_analysis_reports_lkg_when_baseline_not_found(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    monkeypatch.setattr(run, "VIEWER_DB", db_path)
+
+    # run1: first perf run -> gray
+    s1 = tmp_path / "daily.20260501_0100.summary.json"
+    s1.write_text(
+        json.dumps(
+            {
+                "generated_at": 1.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260501_0100",
+                    "workweek": "2026.WW18.4",
+                    "ov_version": "2026.2.0-11111-aaaaaaaaaaa",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_r1",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.0, 2.0]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    r1 = tmp_path / "daily.20260501_0100.report"
+    r1.write_text("[ Summary ]\nrun1\n", encoding="utf-8")
+    run._run_analysis(r1, s1)
+
+    # run2: comparable perf run -> green (becomes candidate LKG)
+    s2 = tmp_path / "daily.20260502_0100.summary.json"
+    s2.write_text(
+        json.dumps(
+            {
+                "generated_at": 2.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260502_0100",
+                    "workweek": "2026.WW18.5",
+                    "ov_version": "2026.2.0-22222-bbbbbbbbbbb",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 1, "failed": 0, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_r2",
+                        "outcome": "passed",
+                        "metrics": {
+                            "test_type": "llm_benchmark",
+                            "model": "llama",
+                            "precision": "FP16",
+                            "data": [{"in_token": 32, "out_token": 128, "perf": [10.0, 2.0]}],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    r2 = tmp_path / "daily.20260502_0100.report"
+    r2.write_text("[ Summary ]\nrun2\n", encoding="utf-8")
+    run._run_analysis(r2, s2)
+
+    # run3: functional issue with no perf rows -> red
+    # Baseline must be not_found (no overlap), but LKG should still be found.
+    s3 = tmp_path / "daily.20260503_0100.summary.json"
+    s3.write_text(
+        json.dumps(
+            {
+                "generated_at": 3.0,
+                "duration_sec": 10.0,
+                "meta": {
+                    "machine": "LNL-03",
+                    "stamp": "20260503_0100",
+                    "workweek": "2026.WW18.6",
+                    "ov_version": "2026.2.1-33333-ccccccccccc",
+                    "description": "daily_CB timer",
+                    "device": "GPU",
+                },
+                "totals": {"passed": 0, "failed": 1, "error": 0, "skipped": 0, "total": 1},
+                "tests": [
+                    {
+                        "nodeid": "test_llm_r3",
+                        "outcome": "failed",
+                        "longrepr": "assert False",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    r3 = tmp_path / "daily.20260503_0100.report"
+    r3.write_text("[ Summary ]\nrun3\n", encoding="utf-8")
+    run._run_analysis(r3, s3)
+
+    d3 = json.loads(s3.read_text(encoding="utf-8"))
+    assert d3["analysis"]["overall_status"] == "red"
+    assert d3["analysis"]["baseline"]["status"] == "not_found"
+    assert d3["analysis"]["last_known_good"]["status"] == "found"
+    assert d3["analysis"]["last_known_good"]["stamp"] == "20260502_0100"
+
+    text = r3.read_text(encoding="utf-8")
+    assert "Baseline comparison: no older run found for this machine." in text
+    assert "Last known good: stamp=20260502_0100" in text

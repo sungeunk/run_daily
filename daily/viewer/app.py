@@ -134,13 +134,6 @@ PERF_COL_NON_VALUE = {"model", "precision", "in_spec", "out_spec",
                       "exec_mode", "label"}
 
 
-def _worse_direction(unit: str | None) -> int:
-    """+1 if up = worse (latency), -1 if up = better (throughput)."""
-    if unit is None:
-        return +1
-    return +1 if unit in ("ms", "s", "%") else -1
-
-
 def _stable_y_range(values: pd.Series, min_relative_span: float = 0.10) -> list[float] | None:
     clean = pd.to_numeric(values, errors="coerce").dropna()
     if clean.empty:
@@ -477,6 +470,19 @@ def _tab_dashboard(cfg: dict) -> None:
             if pd.notna(baseline_ov):
                 baseline_text = f"{baseline_text} / {baseline_ov}"
         health_cols[4].metric("Baseline", baseline_text)
+
+        run_source_path = analysis_row.get("run_source_path")
+        analysis_payload = _read_json_file(_existing_path(run_source_path))
+        analysis_block = analysis_payload.get("analysis") if isinstance(analysis_payload, dict) else {}
+        lkg = analysis_block.get("last_known_good") if isinstance(analysis_block, dict) else {}
+        if isinstance(lkg, dict):
+            lkg_text = "not found"
+            if lkg.get("status") == "found":
+                lkg_text = str(lkg.get("stamp") or "")
+                lkg_ov = lkg.get("ov_version")
+                if lkg_ov:
+                    lkg_text = f"{lkg_text} / {lkg_ov}"
+            st.caption(f"Last known good: {lkg_text}")
 
     artifacts = {
         "summary":     str(summary_path)     if summary_path     else "missing",
@@ -1029,19 +1035,6 @@ def _tab_compare(cfg: dict) -> None:
         st.info("No overlapping series found between the two runs.")
         return
 
-    # Preserve DB-provided verdict when available; derive only missing ones.
-    def _verdict(pct: float | None) -> str:
-        if pd.isna(pct):
-            return "unavailable"
-        if pct >= 0.05:
-            return "improved"
-        if pct <= -0.05:
-            return "regressed"
-        return "same"
-
-    if "verdict" not in df.columns:
-        df["verdict"] = pd.NA
-    df["verdict"] = df["verdict"].where(df["verdict"].notna(), df["improvement_pct"].apply(_verdict))
     df["pct"] = df["improvement_pct"].apply(
         lambda x: f"{x * 100:+.1f}%" if not pd.isna(x) else "—"
     )

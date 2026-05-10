@@ -412,6 +412,20 @@ class TestFindLastKnownGood:
             """
         )
         con.execute("CREATE TABLE analysis_results (run_id TEXT, overall_status TEXT)")
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
 
         now = datetime(2026, 1, 2, 0, 0)
         # Should be ignored: wrong purpose.
@@ -428,12 +442,31 @@ class TestFindLastKnownGood:
         )
         con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green-wrong-short", "green"])
 
-        # Should be selected: same profile + green.
+        # Same profile + green candidates.
         con.execute(
             "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
             ["old-green-match", "M1", now - timedelta(hours=1), True, "nightly", "ov-z"],
         )
         con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green-match", "green"])
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            ["old-green-no-overlap", "M1", now - timedelta(minutes=30), True, "nightly", "ov-no-overlap"],
+        )
+        con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green-no-overlap", "green"])
+        con.executemany(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                # Current run series key
+                ("current", "llama", "FP16", 32, 128, "2nd", 11.0, "ms"),
+                # Comparable candidate
+                ("old-green-match", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                # Non-overlap candidate (newer but different model)
+                ("old-green-no-overlap", "bert", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                # Other profile runs still comparable but filtered by profile policy
+                ("old-green-wrong-purpose", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                ("old-green-wrong-short", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+            ],
+        )
 
         rec = RunRecord(
             run_id="current",
@@ -448,7 +481,62 @@ class TestFindLastKnownGood:
         lkg = find_last_known_good(con, rec)
 
         assert lkg.status == "found"
-        assert lkg.run_id == "old-green-match"
+        assert lkg.run_id == "old-green-no-overlap"
+
+    def test_allows_functional_only_runs_without_perf_overlap(self):
+        duckdb = pytest.importorskip("duckdb")
+        from viewer.ingest.record import RunRecord
+
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """
+            CREATE TABLE runs (
+                run_id TEXT,
+                machine TEXT,
+                ts TIMESTAMP,
+                short_run BOOLEAN,
+                purpose TEXT,
+                ov_version TEXT
+            )
+            """
+        )
+        con.execute("CREATE TABLE analysis_results (run_id TEXT, overall_status TEXT)")
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
+
+        now = datetime(2026, 1, 2, 0, 0)
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            ["old-green", "M1", now - timedelta(hours=1), True, "nightly", "ov-green"],
+        )
+        con.execute("INSERT INTO analysis_results VALUES (?, ?)", ["old-green", "green"])
+
+        rec = RunRecord(
+            run_id="current-functional-only",
+            source_format="new",
+            report_file="r",
+            machine="M1",
+            ts=now,
+            short_run=True,
+            purpose="nightly",
+        )
+
+        lkg = find_last_known_good(con, rec)
+
+        assert lkg.status == "found"
+        assert lkg.run_id == "old-green"
 
 
 class TestOverallStatus:

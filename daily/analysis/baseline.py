@@ -36,17 +36,16 @@ def select_baseline(
     requires ``overall_status = 'green'`` in the ``analysis_results``
     table.  If that table does not yet exist the flag is silently ignored.
     """
-    common_params = [rec.machine, rec.run_id, rec.ts]
     green_join = _green_join(con) if config.baseline_green_only else ""
 
     # --- priority 1: same purpose ---
     if rec.purpose:
         row = _query_baseline(
             con,
-            extra_where="AND COALESCE(r.purpose, '') = ?",
-            extra_params=[*common_params, rec.short_run, rec.purpose],
-            current_run_id=rec.run_id,
+            rec=rec,
             green_join=green_join,
+            include_short_run=True,
+            include_purpose=True,
         )
         if row:
             return _make_info(row, "same machine, short_run, purpose")
@@ -54,10 +53,10 @@ def select_baseline(
     # --- priority 2: same short_run ---
     row = _query_baseline(
         con,
-        extra_where="",
-        extra_params=[*common_params, rec.short_run],
-        current_run_id=rec.run_id,
+        rec=rec,
         green_join=green_join,
+        include_short_run=True,
+        include_purpose=False,
     )
     if row:
         return _make_info(row, "same machine, short_run")
@@ -65,11 +64,10 @@ def select_baseline(
     # --- priority 3: same machine only ---
     row = _query_baseline(
         con,
-        extra_where="",
-        extra_params=common_params,
-        current_run_id=rec.run_id,
+        rec=rec,
         green_join=green_join,
-        skip_short_run=True,
+        include_short_run=False,
+        include_purpose=False,
     )
     if row:
         return _make_info(row, "same machine")
@@ -91,23 +89,25 @@ def find_last_known_good(
     ``BaselineInfo(status='not_found')`` if the table is absent or empty.
     """
     try:
+        where_sql, params = _candidate_filters(
+            rec,
+            include_short_run=True,
+            include_purpose=True,
+            require_overlap=False,
+        )
         row = con.execute(
-            """
+            f"""
             SELECT r.run_id,
                    strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
                    COALESCE(r.ov_version, '') AS ov_version
             FROM runs r
             JOIN analysis_results ar USING (run_id)
-            WHERE r.machine = ?
-              AND r.run_id  <> ?
-              AND r.ts      < ?
-                            AND r.short_run IS NOT DISTINCT FROM ?
-                            AND COALESCE(r.purpose, '') = COALESCE(?, '')
+            WHERE {where_sql}
               AND ar.overall_status = 'green'
             ORDER BY r.ts DESC
             LIMIT 1
             """,
-                        [rec.machine, rec.run_id, rec.ts, rec.short_run, rec.purpose],
+            params,
         ).fetchone()
     except Exception:  # noqa: BLE001 — table may not exist yet
         return BaselineInfo(status="not_found")
@@ -134,41 +134,73 @@ def _green_join(con: "duckdb.DuckDBPyConnection") -> str:
 def _query_baseline(
     con: "duckdb.DuckDBPyConnection",
     *,
-    extra_where: str,
-    extra_params: list,
-    current_run_id: str,
+    rec: "RunRecord",
     green_join: str,
-    skip_short_run: bool = False,
+    include_short_run: bool,
+    include_purpose: bool,
 ) -> tuple | None:
-    short_run_clause = "" if skip_short_run else "AND r.short_run = ?"
+    where_sql, params = _candidate_filters(
+        rec,
+        include_short_run=include_short_run,
+        include_purpose=include_purpose,
+        require_overlap=True,
+    )
     sql = f"""
         SELECT r.run_id,
                strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
                COALESCE(r.ov_version, '') AS ov_version
         FROM runs r
         {green_join}
-        WHERE r.machine  = ?
-          AND r.run_id  <> ?
-          AND r.ts       < ?
-          {short_run_clause}
-          {extra_where}
-          AND EXISTS (
-              SELECT 1
-              FROM perf c
-              JOIN perf p
-                ON p.model     = c.model
-               AND p.precision = c.precision
-               AND p.in_token  = c.in_token
-               AND p.out_token = c.out_token
-               AND p.exec_mode = c.exec_mode
-              WHERE c.run_id = ?
-                AND p.run_id = r.run_id
-              LIMIT 1
-          )
+        WHERE {where_sql}
         ORDER BY r.ts DESC
         LIMIT 1
     """
-    return con.execute(sql, [*extra_params, current_run_id]).fetchone()
+    return con.execute(sql, params).fetchone()
+
+
+def _candidate_filters(
+    rec: "RunRecord",
+    *,
+    include_short_run: bool,
+    include_purpose: bool,
+    require_overlap: bool,
+) -> tuple[str, list]:
+    """Build shared candidate-policy predicates for baseline/LKG lookup."""
+    clauses = [
+        "r.machine = ?",
+        "r.run_id <> ?",
+        "r.ts < ?",
+    ]
+    params: list = [rec.machine, rec.run_id, rec.ts]
+
+    if include_short_run:
+        clauses.append("r.short_run IS NOT DISTINCT FROM ?")
+        params.append(rec.short_run)
+    if include_purpose:
+        clauses.append("COALESCE(r.purpose, '') = COALESCE(?, '')")
+        params.append(rec.purpose)
+
+    if require_overlap:
+        clauses.append(
+            """
+            EXISTS (
+                SELECT 1
+                FROM perf c
+                JOIN perf p
+                  ON p.model     = c.model
+                 AND p.precision = c.precision
+                 AND p.in_token  = c.in_token
+                 AND p.out_token = c.out_token
+                 AND p.exec_mode = c.exec_mode
+                WHERE c.run_id = ?
+                  AND p.run_id = r.run_id
+                LIMIT 1
+            )
+            """.strip()
+        )
+        params.append(rec.run_id)
+
+    return "\n          AND ".join(clauses), params
 
 
 def _make_info(row: tuple, reason: str) -> BaselineInfo:

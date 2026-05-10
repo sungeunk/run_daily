@@ -153,3 +153,4 @@ class AnalysisResult:
     models: list[ModelSummary]
     top_regressions: list[ComparisonRow]
     rows: list[ComparisonRow]           # full comparison table (not in JSON output)
+    last_known_good: BaselineInfo | None = None

@@ -209,7 +209,7 @@ def _result_to_dict(result: AnalysisResult) -> dict[str, Any]:
         }
 
     b = result.baseline
-    return {
+    payload = {
         "overall_status": result.overall_status,
         "baseline": {
             "status": b.status,
@@ -249,3 +249,13 @@ def _result_to_dict(result: AnalysisResult) -> dict[str, Any]:
         ],
         "top_regressions": [_row_dict(r) for r in result.top_regressions],
     }
+    if result.last_known_good is not None:
+        lkg = result.last_known_good
+        payload["last_known_good"] = {
+            "status": lkg.status,
+            "run_id": lkg.run_id,
+            "stamp": lkg.stamp,
+            "ov_version": lkg.ov_version,
+            "selection_reason": lkg.selection_reason,
+        }
+    return payload

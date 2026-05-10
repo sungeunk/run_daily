@@ -35,6 +35,17 @@ def render_analysis_summary(result: AnalysisResult) -> str:
             + (f" ({b.selection_reason})" if b.selection_reason else "")
         )
 
+    lkg = result.last_known_good
+    if lkg is not None:
+        if lkg.status == "found":
+            lines.append(
+                "- Last known good: "
+                f"stamp={lkg.stamp} ov={lkg.ov_version or 'unknown'}"
+            )
+        else:
+            lines.append("- Last known good: not found")
+
+    if b.status != "not_found":
         # --- performance aggregate ---
         p = result.performance
         lines.append(
