@@ -208,12 +208,23 @@ def _fetch_comparison_rows(
             )
             continue
 
+        # NOTE: Current comparison path has no trend stats (recent_cv, worsening_z, recent_n,
+        # baseline_n) from just current vs baseline values. Dual-gate verdicts (noisy,
+        # insufficient) will be integrated in a future enhancement. For now, verdicts are
+        # limited to improved/same/regressed/unavailable.
         result.append(make_comparison_row(key, unit, current_value, baseline_value, config))
     return result
 
 
 def _aggregate_performance(rows: list[ComparisonRow]) -> PerformanceResult:
-    counts = {"improved": 0, "same": 0, "regressed": 0, "unavailable": 0, "noisy": 0}
+    counts = {
+        "improved": 0,
+        "same": 0,
+        "regressed": 0,
+        "unavailable": 0,
+        "noisy": 0,
+        "insufficient": 0,
+    }
     for row in rows:
         counts[row.verdict] = counts.get(row.verdict, 0) + 1
     return PerformanceResult(
@@ -221,7 +232,7 @@ def _aggregate_performance(rows: list[ComparisonRow]) -> PerformanceResult:
         improved=counts["improved"],
         same=counts["same"],
         regressed=counts["regressed"],
-        unavailable=counts["unavailable"] + counts["noisy"],
+        unavailable=counts["unavailable"] + counts["noisy"] + counts["insufficient"],
     )
 
 

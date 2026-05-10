@@ -30,6 +30,10 @@ class AnalysisConfig:
                              report (default 5).
         baseline_green_only: When True only consider baseline runs with
                              overall_status = 'green'; used for bisect mode.
+        min_recent_points:   Minimum number of recent points required for
+                             dual-gate mode (default 5).
+        min_baseline_points: Minimum number of baseline points required for
+                             dual-gate mode (default 7).
     """
 
     pct_threshold: float = 0.05
@@ -37,6 +41,8 @@ class AnalysisConfig:
     noisy_cv_threshold: float = 0.10
     top_regressions: int = 5
     baseline_green_only: bool = False
+    min_recent_points: int = 5
+    min_baseline_points: int = 7
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +60,7 @@ class SeriesKey:
     exec_mode: str
 
 
-Verdict = Literal["improved", "same", "regressed", "noisy", "unavailable"]
+Verdict = Literal["improved", "same", "regressed", "noisy", "insufficient", "unavailable"]
 OverallStatus = Literal["green", "yellow", "red", "gray"]
 
 

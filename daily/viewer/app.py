@@ -1046,7 +1046,7 @@ def _tab_compare(cfg: dict) -> None:
 
     verdict_filter = st.multiselect(
         "Filter by verdict",
-        options=["improved", "same", "regressed", "unavailable"],
+        options=["improved", "same", "regressed", "noisy", "insufficient", "unavailable"],
         default=["improved", "same", "regressed", "unavailable"],
         key="compare_verdict_filter",
     )
@@ -1054,11 +1054,11 @@ def _tab_compare(cfg: dict) -> None:
 
     # Summary counts
     vc = df["verdict"].value_counts().to_dict()
-    cols = st.columns(4)
+    cols = st.columns(6)
     for col, label, colour in zip(
         cols,
-        ["improved", "same", "regressed", "unavailable"],
-        ["🟢", "🔵", "🔴", "⚫"],
+        ["improved", "same", "regressed", "noisy", "insufficient", "unavailable"],
+        ["🟢", "🔵", "🔴", "🟡", "⚪", "⚫"],
     ):
         col.metric(f"{colour} {label.capitalize()}", vc.get(label, 0))
 

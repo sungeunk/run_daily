@@ -30,7 +30,7 @@ from analysis.types import (
     PerformanceResult,
     SeriesKey,
 )
-from analysis.verdict import improvement_pct, verdict_from_pct, make_comparison_row
+from analysis.verdict import improvement_pct, verdict_from_pct, verdict_from_signal, make_comparison_row
 from analysis.functional import aggregate_functional
 from analysis.engine import (
     _aggregate_models,
@@ -137,6 +137,26 @@ class TestVerdictFromPct:
 
     def test_nan_returns_unavailable(self):
         assert verdict_from_pct(float("nan"), self.cfg) == "unavailable"
+
+
+class TestVerdictFromSignal:
+    cfg = AnalysisConfig(pct_threshold=0.05, z_threshold=3.0, noisy_cv_threshold=0.10)
+
+    def test_noisy_when_cv_high(self):
+        assert verdict_from_signal(-0.20, self.cfg, recent_cv=0.12) == "noisy"
+
+    def test_insufficient_when_recent_points_low(self):
+        assert verdict_from_signal(-0.20, self.cfg, recent_n=2, baseline_n=10) == "insufficient"
+
+    def test_insufficient_when_baseline_points_low(self):
+        assert verdict_from_signal(-0.20, self.cfg, recent_n=10, baseline_n=2) == "insufficient"
+
+    def test_regression_requires_z_when_provided(self):
+        assert verdict_from_signal(-0.20, self.cfg, worsening_z=2.5) == "same"
+        assert verdict_from_signal(-0.20, self.cfg, worsening_z=3.0) == "regressed"
+
+    def test_improvement_uses_pct_gate(self):
+        assert verdict_from_signal(0.08, self.cfg, worsening_z=0.1) == "improved"
 
 
 class TestMakeComparisonRow:
