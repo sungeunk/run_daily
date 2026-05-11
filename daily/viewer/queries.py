@@ -47,56 +47,46 @@ def _fill_missing_verdicts(df: pd.DataFrame) -> pd.DataFrame:
     if "verdict" not in df.columns:
         df["verdict"] = pd.NA
 
-    # Vectorized verdict classification: improved -> same -> regressed based on threshold
+    # Use verdict_from_pct() vectorized via apply on missing rows only (idiomatic pandas)
     mask_missing = df["verdict"].isna()
     if mask_missing.any():
-        pct = df.loc[mask_missing, "improvement_pct"]
-        improved = (pct >= _COMPARE_CONFIG.pct_threshold)
-        regressed = (pct <= -_COMPARE_CONFIG.pct_threshold)
-        df.loc[mask_missing & improved.values, "verdict"] = "improved"
-        df.loc[mask_missing & regressed.values, "verdict"] = "regressed"
-        df.loc[mask_missing & ~(improved | regressed).values, "verdict"] = "same"
-        df.loc[mask_missing & pct.isna(), "verdict"] = "unavailable"
+        df.loc[mask_missing, "verdict"] = df.loc[mask_missing, "improvement_pct"].apply(
+            lambda pct: verdict_from_pct(None if pd.isna(pct) else float(pct), _COMPARE_CONFIG)
+        )
     return df
 
 
 def _apply_fallback_metrics(df: pd.DataFrame) -> pd.DataFrame:
-    """Derive improvement_pct/verdict for raw fallback rows using vectorized operations."""
+    """Derive improvement_pct/verdict for raw fallback rows via canonical helpers."""
     if df.empty:
         return df
 
-    # Vectorized float conversion
-    value_a = pd.to_numeric(df.get("value_a", pd.Series(dtype=float)), errors="coerce")
-    value_b = pd.to_numeric(df.get("value_b", pd.Series(dtype=float)), errors="coerce")
-    current_unit = df.get("current_unit", None)
-    baseline_unit = df.get("baseline_unit", None)
-    unit = df.get("unit", None)
+    def _to_float(value) -> float | None:
+        if pd.isna(value):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
-    # Unit mismatch: unavailable
-    unit_mismatch = (current_unit.notna() & baseline_unit.notna() & (current_unit != baseline_unit))
-    
-    # Vectorized improvement_pct calculation (positive = better for all directions handled by unit)
-    pct = value_b.copy()
-    pct[:] = None
-    valid = ~(value_a.isna() | value_b.isna() | unit_mismatch)
-    for idx in valid[valid].index:
-        pct.loc[idx] = improvement_pct(value_a.loc[idx], value_b.loc[idx], unit.loc[idx])
-    
-    df["improvement_pct"] = pct
-    
-    # Vectorized verdict classification
+    def _row_metrics(row: pd.Series) -> tuple[float | None, str]:
+        current_unit = row.get("current_unit")
+        baseline_unit = row.get("baseline_unit")
+        unit = row.get("unit")
+        cur = _to_float(row.get("value_a"))
+        base = _to_float(row.get("value_b"))
+
+        if current_unit is not None and baseline_unit is not None and current_unit != baseline_unit:
+            return None, "unavailable"
+
+        pct = improvement_pct(cur, base, unit)
+        return pct, verdict_from_pct(pct, _COMPARE_CONFIG)
+
+    metrics = df.apply(_row_metrics, axis=1)
+    df["improvement_pct"] = [m[0] for m in metrics]
     if "verdict" not in df.columns:
         df["verdict"] = pd.NA
-    mask_missing = df["verdict"].isna()
-    if mask_missing.any():
-        pct_val = df.loc[mask_missing, "improvement_pct"]
-        df.loc[unit_mismatch, "verdict"] = "unavailable"
-        df.loc[mask_missing & pct_val.isna(), "verdict"] = "unavailable"
-        improved = (pct_val >= _COMPARE_CONFIG.pct_threshold)
-        regressed = (pct_val <= -_COMPARE_CONFIG.pct_threshold)
-        df.loc[mask_missing & improved.values, "verdict"] = "improved"
-        df.loc[mask_missing & regressed.values, "verdict"] = "regressed"
-        df.loc[mask_missing & ~(improved | regressed).values, "verdict"] = "same"
+    df["verdict"] = df["verdict"].where(df["verdict"].notna(), [m[1] for m in metrics])
     return df
 
 
@@ -290,9 +280,9 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
                    purpose_filter: str | None = None) -> pd.DataFrame:
     """Time-series of one perf point with rolling baseline stats."""
     start = time.time()
-    purpose_like = f\"%{purpose_filter}%\" if purpose_filter else None
+    purpose_like = f"%{purpose_filter}%" if purpose_filter else None
     with _read_only(db_path) as con:
-        result = con.execute(\"\"\"
+        result = con.execute("""
             WITH base AS (
                 SELECT ts, date, ov_version, ov_build, ww,
                        value, unit

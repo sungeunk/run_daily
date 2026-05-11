@@ -92,13 +92,6 @@ def write_analysis_to_db(
 def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult, config: "AnalysisConfig | None" = None) -> None:
     p = result.performance
     b = result.baseline
-    
-    # Store config_json for reproducibility/audit
-    config_json = None
-    if config is not None:
-        from dataclasses import asdict as dc_asdict
-        config_json = json.dumps(dc_asdict(config))
-    
     con.execute(
         """
         INSERT INTO analysis_results (
