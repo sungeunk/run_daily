@@ -42,6 +42,7 @@ from analysis.engine import (
 from analysis.report import render_analysis_summary, prepend_to_report
 from analysis.persistence import write_analysis_to_summary, _result_to_dict, write_analysis_to_db
 from analysis.baseline import find_last_known_good, select_baseline
+from report.builder import build_summary
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +771,20 @@ class TestWriteAnalysisToSummary:
         assert "performance" in block
         assert "top_regressions" in block
 
+    def test_config_snapshot_written(self, tmp_path):
+        summary_json = tmp_path / "daily.20260101_0000.summary.json"
+        summary_json.write_text(
+            json.dumps({"meta": {}, "totals": {}, "tests": []}),
+            encoding="utf-8",
+        )
+        result = _make_result()
+        config = AnalysisConfig(pct_threshold=0.12, top_regressions=7)
+        write_analysis_to_summary(summary_json, result, config=config)
+
+        data = json.loads(summary_json.read_text(encoding="utf-8"))
+        assert data["analysis"]["config_snapshot"]["pct_threshold"] == 0.12
+        assert data["analysis"]["config_snapshot"]["top_regressions"] == 7
+
     def test_idempotent_overwrite(self, tmp_path):
         summary_json = tmp_path / "daily.20260101_0000.summary.json"
         summary_json.write_text(
@@ -781,6 +796,12 @@ class TestWriteAnalysisToSummary:
 
         data = json.loads(summary_json.read_text(encoding="utf-8"))
         assert "old" not in data["analysis"]
+
+
+class TestReportSummarySchema:
+    def test_summary_schema_version_is_emitted(self):
+        summary = build_summary({"created": 1.0, "duration": 2.0, "summary": {}, "tests": []})
+        assert summary["schema_version"] == 1
 
 
 class TestWriteAnalysisToDb:

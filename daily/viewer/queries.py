@@ -7,6 +7,7 @@ per-call connection cost is paid once per cache bucket.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 import logging
 import time
@@ -22,22 +23,28 @@ log = logging.getLogger(__name__)
 
 _COMPARE_CONFIG = AnalysisConfig()
 
-# Cache table existence per connection lifecycle to avoid repeated information_schema scans
-_table_cache: dict[int, set[str]] = {}
+# Cache table existence per database file + mtime so the cache stays bounded
+# and automatically refreshes when the DuckDB file is rewritten.
 
 
 def _read_only(db_path: Path) -> duckdb.DuckDBPyConnection:
     return duckdb.connect(str(db_path), read_only=True)
 
 
-def _cached_tables(con) -> set[str]:
-    """Return set of existing tables for this connection, cached per connection."""
-    con_id = id(con)
-    if con_id not in _table_cache:
-        _table_cache[con_id] = {r[0] for r in con.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-        ).fetchall()}
-    return _table_cache[con_id]
+@lru_cache(maxsize=8)
+def _cached_tables(db_path_str: str, mtime_ns: int) -> frozenset[str]:
+    with _read_only(Path(db_path_str)) as con:
+        return frozenset(
+            r[0]
+            for r in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
+        )
+
+
+def _tables_for_db(db_path: Path) -> set[str]:
+    stat = db_path.stat()
+    return set(_cached_tables(str(db_path), stat.st_mtime_ns))
 
 
 def _fill_missing_verdicts(df: pd.DataFrame) -> pd.DataFrame:
@@ -581,7 +588,7 @@ def fetch_functional_history(
     Returns an empty DataFrame when the table does not exist (pre-migration DB).
     """
     with _read_only(db_path) as con:
-        if "functional_issues" not in _cached_tables(con):
+        if "functional_issues" not in _tables_for_db(db_path):
             return pd.DataFrame()
 
         machine_filter = "AND r.machine = ?" if machine else ""
@@ -619,7 +626,7 @@ def fetch_functional_summary(
     Returns an empty DataFrame when analysis tables do not exist.
     """
     with _read_only(db_path) as con:
-        if "analysis_results" not in _cached_tables(con):
+        if "analysis_results" not in _tables_for_db(db_path):
             return pd.DataFrame()
 
         machine_filter = "AND r.machine = ?" if machine else ""
@@ -664,7 +671,7 @@ def fetch_run_comparison(
     Falls back to a direct perf join when analysis_comparisons lacks one run.
     """
     with _read_only(db_path) as con:
-        if "analysis_comparisons" in _cached_tables(con):
+        if "analysis_comparisons" in _tables_for_db(db_path):
             # Try to use pre-computed comparisons (run_a is current, run_b is baseline).
             df = con.execute("""
                 SELECT
@@ -721,7 +728,7 @@ def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
     has not been analyzed yet.
     """
     with _read_only(db_path) as con:
-        if "analysis_results" not in _cached_tables(con):
+        if "analysis_results" not in _tables_for_db(db_path):
             return pd.DataFrame()
 
         return con.execute("""

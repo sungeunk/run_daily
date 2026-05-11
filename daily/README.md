@@ -261,8 +261,14 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 
 ```json
 {
+  "schema_version": 1,
   "generated_at": 1713499200.0,
   "duration_sec": 1234.5,
+  "meta": {
+    "machine": "LNL-03",
+    "stamp": "20260421_2234",
+    "ov_version": "2026.2.0-21664-ad5d8e0f99b"
+  },
   "totals": {"passed": 14, "failed": 0, "error": 0, "skipped": 0, "total": 14},
   "tests": [
     {
@@ -282,9 +288,29 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
         ]
       }
     }
-  ]
+  ],
+  "analysis": {
+    "overall_status": "green",
+    "baseline": {"status": "found", "run_id": "..."},
+    "functional": {"total": 14, "passed": 14, "failed": 0, "error": 0, "skipped": 0, "issue_count": 0, "issues": []},
+    "performance": {"compared": 40, "improved": 5, "same": 33, "regressed": 2, "unavailable": 0},
+    "config_snapshot": {
+      "pct_threshold": 0.05,
+      "z_threshold": 3.0,
+      "noisy_cv_threshold": 0.10,
+      "top_regressions": 5,
+      "baseline_green_only": false,
+      "min_recent_points": 5,
+      "min_baseline_points": 7
+    }
+  }
 }
 ```
+
+- `schema_version`: summary contract 버전. downstream parser는 이 값을 기준으로
+  호환성 분기를 할 수 있음.
+- `analysis.config_snapshot`: 해당 run의 분석 임계치/게이트 설정 스냅샷.
+  재현성 검증(왜 improved/regressed가 나왔는지)에 사용.
 
 ## 진행 상태
 

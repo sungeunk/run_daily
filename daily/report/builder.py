@@ -35,6 +35,9 @@ from typing import Any, Iterable
 from tabulate import tabulate
 
 
+SUMMARY_SCHEMA_VERSION = 1
+
+
 # ---------------------------------------------------------------------------
 # Extraction
 # ---------------------------------------------------------------------------
@@ -76,6 +79,7 @@ def build_summary(pytest_report: dict, *, extra_meta: dict | None = None
     """
     summary_block = pytest_report.get('summary', {})
     out = {
+        'schema_version': SUMMARY_SCHEMA_VERSION,
         'generated_at': pytest_report.get('created', 0.0),
         'duration_sec': pytest_report.get('duration', 0.0),
         'meta':         dict(extra_meta or {}),

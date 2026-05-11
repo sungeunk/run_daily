@@ -64,7 +64,6 @@ def write_analysis_to_db(
     run_id: str,
     result: AnalysisResult,
     threshold_pct: float | None = None,
-    config: "AnalysisConfig | None" = None,
 ) -> None:
     """Upsert analysis result into DB aggregate tables.
 
@@ -80,7 +79,7 @@ def write_analysis_to_db(
 
     try:
         con.execute("BEGIN")
-        _try_upsert_analysis_results(con, run_id, result, config=config)
+        _try_upsert_analysis_results(con, run_id, result)
         _try_upsert_analysis_comparisons(con, run_id, result, threshold_pct)
         _try_upsert_functional_issues(con, run_id, result)
         con.execute("COMMIT")
@@ -89,7 +88,7 @@ def write_analysis_to_db(
         log.warning("analysis DB persistence rolled back for %s: %s", run_id, exc)
 
 
-def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult, config: "AnalysisConfig | None" = None) -> None:
+def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult) -> None:
     p = result.performance
     b = result.baseline
     con.execute(

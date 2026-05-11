@@ -107,14 +107,15 @@ def analyze_run(
         )
 
         # Best-effort persistence for green-only baseline and downstream tabs.
-        from .persistence import write_analysis_to_db
+        from .persistence import write_analysis_to_db, write_analysis_to_summary
+
+        write_analysis_to_summary(summary_json, result, config=config)
 
         write_analysis_to_db(
             con,
             rec.run_id,
             result,
             threshold_pct=config.pct_threshold,
-            config=config,
         )
         return result
 
