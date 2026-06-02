@@ -36,10 +36,11 @@ from analysis.engine import (
     _aggregate_models,
     _aggregate_performance,
     _fetch_comparison_rows,
+    _is_within_fluctuation,
     _overall_status,
     _top_regressions,
 )
-from analysis.report import render_analysis_summary, prepend_to_report
+from analysis.report import prepend_to_report, render_analysis_html, render_analysis_summary, write_analysis_html
 from analysis.persistence import write_analysis_to_summary, _result_to_dict, write_analysis_to_db
 from analysis.baseline import find_last_known_good, select_baseline
 from report.builder import build_summary
@@ -595,6 +596,76 @@ class TestOverallStatus:
 
 
 class TestFetchComparisonRows:
+    def test_topk_history_reference_is_preferred(self):
+        duckdb = pytest.importorskip("duckdb")
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """
+            CREATE TABLE runs (
+                run_id TEXT,
+                machine TEXT,
+                ts TIMESTAMP,
+                short_run BOOLEAN,
+                purpose TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
+
+        now = datetime(2026, 1, 2, 0, 0)
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?)",
+            ["cur", "M1", now, True, "nightly"],
+        )
+        con.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?)",
+            ["base", "M1", now - timedelta(days=1), True, "nightly"],
+        )
+
+        history_vals = [10.0, 10.2, 9.9, 10.1, 10.0, 9.8, 10.3, 10.1, 9.9, 10.0]
+        for idx, v in enumerate(history_vals, start=1):
+            run_id = f"h{idx}"
+            con.execute(
+                "INSERT INTO runs VALUES (?, ?, ?, ?, ?)",
+                [run_id, "M1", now - timedelta(days=idx + 1), True, "nightly"],
+            )
+            con.execute(
+                "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [run_id, "llama", "FP16", 32, 128, "2nd", v, "ms"],
+            )
+
+        con.execute(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ["base", "llama", "FP16", 32, 128, "2nd", 11.0, "ms"],
+        )
+        con.execute(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ["cur", "llama", "FP16", 32, 128, "2nd", 9.7, "ms"],
+        )
+
+        baseline = BaselineInfo(status="found", run_id="base")
+        cfg = AnalysisConfig(history_window=10, reference_top_k=5)
+        rows = _fetch_comparison_rows(con, "cur", baseline, cfg)
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.reference_source == "topk_mean"
+        assert row.history_count == 10
+        assert row.baseline_value < 10.2
+
     def test_null_or_nan_values_marked_unavailable(self):
         duckdb = pytest.importorskip("duckdb")
         con = duckdb.connect(":memory:")
@@ -715,6 +786,24 @@ class TestFetchComparisonRows:
         assert unavailable[0].key.in_token == 64
 
 
+class TestFluctuationGuard:
+    def test_is_within_fluctuation_true_when_delta_small(self):
+        assert _is_within_fluctuation(
+            current=9.3,
+            reference=10.0,
+            sigma=0.6,
+            scale=1.5,
+        )
+
+    def test_is_within_fluctuation_false_when_sigma_missing(self):
+        assert not _is_within_fluctuation(
+            current=9.0,
+            reference=10.0,
+            sigma=None,
+            scale=1.5,
+        )
+
+
 # ---------------------------------------------------------------------------
 # report.py
 # ---------------------------------------------------------------------------
@@ -747,6 +836,21 @@ class TestRenderAnalysisSummary:
         prepend_to_report(report, result)
         content = report.read_text(encoding="utf-8")
         assert content.index("[ Analysis summary ]") < content.index("[ Summary ]")
+
+    def test_html_report_render_and_write(self, tmp_path):
+        rows = [
+            ComparisonRow(_KEY, "ms", 120.0, 100.0, -0.20, "regressed", history_count=10, reference_source="topk_mean"),
+        ]
+        result = _make_result(rows=rows)
+        html_body = render_analysis_html(result)
+        assert "<html" in html_body
+        assert "Top Regressions" in html_body
+
+        report = tmp_path / "daily.20260101_0000.report"
+        report.write_text("[ Summary ]", encoding="utf-8")
+        html_path = write_analysis_html(report, result)
+        assert html_path.exists()
+        assert html_path.suffix == ".html"
 
 
 # ---------------------------------------------------------------------------

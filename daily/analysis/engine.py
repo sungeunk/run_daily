@@ -15,6 +15,8 @@ import json
 import logging
 import math
 from pathlib import Path
+from statistics import mean, median
+from types import SimpleNamespace
 
 from .baseline import find_last_known_good, select_baseline
 from .functional import aggregate_functional
@@ -29,9 +31,10 @@ from .types import (
     PerformanceResult,
     SeriesKey,
 )
-from .verdict import make_comparison_row, verdict_from_pct
+from .verdict import improvement_pct, make_comparison_row, verdict_from_pct, verdict_from_signal
 
 log = logging.getLogger(__name__)
+REFERENCE_PURPOSE = "daily_CB timer"
 
 
 def analyze_run(
@@ -75,7 +78,7 @@ def analyze_run(
         ensure_schema(con)
         upsert_run(con, rec)
         baseline_info = select_baseline(con, rec, config)
-        rows = _fetch_comparison_rows(con, rec.run_id, baseline_info, config)
+        rows = _fetch_comparison_rows(con, rec, baseline_info, config)
 
         # --- aggregate ---
         performance = _aggregate_performance(rows)
@@ -126,12 +129,20 @@ def analyze_run(
 
 def _fetch_comparison_rows(
     con,
-    run_id: str,
+    rec,
     baseline_info: BaselineInfo,
     config: AnalysisConfig,
 ) -> list[ComparisonRow]:
+    if isinstance(rec, str):
+        run_id = rec
+        rec_ctx = _fetch_run_context(con, run_id)
+    else:
+        run_id = rec.run_id
+        rec_ctx = rec
     if baseline_info.status != "found" or not baseline_info.run_id:
         return []
+
+    history_map = _load_series_history(con, rec_ctx, config) if rec_ctx is not None else {}
 
     db_rows = con.execute(
         """
@@ -182,6 +193,8 @@ def _fetch_comparison_rows(
         unit = current_unit or baseline_unit
         current_value = _as_finite_float(cur)
         baseline_value = _as_finite_float(base)
+        history_values = history_map.get((model, precision, int(in_token), int(out_token), exec_mode), [])
+        history_stats = _history_stats(history_values, unit, config)
 
         # Unit mismatch: treat as unavailable to avoid comparing apples to oranges.
         if current_unit is not None and baseline_unit is not None and current_unit != baseline_unit:
@@ -193,6 +206,8 @@ def _fetch_comparison_rows(
                     baseline_value=float("nan"),
                     improvement_pct=None,
                     verdict=verdict_from_pct(None, config),
+                    history_count=history_stats["count"],
+                    reference_source="unit_mismatch",
                 )
             )
             continue
@@ -206,16 +221,159 @@ def _fetch_comparison_rows(
                     baseline_value=float("nan") if baseline_value is None else baseline_value,
                     improvement_pct=None,
                     verdict=verdict_from_pct(None, config),
+                    history_count=history_stats["count"],
                 )
             )
             continue
 
-        # NOTE: Current comparison path has no trend stats (recent_cv, worsening_z, recent_n,
-        # baseline_n) from just current vs baseline values. Dual-gate verdicts (noisy,
-        # insufficient) will be integrated in a future enhancement. For now, verdicts are
-        # limited to improved/same/regressed/unavailable.
-        result.append(make_comparison_row(key, unit, current_value, baseline_value, config))
+        reference_value = baseline_value
+        reference_source = "baseline"
+        if history_stats["topk_mean"] is not None:
+            reference_value = history_stats["topk_mean"]
+            reference_source = "topk_mean"
+
+        row = make_comparison_row(key, unit, current_value, reference_value, config)
+        row.reference_source = reference_source
+        row.history_count = history_stats["count"]
+        row.history_median = history_stats["median"]
+        row.history_mad = history_stats["mad"]
+        row.history_sigma = history_stats["sigma"]
+        row.history_cv = history_stats["cv"]
+        row.worsening_z = history_stats["worsening_z"](current_value)
+
+        if reference_source == "topk_mean":
+            row.improvement_pct = improvement_pct(current_value, reference_value, unit)
+            row.verdict = verdict_from_signal(
+                row.improvement_pct,
+                config,
+                worsening_z=row.worsening_z,
+                recent_cv=row.history_cv,
+                recent_n=row.history_count,
+                baseline_n=row.history_count,
+            )
+
+            # When the delta is within historical fluctuation range,
+            # downgrade to "same" even if pct threshold was crossed.
+            if _is_within_fluctuation(
+                current=current_value,
+                reference=reference_value,
+                sigma=row.history_sigma,
+                scale=config.fluctuation_sigma_scale,
+            ) and row.verdict in {"improved", "regressed"}:
+                row.within_fluctuation = True
+                row.verdict = "same"
+
+        result.append(row)
     return result
+
+
+def _load_series_history(con, rec, config: AnalysisConfig) -> dict[tuple, list[float]]:
+    try:
+        rows = con.execute(
+            """
+        WITH ranked AS (
+            SELECT
+                p.model,
+                p.precision,
+                p.in_token,
+                p.out_token,
+                p.exec_mode,
+                p.value,
+                ROW_NUMBER() OVER (
+                    PARTITION BY p.model, p.precision, p.in_token, p.out_token, p.exec_mode
+                    ORDER BY r.ts DESC
+                ) AS rn
+            FROM perf p
+            JOIN runs r USING (run_id)
+            WHERE r.machine = ?
+              AND r.run_id <> ?
+              AND r.ts < ?
+              AND r.short_run IS NOT DISTINCT FROM ?
+                            AND COALESCE(r.purpose, '') = ?
+        )
+        SELECT model, precision, in_token, out_token, exec_mode, value
+        FROM ranked
+        WHERE rn <= ?
+        ORDER BY model, precision, in_token, out_token, exec_mode, rn
+            """,
+            [
+                rec.machine,
+                rec.run_id,
+                rec.ts,
+                rec.short_run,
+                REFERENCE_PURPOSE,
+                config.history_window,
+            ],
+        ).fetchall()
+    except Exception:
+        return {}
+
+    out: dict[tuple, list[float]] = {}
+    for model, precision, in_token, out_token, exec_mode, value in rows:
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(num):
+            continue
+        key = (model, precision, int(in_token), int(out_token), exec_mode)
+        out.setdefault(key, []).append(num)
+    return out
+
+
+def _history_stats(values: list[float], unit: str | None, config: AnalysisConfig) -> dict:
+    if not values:
+        return {
+            "count": 0,
+            "topk_mean": None,
+            "median": None,
+            "mad": None,
+            "sigma": None,
+            "cv": None,
+            "worsening_z": lambda _current: None,
+        }
+
+    med = median(values)
+    abs_dev = [abs(v - med) for v in values]
+    mad = median(abs_dev)
+    sigma = 1.4826 * mad if mad is not None else None
+    cv = None
+    if sigma is not None and med not in (None, 0.0):
+        cv = sigma / abs(med)
+
+    top_k = max(1, min(config.reference_top_k, len(values)))
+    lower_is_better = unit in {"ms", "s", "%"}
+    selected = sorted(values)[:top_k] if lower_is_better else sorted(values, reverse=True)[:top_k]
+    topk_mean = mean(selected)
+
+    def _worsening_z(current: float) -> float | None:
+        if sigma is None or sigma <= 0.0 or not math.isfinite(sigma):
+            return None
+        if lower_is_better:
+            return (current - med) / sigma
+        return (med - current) / sigma
+
+    return {
+        "count": len(values),
+        "topk_mean": topk_mean,
+        "median": med,
+        "mad": mad,
+        "sigma": sigma,
+        "cv": cv,
+        "worsening_z": _worsening_z,
+    }
+
+
+def _is_within_fluctuation(
+    *,
+    current: float,
+    reference: float,
+    sigma: float | None,
+    scale: float,
+) -> bool:
+    if sigma is None or not math.isfinite(sigma) or sigma <= 0.0:
+        return False
+    return abs(current - reference) <= scale * sigma
 
 
 def _aggregate_performance(rows: list[ComparisonRow]) -> PerformanceResult:
@@ -309,7 +467,28 @@ def _build_bisect_delta(
             sha_changed=None,
         )
 
-    lkg_rows = _fetch_comparison_rows(con, current_run_id, lkg, config)
+    rec = _fetch_run_context(con, current_run_id)
+    if rec is None:
+        return BisectDelta(
+            status="unavailable",
+            issue_run_id=current_run_id,
+            issue_stamp=issue_meta.get("stamp"),
+            issue_ov_version=issue_meta.get("ov_version"),
+            issue_ov_build=issue_meta.get("ov_build"),
+            issue_ov_sha=issue_meta.get("ov_sha"),
+            last_good_run_id=lkg.run_id,
+            last_good_stamp=lkg.stamp,
+            last_good_ov_version=lkg.ov_version,
+            last_good_ov_build=None,
+            last_good_ov_sha=None,
+            compared_count=0,
+            regressed_count=0,
+            functional_issue_count=functional_issue_count,
+            build_changed=None,
+            sha_changed=None,
+        )
+
+    lkg_rows = _fetch_comparison_rows(con, rec, lkg, config)
     comparable_rows = [
         row for row in lkg_rows
         if row.improvement_pct is not None and row.verdict != "unavailable"
@@ -370,6 +549,27 @@ def _fetch_run_meta(con, run_id: str) -> dict[str, str | None]:
         "ov_build": ov_build,
         "ov_sha": ov_sha,
     }
+
+
+def _fetch_run_context(con, run_id: str):
+    row = con.execute(
+        """
+        SELECT run_id, machine, ts, short_run, purpose
+        FROM runs
+        WHERE run_id = ?
+        LIMIT 1
+        """,
+        [run_id],
+    ).fetchone()
+    if row is None:
+        return None
+    return SimpleNamespace(
+        run_id=row[0],
+        machine=row[1],
+        ts=row[2],
+        short_run=row[3],
+        purpose=row[4],
+    )
 
 
 def _changed(current: str | None, previous: str | None) -> bool | None:

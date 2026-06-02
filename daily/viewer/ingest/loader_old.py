@@ -41,7 +41,7 @@ from pathlib import Path
 
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
-from .record import PerfRow, RunRecord
+from .record import DeviceRecord, PerfRow, RunRecord
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +90,8 @@ _PURPOSE_TABLE_RE = re.compile(
 _PURPOSE_FALLBACK_RE = re.compile(r"(?im)^\s*Purpose\s*:\s*(?P<purpose>.+?)\s*$")
 _OPENVINO_LINE_RE = re.compile(
     r"(?is)OpenVINO[^\n\r]*?-(?P<build>\d+)-(?P<sha>[0-9a-fA-F]{7,40})")
+_TABLE_HEADER_RE = re.compile(r"^\s*(?P<header>[A-Za-z ]+):\s*$")
+_NUM_RE = re.compile(r"([-+]?[0-9]*\.?[0-9]+)")
 
 
 def _parse_report_text(path: Path) -> tuple[str | None, str | None, str | None]:
@@ -117,6 +119,76 @@ def _parse_report_text(path: Path) -> tuple[str | None, str | None, str | None]:
         build, sha = m.group("build"), m.group("sha").lower()
 
     return purpose, build, sha
+
+
+def _parse_table_sections(path: Path) -> dict[str, list[tuple[str, str]]]:
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        log.warning("Failed to read %s: %s", path, e)
+        return {}
+
+    sections: dict[str, list[tuple[str, str]]] = {}
+    current_header: str | None = None
+    for raw_line in text.splitlines():
+        header_match = _TABLE_HEADER_RE.match(raw_line)
+        if header_match:
+            current_header = header_match.group("header").strip()
+            sections.setdefault(current_header, [])
+            continue
+        if current_header is None or not raw_line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in raw_line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        if all(set(cell) <= {"-"} for cell in cells[:2]):
+            continue
+        sections[current_header].append((cells[0], cells[1]))
+    return sections
+
+
+def _parse_float(value: str | None) -> float | None:
+    if not value:
+        return None
+    m = _NUM_RE.search(value.replace(",", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _report_runtime_meta(path: Path) -> tuple[str | None, float | None, float | None, list[DeviceRecord]]:
+    sections = _parse_table_sections(path)
+
+    system_rows = dict(sections.get("System Info", []))
+    cpu_rows = dict(sections.get("CPU Info", []))
+    gpu_rows = sections.get("GPU Info", [])
+    gpu_map = {k: v for k, v in gpu_rows if k}
+    gpu_name = next((v for k, v in gpu_rows if not k and v), None)
+
+    host_parts = [part for part in [system_rows.get("Caption"), system_rows.get("Version"), cpu_rows.get("Name")] if part]
+    host_info = " / ".join(host_parts) if host_parts else None
+    host_memory_size_gb = _parse_float(system_rows.get("host.memory size"))
+    host_memory_speed_mhz = _parse_float(system_rows.get("host.memory speed"))
+
+    devices: list[DeviceRecord] = []
+    if gpu_name or gpu_map:
+        devices.append(
+            DeviceRecord(
+                device_index=0,
+                device=gpu_name,
+                driver=gpu_map.get("DRIVER_VERSION"),
+                eu=int(_parse_float(gpu_map.get("MAX_COMPUTE_UNITS")) or 0) or None,
+                clock_freq_mhz=_parse_float(gpu_map.get("MAX_CLOCK_FREQUENCY")),
+                global_mem_size_gb=_parse_float(gpu_map.get("GLOBAL_MEM_SIZE")),
+            )
+        )
+
+    return host_info, host_memory_size_gb, host_memory_speed_mhz, devices
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +338,7 @@ def load_report(report_path: Path, *, machine_override: str | None = None) -> Ru
     machine = machine_override or pickle_path.parent.name  # e.g. /var/www/html/daily/<MACHINE>/...
 
     purpose, r_build, r_sha = _parse_report_text(text_report)
+    host_info, host_memory_size_gb, host_memory_speed_mhz, devices = _report_runtime_meta(text_report)
 
     ov_version = _ov_version_from_filename(pickle_path.name)
     fn_build, fn_sha = split_ov_version(ov_version)
@@ -284,9 +357,13 @@ def load_report(report_path: Path, *, machine_override: str | None = None) -> Ru
         ov_version=ov_version,
         ov_build=ov_build,
         ov_sha=ov_sha,
+        host_info=host_info,
+        host_memory_size_gb=host_memory_size_gb,
+        host_memory_speed_mhz=host_memory_speed_mhz,
         source_path=str(pickle_path),
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(text_report)) else None,
         file_hash=file_hash(pickle_path),
+        devices=devices,
     )
 
     for key_tuple, items in result_root.items():

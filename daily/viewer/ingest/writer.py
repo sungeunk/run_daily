@@ -37,6 +37,9 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
     migrations = [
         "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now()",
         "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS threshold_pct DOUBLE",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_info TEXT",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_size_gb DOUBLE",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_speed_mhz DOUBLE",
     ]
     for sql in migrations:
         try:
@@ -72,9 +75,10 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 run_id, source_format, report_file, machine, device,
                 purpose, description, ts, ww,
                 ov_version, ov_build, ov_sha,
+                host_info, host_memory_size_gb, host_memory_speed_mhz,
                 genai_version, genai_commit, tok_commit,
                 short_run, source_path, rawlog_path, file_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
@@ -87,6 +91,9 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 ov_version    = excluded.ov_version,
                 ov_build      = excluded.ov_build,
                 ov_sha        = excluded.ov_sha,
+                host_info     = excluded.host_info,
+                host_memory_size_gb = excluded.host_memory_size_gb,
+                host_memory_speed_mhz = excluded.host_memory_speed_mhz,
                 genai_version = excluded.genai_version,
                 genai_commit  = excluded.genai_commit,
                 tok_commit    = excluded.tok_commit,
@@ -99,6 +106,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 rec.run_id, rec.source_format, rec.report_file, rec.machine, rec.device,
                 rec.purpose, rec.description, rec.ts, rec.ww,
                 rec.ov_version, rec.ov_build, rec.ov_sha,
+                rec.host_info, rec.host_memory_size_gb, rec.host_memory_speed_mhz,
                 rec.genai_version, rec.genai_commit, rec.tok_commit,
                 rec.short_run, rec.source_path, rec.rawlog_path, rec.file_hash,
             ],

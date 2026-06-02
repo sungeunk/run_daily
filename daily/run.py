@@ -149,14 +149,16 @@ def _run_analysis(text_report: Path, summary_json: Path) -> None:
     """Best-effort: run the analysis engine and update report + summary.json."""
     try:
         from analysis.engine import analyze_run
-        from analysis.report import prepend_to_report
+        from analysis.report import prepend_to_report, write_analysis_html
         from analysis.persistence import write_analysis_to_summary
 
         result = analyze_run(summary_json, VIEWER_DB)
         write_analysis_to_summary(summary_json, result)
 
         prepend_to_report(text_report, result)
+        html_report = write_analysis_html(text_report, result)
         print(f'[run.py] analysis summary prepended to {text_report}')
+        print(f'[run.py] analysis html report: {html_report}')
     except Exception as exc:  # noqa: BLE001 — analysis must not fail the run
         print(f'[run.py] analysis skipped: {exc}', file=sys.stderr)
 

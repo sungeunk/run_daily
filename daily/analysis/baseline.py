@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from .types import AnalysisConfig, BaselineInfo
 
 log = logging.getLogger(__name__)
+REFERENCE_PURPOSE = "daily_CB timer"
 
 
 def select_baseline(
@@ -38,39 +39,29 @@ def select_baseline(
     """
     green_join = _green_join(con) if config.baseline_green_only else ""
 
-    # --- priority 1: same purpose ---
-    if rec.purpose:
-        row = _query_baseline(
-            con,
-            rec=rec,
-            green_join=green_join,
-            include_short_run=True,
-            include_purpose=True,
-        )
-        if row:
-            return _make_info(row, "same machine, short_run, purpose")
-
-    # --- priority 2: same short_run ---
+    # --- priority 1: same short_run + reference purpose ---
     row = _query_baseline(
         con,
         rec=rec,
         green_join=green_join,
         include_short_run=True,
-        include_purpose=False,
+        include_purpose=True,
+        purpose_value=REFERENCE_PURPOSE,
     )
     if row:
-        return _make_info(row, "same machine, short_run")
+        return _make_info(row, f"same machine, short_run, purpose={REFERENCE_PURPOSE}")
 
-    # --- priority 3: same machine only ---
+    # --- priority 2: same machine + reference purpose ---
     row = _query_baseline(
         con,
         rec=rec,
         green_join=green_join,
         include_short_run=False,
-        include_purpose=False,
+        include_purpose=True,
+        purpose_value=REFERENCE_PURPOSE,
     )
     if row:
-        return _make_info(row, "same machine")
+        return _make_info(row, f"same machine, purpose={REFERENCE_PURPOSE}")
 
     return BaselineInfo(status="not_found")
 
@@ -138,11 +129,13 @@ def _query_baseline(
     green_join: str,
     include_short_run: bool,
     include_purpose: bool,
+    purpose_value: str | None = None,
 ) -> tuple | None:
     where_sql, params = _candidate_filters(
         rec,
         include_short_run=include_short_run,
         include_purpose=include_purpose,
+        purpose_value=purpose_value,
         require_overlap=True,
     )
     sql = f"""
@@ -163,6 +156,7 @@ def _candidate_filters(
     *,
     include_short_run: bool,
     include_purpose: bool,
+    purpose_value: str | None,
     require_overlap: bool,
 ) -> tuple[str, list]:
     """Build shared candidate-policy predicates for baseline/LKG lookup."""
@@ -178,7 +172,7 @@ def _candidate_filters(
         params.append(rec.short_run)
     if include_purpose:
         clauses.append("COALESCE(r.purpose, '') = COALESCE(?, '')")
-        params.append(rec.purpose)
+        params.append(rec.purpose if purpose_value is None else purpose_value)
 
     if require_overlap:
         clauses.append(

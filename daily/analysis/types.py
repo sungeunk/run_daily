@@ -43,6 +43,9 @@ class AnalysisConfig:
     baseline_green_only: bool = False
     min_recent_points: int = 5
     min_baseline_points: int = 7
+    history_window: int = 10
+    reference_top_k: int = 5
+    fluctuation_sigma_scale: float = 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +77,14 @@ class ComparisonRow:
     baseline_value: float
     improvement_pct: float | None   # positive = better, None = unavailable
     verdict: Verdict
+    history_count: int = 0
+    reference_source: str = "baseline"
+    history_median: float | None = None
+    history_mad: float | None = None
+    history_sigma: float | None = None
+    history_cv: float | None = None
+    worsening_z: float | None = None
+    within_fluctuation: bool = False
 
 
 @dataclass
@@ -141,6 +152,20 @@ class ModelSummary:
 
 
 @dataclass
+class CurrentRunInfo:
+    """Current run metadata shown in the HTML summary."""
+
+    ov_version: str | None = None
+    purpose: str | None = None
+    machine_name: str | None = None
+    gpu_driver_version: str | None = None
+    gpu_info: str | None = None
+    host_info: str | None = None
+    memory_size: str | None = None
+    memory_speed: str | None = None
+
+
+@dataclass
 class BisectDelta:
     """Issue-run vs last-known-good summary for bisect assistance."""
 
@@ -181,5 +206,6 @@ class AnalysisResult:
     models: list[ModelSummary]
     top_regressions: list[ComparisonRow]
     rows: list[ComparisonRow]           # full comparison table (not in JSON output)
+    current_run: CurrentRunInfo | None = None
     last_known_good: BaselineInfo | None = None
     bisect_delta: BisectDelta | None = None

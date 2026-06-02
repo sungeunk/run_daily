@@ -46,6 +46,9 @@ class RunRecord:
     ov_version: str | None = None
     ov_build: str | None = None
     ov_sha: str | None = None
+    host_info: str | None = None
+    host_memory_size_gb: float | None = None
+    host_memory_speed_mhz: float | None = None
     genai_version: str | None = None
     genai_commit: str | None = None
     tok_commit: str | None = None

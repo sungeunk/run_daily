@@ -209,6 +209,14 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
             "baseline_value": row.baseline_value,
             "improvement_pct": row.improvement_pct,
             "verdict": row.verdict,
+            "history_count": row.history_count,
+            "reference_source": row.reference_source,
+            "history_median": row.history_median,
+            "history_mad": row.history_mad,
+            "history_sigma": row.history_sigma,
+            "history_cv": row.history_cv,
+            "worsening_z": row.worsening_z,
+            "within_fluctuation": row.within_fluctuation,
         }
 
     b = result.baseline

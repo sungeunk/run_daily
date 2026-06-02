@@ -31,6 +31,7 @@ from typing import Iterable
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
 from .record import PerfRow, RunRecord
+from .loader_old import _report_runtime_meta
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +186,13 @@ def load_summary(path: Path) -> RunRecord:
         ov_build = ov_build or b
         ov_sha = ov_sha or s
     ww = meta.get("workweek") or workweek_of(ts)
+    report_path = _report_candidate(path)
+    host_info = None
+    host_memory_size_gb = None
+    host_memory_speed_mhz = None
+    devices = []
+    if report_path is not None:
+        host_info, host_memory_size_gb, host_memory_speed_mhz, devices = _report_runtime_meta(report_path)
 
     rec = RunRecord(
         run_id=run_id_of(machine, ts, path.name),
@@ -199,10 +207,14 @@ def load_summary(path: Path) -> RunRecord:
         ov_version=ov_version,
         ov_build=ov_build,
         ov_sha=ov_sha,
+        host_info=host_info,
+        host_memory_size_gb=host_memory_size_gb,
+        host_memory_speed_mhz=host_memory_speed_mhz,
         short_run=bool(meta.get("short_run", False)),
         source_path=str(path),
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(path)) else None,
         file_hash=file_hash(path),
+        devices=devices,
     )
 
     for t in summary.get("tests", []):
