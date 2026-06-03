@@ -145,12 +145,28 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
-def _run_analysis(text_report: Path, summary_json: Path) -> None:
-    """Best-effort: run the analysis engine and update report + summary.json."""
+def _run_analysis(text_report: Path, summary_json: Path) -> Path | None:
+    """Best-effort: ingest output_dir artefacts, then run analysis and update reports."""
+    output_dir = summary_json.parent
     try:
+        from viewer.ingest.cli import discover, ingest_files
         from analysis.engine import analyze_run
         from analysis.report import prepend_to_report, write_analysis_html
         from analysis.persistence import write_analysis_to_summary
+
+        files = discover(output_dir, fmt='auto')
+        if files:
+            added, skipped, failures = ingest_files(files, VIEWER_DB)
+            if failures:
+                raise RuntimeError(
+                    f'ingest failed for {len(failures)} file(s); first error: {failures[0][1]}'
+                )
+            print(
+                f'[run.py] ingest: candidates={len(files)} added={added} '
+                f'skipped={skipped} db={VIEWER_DB}'
+            )
+        else:
+            print(f'[run.py] ingest skipped: no artefacts found under {output_dir}')
 
         result = analyze_run(summary_json, VIEWER_DB)
         write_analysis_to_summary(summary_json, result)
@@ -159,8 +175,10 @@ def _run_analysis(text_report: Path, summary_json: Path) -> None:
         html_report = write_analysis_html(text_report, result)
         print(f'[run.py] analysis summary prepended to {text_report}')
         print(f'[run.py] analysis html report: {html_report}')
+        return html_report
     except Exception as exc:  # noqa: BLE001 — analysis must not fail the run
         print(f'[run.py] analysis skipped: {exc}', file=sys.stderr)
+        return None
 
 
 def main() -> int:
@@ -230,7 +248,7 @@ def main() -> int:
     print(f'[run.py] summary json:   {summary_json}')
     print(f'[run.py] pytest json:    {pytest_json}')
 
-    _run_analysis(text_report, summary_json)
+    html_report = _run_analysis(text_report, summary_json)
 
     # --- post-run delivery ---
     # Find the session raw log — the RawLogSink names it with the OV version
@@ -248,7 +266,8 @@ def main() -> int:
 
     if args.mail:
         suffix = mail_title_suffix(summary)
-        send_mail(text_report, args.mail, args.description,
+        mail_report = html_report or text_report
+        send_mail(mail_report, args.mail, args.description,
                   suffix_title=suffix, now_stamp=stamp,
                   summary_json=summary_json)
 

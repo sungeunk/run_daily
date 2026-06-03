@@ -40,8 +40,11 @@ REMOTE_BASE_DIR = '/var/www/html/daily2'
 
 
 def _html_report_body(report_path: Path) -> str:
-    """Return an HTML body that preserves the text report formatting."""
+    """Return an HTML body for either a raw HTML report or plain text report."""
     report_text = report_path.read_text(encoding='utf-8')
+    if report_path.suffix.lower() == '.html':
+        return report_text
+
     escaped = html.escape(report_text)
     return (
         '<html><body>'
@@ -225,7 +228,8 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
     """Send ``report_path`` as an HTML email to ``recipients``.
 
     ``recipients`` is the same comma-separated string the old ``--mail``
-    flag accepted. Returns True on success.
+    flag accepted. ``report_path`` may be a generated ``.html`` report or a
+    legacy plain-text ``.report`` file. Returns True on success.
     """
     if not recipients:
         return False

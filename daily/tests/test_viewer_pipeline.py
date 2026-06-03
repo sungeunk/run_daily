@@ -597,9 +597,18 @@ def test_html_report_body_preserves_lines_and_escapes(tmp_path: Path) -> None:
     assert "[ Summary ]\nA &lt; B\n| col | value |" in body
 
 
+def test_html_report_body_passthrough_for_html_files(tmp_path: Path) -> None:
+    report = tmp_path / "daily.html"
+    report.write_text("<html><body><h1>Hello</h1></body></html>", encoding="utf-8")
+
+    body = delivery._html_report_body(report)
+
+    assert body == "<html><body><h1>Hello</h1></body></html>"
+
+
 def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> None:
-    report = tmp_path / "daily.report"
-    report.write_text("line 1\nline 2\n", encoding="utf-8")
+    report = tmp_path / "daily.html"
+    report.write_text("<html><body><p>line 1</p><p>line 2</p></body></html>", encoding="utf-8")
     captured: dict[str, object] = {}
 
     class _Result:
@@ -627,7 +636,7 @@ def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> 
     ]
     assert captured["text"] is True
     assert "<pre" in str(captured["input"])
-    assert "line 1\nline 2\n" in str(captured["input"])
+    assert "<p>line 1</p><p>line 2</p>" in str(captured["input"])
 
 
 def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) -> None:
