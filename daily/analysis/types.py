@@ -46,6 +46,7 @@ class AnalysisConfig:
     history_window: int = 10
     reference_top_k: int = 5
     fluctuation_sigma_scale: float = 1.5
+    baseline_purpose: str | None = None
 
 
 # ---------------------------------------------------------------------------

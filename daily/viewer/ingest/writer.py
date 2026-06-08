@@ -11,7 +11,7 @@ from pathlib import Path
 
 import duckdb
 
-from .record import RunRecord
+from .record import DeviceRecord, RunRecord
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,16 @@ def profile_exists(con: duckdb.DuckDBPyConnection, profile: str) -> bool:
 
 def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
     """Upsert a single RunRecord (runs + system_devices + perf) transactionally."""
+    devices_to_write = rec.devices
+    if not devices_to_write and (rec.gpu_info or rec.gpu_driver_version):
+        devices_to_write = [
+            DeviceRecord(
+                device_index=0,
+                device=rec.gpu_info,
+                driver=rec.gpu_driver_version,
+            )
+        ]
+
     con.begin()
     try:
         con.execute(
@@ -115,7 +125,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
         # Replace child rows wholesale: simpler than diffing and the run is
         # the natural unit.
         con.execute("DELETE FROM system_devices WHERE run_id = ?", [rec.run_id])
-        if rec.devices:
+        if devices_to_write:
             con.executemany(
                 """
                 INSERT INTO system_devices (
@@ -126,7 +136,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 [
                     (rec.run_id, d.device_index, d.device, d.driver, d.eu,
                      d.clock_freq_mhz, d.global_mem_size_gb)
-                    for d in rec.devices
+                    for d in devices_to_write
                 ],
             )
 

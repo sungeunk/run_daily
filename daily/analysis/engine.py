@@ -18,11 +18,12 @@ from pathlib import Path
 from statistics import mean, median
 from types import SimpleNamespace
 
-from .baseline import find_last_known_good, select_baseline
+from .baseline import _reference_purposes, find_last_known_good, select_baseline
 from .functional import aggregate_functional
 from .types import (
     AnalysisConfig,
     AnalysisResult,
+    CurrentRunInfo,
     BaselineInfo,
     BisectDelta,
     ComparisonRow,
@@ -34,7 +35,32 @@ from .types import (
 from .verdict import improvement_pct, make_comparison_row, verdict_from_pct, verdict_from_signal
 
 log = logging.getLogger(__name__)
-REFERENCE_PURPOSE = "daily_CB timer"
+
+
+def _build_current_run_info(rec) -> CurrentRunInfo:
+    device = rec.devices[0] if getattr(rec, "devices", None) else None
+    gpu_info = getattr(rec, "gpu_info", None) or (device.device if device else None) or getattr(rec, "device", None)
+    gpu_driver_version = getattr(rec, "gpu_driver_version", None) or (device.driver if device else None)
+    memory_size = (
+        f"{rec.host_memory_size_gb:.1f} GB"
+        if getattr(rec, "host_memory_size_gb", None) is not None
+        else None
+    )
+    memory_speed = (
+        f"{rec.host_memory_speed_mhz:.0f} MHz"
+        if getattr(rec, "host_memory_speed_mhz", None) is not None
+        else None
+    )
+    return CurrentRunInfo(
+        ov_version=getattr(rec, "ov_version", None),
+        purpose=getattr(rec, "purpose", None) or getattr(rec, "description", None),
+        machine_name=getattr(rec, "machine", None),
+        gpu_driver_version=gpu_driver_version,
+        gpu_info=gpu_info,
+        host_info=getattr(rec, "host_info", None),
+        memory_size=memory_size,
+        memory_speed=memory_speed,
+    )
 
 
 def analyze_run(
@@ -88,7 +114,7 @@ def analyze_run(
         last_known_good = None
         bisect_delta = None
         if overall_status in {"red", "yellow"}:
-            last_known_good = find_last_known_good(con, rec)
+            last_known_good = find_last_known_good(con, rec, config)
             bisect_delta = _build_bisect_delta(
                 con,
                 current_run_id=rec.run_id,
@@ -104,6 +130,7 @@ def analyze_run(
             performance=performance,
             models=models,
             top_regressions=top_regressions,
+            current_run=_build_current_run_info(rec),
             last_known_good=last_known_good,
             bisect_delta=bisect_delta,
             rows=rows,
@@ -228,7 +255,11 @@ def _fetch_comparison_rows(
 
         reference_value = baseline_value
         reference_source = "baseline"
-        if history_stats["topk_mean"] is not None:
+        enough_history_for_topk = history_stats["count"] >= max(
+            config.min_recent_points,
+            config.min_baseline_points,
+        )
+        if history_stats["topk_mean"] is not None and enough_history_for_topk:
             reference_value = history_stats["topk_mean"]
             reference_source = "topk_mean"
 
@@ -268,6 +299,13 @@ def _fetch_comparison_rows(
 
 
 def _load_series_history(con, rec, config: AnalysisConfig) -> dict[tuple, list[float]]:
+    reference_purposes = _reference_purposes(config, getattr(rec, "purpose", None))
+    if len(reference_purposes) == 1:
+        purpose_clause = "COALESCE(r.purpose, '') = COALESCE(?, '')"
+    else:
+        purpose_clause = "COALESCE(r.purpose, '') IN ({})".format(
+            ", ".join("?" for _ in reference_purposes)
+        )
     try:
         rows = con.execute(
             """
@@ -289,19 +327,19 @@ def _load_series_history(con, rec, config: AnalysisConfig) -> dict[tuple, list[f
               AND r.run_id <> ?
               AND r.ts < ?
               AND r.short_run IS NOT DISTINCT FROM ?
-                            AND COALESCE(r.purpose, '') = ?
+              AND {purpose_clause}
         )
         SELECT model, precision, in_token, out_token, exec_mode, value
         FROM ranked
         WHERE rn <= ?
         ORDER BY model, precision, in_token, out_token, exec_mode, rn
-            """,
+            """.format(purpose_clause=purpose_clause),
             [
                 rec.machine,
                 rec.run_id,
                 rec.ts,
                 rec.short_run,
-                REFERENCE_PURPOSE,
+                *reference_purposes,
                 config.history_window,
             ],
         ).fetchall()
@@ -552,15 +590,18 @@ def _fetch_run_meta(con, run_id: str) -> dict[str, str | None]:
 
 
 def _fetch_run_context(con, run_id: str):
-    row = con.execute(
-        """
-        SELECT run_id, machine, ts, short_run, purpose
-        FROM runs
-        WHERE run_id = ?
-        LIMIT 1
-        """,
-        [run_id],
-    ).fetchone()
+    try:
+        row = con.execute(
+            """
+            SELECT run_id, machine, ts, short_run, purpose
+            FROM runs
+            WHERE run_id = ?
+            LIMIT 1
+            """,
+            [run_id],
+        ).fetchone()
+    except Exception:
+        return None
     if row is None:
         return None
     return SimpleNamespace(

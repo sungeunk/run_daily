@@ -24,6 +24,7 @@ from analysis.types import (
     AnalysisConfig,
     BaselineInfo,
     ComparisonRow,
+    CurrentRunInfo,
     FunctionalResult,
     FunctionalIssue,
     ModelSummary,
@@ -59,6 +60,7 @@ def _make_result(
     rows: list[ComparisonRow] | None = None,
     functional_failed: int = 0,
     baseline_found: bool = True,
+    current_run: CurrentRunInfo | None = None,
 ):
     """Build a minimal AnalysisResult for testing helpers."""
     from analysis.engine import _aggregate_models, _aggregate_performance, _top_regressions, _overall_status
@@ -88,6 +90,7 @@ def _make_result(
         performance=performance,
         models=models,
         top_regressions=top_reg,
+        current_run=current_run,
         rows=rows,
     )
 
@@ -413,6 +416,74 @@ class TestSelectBaseline:
 
         assert baseline.status == "found"
         assert baseline.run_id == "old-match"
+
+    def test_uses_both_daily_purposes_for_history(self):
+        duckdb = pytest.importorskip("duckdb")
+        from viewer.ingest.record import RunRecord
+
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """
+            CREATE TABLE runs (
+                run_id TEXT,
+                machine TEXT,
+                ts TIMESTAMP,
+                short_run BOOLEAN,
+                purpose TEXT,
+                ov_version TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE perf (
+                run_id TEXT,
+                model TEXT,
+                precision TEXT,
+                in_token INTEGER,
+                out_token INTEGER,
+                exec_mode TEXT,
+                value DOUBLE,
+                unit TEXT
+            )
+            """
+        )
+
+        now = datetime(2026, 1, 2, 0, 0)
+        con.executemany(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("old-cb", "M1", now - timedelta(hours=3), True, "daily_CB timer", "ov-cb"),
+                ("old-d2", "M1", now - timedelta(hours=2), True, "daily2 timer", "ov-d2"),
+                ("current", "M1", now, True, "daily2 timer", "ov-current"),
+            ],
+        )
+        con.executemany(
+            "INSERT INTO perf VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("old-cb", "llama", "FP16", 32, 128, "2nd", 10.0, "ms"),
+                ("old-d2", "llama", "FP16", 32, 128, "2nd", 11.0, "ms"),
+                ("current", "llama", "FP16", 32, 128, "2nd", 12.0, "ms"),
+            ],
+        )
+
+        rec = RunRecord(
+            run_id="current",
+            source_format="new",
+            report_file="r",
+            machine="M1",
+            ts=now,
+            short_run=True,
+            purpose="daily2 timer",
+        )
+
+        baseline = select_baseline(con, rec, AnalysisConfig())
+        assert baseline.status == "found"
+        assert baseline.run_id == "old-d2"
+
+        rows = _fetch_comparison_rows(con, rec, baseline, AnalysisConfig())
+        assert len(rows) == 1
+        assert rows[0].history_count == 2
 
 
 class TestFindLastKnownGood:
@@ -851,6 +922,26 @@ class TestRenderAnalysisSummary:
         html_path = write_analysis_html(report, result)
         assert html_path.exists()
         assert html_path.suffix == ".html"
+
+    def test_html_report_shows_current_metadata(self):
+        result = _make_result(
+            current_run=CurrentRunInfo(
+                ov_version="2026.2.0-21664-ad5d8e0f99b",
+                purpose="daily2 timer",
+                machine_name="LNL-03",
+                gpu_driver_version="31.0.101.5333",
+                gpu_info="Intel(R) Arc(TM) Graphics",
+                host_info="Windows / 11 / AMD64",
+                memory_size="64.0 GB",
+                memory_speed="5600 MHz",
+            )
+        )
+
+        html_body = render_analysis_html(result)
+
+        assert "2026.2.0-21664-ad5d8e0f99b" in html_body
+        assert "LNL-03" in html_body
+        assert "Intel(R) Arc(TM) Graphics" in html_body
 
 
 # ---------------------------------------------------------------------------

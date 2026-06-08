@@ -49,6 +49,8 @@ class RunRecord:
     host_info: str | None = None
     host_memory_size_gb: float | None = None
     host_memory_speed_mhz: float | None = None
+    gpu_info: str | None = None
+    gpu_driver_version: str | None = None
     genai_version: str | None = None
     genai_commit: str | None = None
     tok_commit: str | None = None

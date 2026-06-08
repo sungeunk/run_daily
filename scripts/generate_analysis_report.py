@@ -31,6 +31,12 @@ Usage::
     python scripts/generate_analysis_report.py \\
         --history-window 15 --reference-top-k 7 --fluctuation-scale 2.0
 
+    # override baseline purpose used for baseline selection
+    python scripts/generate_analysis_report.py --baseline-purpose "daily2 timer"
+
+    # also overwrite daily.<stamp>.html in out-dir for stable filename access
+    python scripts/generate_analysis_report.py --write-daily-html
+
 Quick re-run alias (runs from any directory)::
 
     PYTHONPATH=<repo>/daily python scripts/generate_analysis_report.py
@@ -77,6 +83,10 @@ def _unique_out_path(out_dir: Path, current_stamp: str, now_tag: str) -> Path:
         if not p.exists():
             return p
         idx += 1
+
+
+def _daily_out_path(out_dir: Path, current_stamp: str) -> Path:
+    return out_dir / f'daily.{current_stamp}.html'
 
 
 def _resolve_stamp_from_name(name: str) -> str:
@@ -396,6 +406,14 @@ def main(argv: list[str] | None = None) -> int:
         '--pct-threshold', type=float, default=0.05,
         help='Minimum fractional change to consider improved/regressed (e.g. 0.05 = 5%%).',
     )
+    ap.add_argument(
+        '--baseline-purpose', type=str, default=None,
+        help='Baseline purpose override used by baseline selection logic.',
+    )
+    ap.add_argument(
+        '--write-daily-html', action='store_true',
+        help='Also overwrite daily.<stamp>.html in out-dir with the generated HTML.',
+    )
     args = ap.parse_args(argv)
 
     # Ensure daily package is importable when invoked from outside the repo.
@@ -411,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         reference_top_k=args.reference_top_k,
         fluctuation_sigma_scale=args.fluctuation_scale,
         pct_threshold=args.pct_threshold,
+        baseline_purpose=args.baseline_purpose,
     )
 
     db_path = args.db
@@ -474,6 +493,11 @@ def main(argv: list[str] | None = None) -> int:
     out_path = _unique_out_path(out_dir, current_stamp, now_tag)
     out_path.write_text(html, encoding='utf-8')
 
+    daily_out_path = None
+    if args.write_daily_html:
+        daily_out_path = _daily_out_path(out_dir, current_stamp)
+        daily_out_path.write_text(html, encoding='utf-8')
+
     p = result.performance
     f = result.functional
     b = result.baseline
@@ -488,6 +512,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f'  functional: failed={f.failed}  error={f.error}  issues={f.issue_count}')
     print()
     print(f'[report] output   : {out_path}')
+    if daily_out_path is not None:
+        print(f'[report] output2  : {daily_out_path}')
     return 0
 
 

@@ -22,10 +22,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import subprocess
 import sys
+import ctypes
+from ctypes import wintypes
 from pathlib import Path
 
 
@@ -61,6 +64,157 @@ def _now_stamp() -> str:
     return dt.datetime.now().strftime('%Y%m%d_%H%M')
 
 
+def _windows_total_memory_gb() -> float | None:
+    class _MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [
+            ('dwLength', wintypes.DWORD),
+            ('dwMemoryLoad', wintypes.DWORD),
+            ('ullTotalPhys', ctypes.c_ulonglong),
+            ('ullAvailPhys', ctypes.c_ulonglong),
+            ('ullTotalPageFile', ctypes.c_ulonglong),
+            ('ullAvailPageFile', ctypes.c_ulonglong),
+            ('ullTotalVirtual', ctypes.c_ulonglong),
+            ('ullAvailVirtual', ctypes.c_ulonglong),
+            ('ullAvailExtendedVirtual', ctypes.c_ulonglong),
+        ]
+
+    stat = _MEMORYSTATUSEX()
+    stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+        return None
+    return round(stat.ullTotalPhys / (1024 ** 3), 1)
+
+
+def _windows_query_gpu(device: str) -> tuple[str | None, str | None]:
+    ps_cmd = (
+        'Get-CimInstance Win32_VideoController | '
+        'Select-Object Name,DriverVersion | ConvertTo-Json -Compress'
+    )
+    try:
+        proc = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_cmd],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None, None
+
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None, None
+
+    try:
+        rows = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None, None
+
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, list):
+        return None, None
+
+    def _is_igpu(name: str) -> bool:
+        n = name.lower()
+        return 'uhd' in n or 'iris' in n
+
+    selected = None
+    if device == 'GPU.1':
+        selected = next(
+            (row for row in rows if isinstance(row, dict) and not _is_igpu(str(row.get('Name') or ''))),
+            None,
+        )
+    elif device == 'GPU.0':
+        selected = next(
+            (row for row in rows if isinstance(row, dict) and _is_igpu(str(row.get('Name') or ''))),
+            None,
+        )
+
+    if selected is None:
+        selected = next((row for row in rows if isinstance(row, dict)), None)
+    if not selected:
+        return None, None
+
+    return selected.get('Name'), selected.get('DriverVersion')
+
+
+def _windows_memory_speed_mhz() -> float | None:
+    ps_cmd = 'Get-CimInstance Win32_PhysicalMemory | Select-Object -ExpandProperty Speed'
+    try:
+        proc = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_cmd],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+
+    if proc.returncode != 0:
+        return None
+
+    speeds: list[float] = []
+    for line in proc.stdout.splitlines():
+        token = line.strip()
+        if not token:
+            continue
+        try:
+            speeds.append(float(token))
+        except ValueError:
+            continue
+    if not speeds:
+        return None
+    return max(speeds)
+
+
+def _collect_runtime_meta(device: str) -> dict:
+    """Return best-effort runtime metadata for the current machine."""
+    import platform
+
+    is_windows = platform.system().lower() == 'windows'
+
+    try:
+        import psutil
+        memory_size_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+    except Exception:
+        memory_size_gb = _windows_total_memory_gb() if is_windows else None
+
+    host_parts = [platform.system(), platform.release(), platform.machine(), platform.processor()]
+    host_info = " / ".join(part for part in host_parts if part)
+
+    gpu_info = None
+    gpu_driver_version = None
+    try:
+        from openvino import Core
+
+        core = Core()
+        try:
+            gpu_info = core.get_property(device, 'FULL_DEVICE_NAME')
+        except Exception:
+            gpu_info = None
+    except Exception:
+        pass
+
+    if is_windows:
+        win_gpu_info, win_driver = _windows_query_gpu(device)
+        if not gpu_info:
+            gpu_info = win_gpu_info
+        gpu_driver_version = win_driver or gpu_driver_version
+        memory_speed_mhz = _windows_memory_speed_mhz()
+    else:
+        memory_speed_mhz = None
+
+    if not gpu_info:
+        gpu_info = device
+
+    return {
+        'host_info': host_info or None,
+        'host_memory_size_gb': memory_size_gb,
+        'host_memory_speed_mhz': memory_speed_mhz,
+        'gpu_info': gpu_info,
+        'gpu_driver_version': gpu_driver_version,
+    }
+
+
 def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
     """Run-level metadata that downstream consumers (viewer, xlsx) need.
 
@@ -94,11 +248,13 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         'machine':        platform.node(),
         'device':         args.device,
         'description':    args.description,
+        'purpose':        args.description,
         'workweek':       workweek,
         'ov_version':     ov_version,
         'ov_build':       build,
         'ov_sha':         sha,
         'short_run':      bool(args.short_run),
+        **_collect_runtime_meta(args.device),
     }
 
 

@@ -17,7 +17,24 @@ if TYPE_CHECKING:
 from .types import AnalysisConfig, BaselineInfo
 
 log = logging.getLogger(__name__)
-REFERENCE_PURPOSE = "daily_CB timer"
+REFERENCE_PURPOSES = ("daily_CB timer", "daily2 timer")
+
+
+def _reference_purposes(config: AnalysisConfig, current_purpose: str | None) -> tuple[str, ...]:
+    """Return the purpose values that count as the daily reference set."""
+    if config.baseline_purpose:
+        values = tuple(
+            purpose.strip()
+            for purpose in config.baseline_purpose.split(",")
+            if purpose.strip()
+        )
+        if values:
+            return values
+    if current_purpose == "daily2 timer":
+        return REFERENCE_PURPOSES
+    if current_purpose:
+        return (current_purpose,)
+    return REFERENCE_PURPOSES
 
 
 def select_baseline(
@@ -39,6 +56,8 @@ def select_baseline(
     """
     green_join = _green_join(con) if config.baseline_green_only else ""
 
+    reference_purposes = _reference_purposes(config, rec.purpose)
+
     # --- priority 1: same short_run + reference purpose ---
     row = _query_baseline(
         con,
@@ -46,10 +65,10 @@ def select_baseline(
         green_join=green_join,
         include_short_run=True,
         include_purpose=True,
-        purpose_value=REFERENCE_PURPOSE,
+        purpose_values=reference_purposes,
     )
     if row:
-        return _make_info(row, f"same machine, short_run, purpose={REFERENCE_PURPOSE}")
+        return _make_info(row, f"same machine, short_run, purpose in {', '.join(reference_purposes)}")
 
     # --- priority 2: same machine + reference purpose ---
     row = _query_baseline(
@@ -58,10 +77,10 @@ def select_baseline(
         green_join=green_join,
         include_short_run=False,
         include_purpose=True,
-        purpose_value=REFERENCE_PURPOSE,
+        purpose_values=reference_purposes,
     )
     if row:
-        return _make_info(row, f"same machine, purpose={REFERENCE_PURPOSE}")
+        return _make_info(row, f"same machine, purpose in {', '.join(reference_purposes)}")
 
     return BaselineInfo(status="not_found")
 
@@ -73,6 +92,7 @@ def select_baseline(
 def find_last_known_good(
     con: "duckdb.DuckDBPyConnection",
     rec: "RunRecord",
+    config: AnalysisConfig | None = None,
 ) -> BaselineInfo:
     """Return the most recent run with overall_status = 'green'.
 
@@ -84,6 +104,7 @@ def find_last_known_good(
             rec,
             include_short_run=True,
             include_purpose=True,
+            purpose_values=_reference_purposes(config or AnalysisConfig(), rec.purpose),
             require_overlap=False,
         )
         row = con.execute(
@@ -129,13 +150,13 @@ def _query_baseline(
     green_join: str,
     include_short_run: bool,
     include_purpose: bool,
-    purpose_value: str | None = None,
+    purpose_values: tuple[str, ...] | None = None,
 ) -> tuple | None:
     where_sql, params = _candidate_filters(
         rec,
         include_short_run=include_short_run,
         include_purpose=include_purpose,
-        purpose_value=purpose_value,
+        purpose_values=purpose_values,
         require_overlap=True,
     )
     sql = f"""
@@ -156,7 +177,7 @@ def _candidate_filters(
     *,
     include_short_run: bool,
     include_purpose: bool,
-    purpose_value: str | None,
+    purpose_values: tuple[str, ...] | None,
     require_overlap: bool,
 ) -> tuple[str, list]:
     """Build shared candidate-policy predicates for baseline/LKG lookup."""
@@ -171,8 +192,14 @@ def _candidate_filters(
         clauses.append("r.short_run IS NOT DISTINCT FROM ?")
         params.append(rec.short_run)
     if include_purpose:
-        clauses.append("COALESCE(r.purpose, '') = COALESCE(?, '')")
-        params.append(rec.purpose if purpose_value is None else purpose_value)
+        values = purpose_values or _reference_purposes(AnalysisConfig(), rec.purpose)
+        if len(values) == 1:
+            clauses.append("COALESCE(r.purpose, '') = COALESCE(?, '')")
+            params.append(values[0])
+        else:
+            placeholders = ", ".join("?" for _ in values)
+            clauses.append(f"COALESCE(r.purpose, '') IN ({placeholders})")
+            params.extend(values)
 
     if require_overlap:
         clauses.append(

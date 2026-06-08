@@ -73,7 +73,12 @@ def test_load_summary_extracts_metadata_artifacts_and_perf(tmp_path: Path) -> No
                     "workweek": "2026.WW17.2",
                     "ov_version": "2026.2.0-21664-ad5d8e0f99b",
                     "description": "daily_CB timer",
+                    "purpose": "daily_CB timer",
                     "device": "GPU",
+                    "host_info": "Windows / 11 / AMD64",
+                    "host_memory_size_gb": 64.0,
+                    "gpu_info": "Intel(R) Arc(TM) Graphics",
+                    "gpu_driver_version": "31.0.101.5333",
                 },
                 "totals": {"passed": 1, "failed": 0, "error": 0, "total": 1},
                 "tests": [
@@ -102,10 +107,54 @@ def test_load_summary_extracts_metadata_artifacts_and_perf(tmp_path: Path) -> No
     assert rec.rawlog_path == str(raw_path)
     assert rec.ov_build == "21664"
     assert rec.ov_sha == "ad5d8e0f99b"
+    assert rec.purpose == "daily_CB timer"
+    assert rec.host_info == "Windows / 11 / AMD64"
+    assert rec.host_memory_size_gb == 64.0
+    assert rec.gpu_info == "Intel(R) Arc(TM) Graphics"
+    assert rec.gpu_driver_version == "31.0.101.5333"
     assert [(p.exec_mode, p.value, p.unit) for p in rec.perf] == [
         ("1st", 11.0, "ms"),
         ("2nd", 2.5, "ms"),
     ]
+
+
+def test_upsert_run_writes_gpu_meta_into_system_devices_when_devices_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "bench.duckdb"
+    now = datetime.now().replace(microsecond=0)
+
+    rec = RunRecord(
+        run_id="run-gpu-meta-only",
+        source_format="new",
+        report_file="daily.20260608_0315.summary.json",
+        machine="dg2alderlake",
+        ts=now,
+        device="GPU.1",
+        purpose="daily2 timer",
+        description="daily2 timer",
+        ww=workweek_of(now),
+        ov_version="2026.3.0-22103-791fa948626",
+        host_info="Windows / 10 / AMD64",
+        host_memory_size_gb=63.7,
+        host_memory_speed_mhz=2666.0,
+        gpu_info="Intel(R) Arc(TM) A770 Graphics",
+        gpu_driver_version="32.0.101.8801",
+        source_path=str(tmp_path / "daily.20260608_0315.summary.json"),
+        file_hash="hash-gpu-meta-only",
+    )
+
+    with connect(db_path) as con:
+        ensure_schema(con)
+        upsert_run(con, rec)
+        row = con.execute(
+            """
+            SELECT device, driver
+            FROM system_devices
+            WHERE run_id = ? AND device_index = 0
+            """,
+            [rec.run_id],
+        ).fetchone()
+
+    assert row == ("Intel(R) Arc(TM) A770 Graphics", "32.0.101.8801")
 
 
 def test_load_report_normalizes_legacy_sd_units(tmp_path: Path) -> None:

@@ -153,6 +153,16 @@ def _purpose_from_report(path: Path) -> str | None:
     return None
 
 
+def _float_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return num if num == num else None
+
+
 def load_summary(path: Path) -> RunRecord:
     """Parse a summary.json into a RunRecord (raw tokens preserved)."""
     path = Path(path)
@@ -177,7 +187,7 @@ def load_summary(path: Path) -> RunRecord:
         ts = datetime.fromtimestamp(path.stat().st_mtime)
 
     machine = meta.get("machine") or _guess_machine(path)
-    description = meta.get("description") or _purpose_from_report(path)
+    purpose = meta.get("purpose") or meta.get("description") or _purpose_from_report(path)
     ov_version = meta.get("ov_version")
     ov_build = meta.get("ov_build") or None
     ov_sha = meta.get("ov_sha") or None
@@ -187,12 +197,23 @@ def load_summary(path: Path) -> RunRecord:
         ov_sha = ov_sha or s
     ww = meta.get("workweek") or workweek_of(ts)
     report_path = _report_candidate(path)
-    host_info = None
-    host_memory_size_gb = None
-    host_memory_speed_mhz = None
+    host_info = meta.get("host_info")
+    host_memory_size_gb = _float_or_none(meta.get("host_memory_size_gb"))
+    host_memory_speed_mhz = _float_or_none(meta.get("host_memory_speed_mhz"))
+    gpu_info = meta.get("gpu_info")
+    gpu_driver_version = meta.get("gpu_driver_version")
     devices = []
     if report_path is not None:
-        host_info, host_memory_size_gb, host_memory_speed_mhz, devices = _report_runtime_meta(report_path)
+        fallback_host_info, fallback_memory_size_gb, fallback_memory_speed_mhz, devices = _report_runtime_meta(report_path)
+        host_info = host_info or fallback_host_info
+        host_memory_size_gb = host_memory_size_gb if host_memory_size_gb is not None else fallback_memory_size_gb
+        host_memory_speed_mhz = host_memory_speed_mhz if host_memory_speed_mhz is not None else fallback_memory_speed_mhz
+    if gpu_info is None and devices:
+        gpu_info = devices[0].device
+    if gpu_driver_version is None and devices:
+        gpu_driver_version = devices[0].driver
+    if gpu_info is None:
+        gpu_info = meta.get("device")
 
     rec = RunRecord(
         run_id=run_id_of(machine, ts, path.name),
@@ -201,8 +222,8 @@ def load_summary(path: Path) -> RunRecord:
         machine=machine,
         ts=ts,
         device=meta.get("device"),
-        purpose=description,
-        description=description,
+        purpose=purpose,
+        description=purpose,
         ww=ww,
         ov_version=ov_version,
         ov_build=ov_build,
@@ -210,6 +231,8 @@ def load_summary(path: Path) -> RunRecord:
         host_info=host_info,
         host_memory_size_gb=host_memory_size_gb,
         host_memory_speed_mhz=host_memory_speed_mhz,
+        gpu_info=gpu_info,
+        gpu_driver_version=gpu_driver_version,
         short_run=bool(meta.get("short_run", False)),
         source_path=str(path),
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(path)) else None,
