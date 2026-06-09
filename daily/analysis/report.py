@@ -200,6 +200,19 @@ def render_analysis_html(result: AnalysisResult) -> str:
     improved_table  = "".join(_row_html(r) for r in improved_rows)  or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
     regressed_table = "".join(_row_html(r) for r in regressed_rows) or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
     all_table       = "".join(_row_html(r, show_fluct=True) for r in all_rows)
+    failed_rows = ""
+    if result.functional.issues:
+        rows: list[str] = []
+        for issue in result.functional.issues[:10]:
+            msg = issue.message or "(no message captured)"
+            rows.append(
+                "<tr>"
+                f"<td style='font-family:Consolas,Monaco,monospace;font-size:12px'>{html.escape(issue.nodeid)}</td>"
+                f"<td>{html.escape(issue.outcome)}</td>"
+                f"<td style='white-space:pre-wrap'>{html.escape(msg)}</td>"
+                "</tr>"
+            )
+        failed_rows = "".join(rows)
 
     baseline_text = "not found"
     if result.baseline.status == "found":
@@ -359,6 +372,26 @@ def render_analysis_html(result: AnalysisResult) -> str:
                 </table>
             </div>
         </details>
+    </div>
+
+    <!-- Functional issues -->
+    <div class="card" style="margin-bottom:14px">
+        <h2>&#x1F6A8; Failed Tests</h2>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
+            Showing up to 10 failed/error tests from this run.
+        </div>
+        <div style="overflow-x:auto">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="border-bottom:2px solid #bcd0f0">Node ID</th>
+                        <th style="border-bottom:2px solid #bcd0f0">Outcome</th>
+                        <th style="border-bottom:2px solid #bcd0f0">Message</th>
+                    </tr>
+                </thead>
+                <tbody>{failed_rows or "<tr><td colspan='3' style='color:#6b7280;text-align:center'>No functional issues</td></tr>"}</tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Top Regressions -->

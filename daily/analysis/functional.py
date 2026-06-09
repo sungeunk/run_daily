@@ -44,9 +44,11 @@ def aggregate_functional(summary: dict) -> FunctionalResult:
         if outcome not in _ISSUE_OUTCOMES:
             continue
         nodeid = test.get("nodeid", "")
-        # Prefer explicit longrepr; fall back to call.longrepr or empty.
+        # Prefer explicit longrepr, then pytest-json-report's failure field,
+        # then call.longrepr as the last fallback.
         message = (
             test.get("longrepr")
+            or test.get("failure")
             or test.get("call", {}).get("longrepr", "")
         )
         issues.append(FunctionalIssue(

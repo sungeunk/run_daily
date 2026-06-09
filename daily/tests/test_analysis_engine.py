@@ -218,6 +218,14 @@ class TestAggregateFunctional:
         result = aggregate_functional(summary)
         assert len(result.issues[0].message) <= 201  # 200 chars + ellipsis
 
+    def test_fallback_to_failure_field(self):
+        summary = {
+            "totals": {"total": 1, "passed": 0, "failed": 1, "error": 0, "skipped": 0},
+            "tests": [{"nodeid": "t", "outcome": "failed", "failure": "AssertionError from failure"}],
+        }
+        result = aggregate_functional(summary)
+        assert result.issues[0].message == "AssertionError from failure"
+
 
 # ---------------------------------------------------------------------------
 # engine helpers
@@ -942,6 +950,22 @@ class TestRenderAnalysisSummary:
         assert "2026.2.0-21664-ad5d8e0f99b" in html_body
         assert "LNL-03" in html_body
         assert "Intel(R) Arc(TM) Graphics" in html_body
+
+    def test_html_report_shows_failed_tests_section(self):
+        result = _make_result(functional_failed=1)
+        result.functional.issues = [
+            FunctionalIssue(
+                nodeid="tests/test_sample.py::test_case",
+                outcome="failed",
+                message="AssertionError: expected 1, got 0",
+            )
+        ]
+
+        html_body = render_analysis_html(result)
+
+        assert "Failed Tests" in html_body
+        assert "tests/test_sample.py::test_case" in html_body
+        assert "AssertionError: expected 1, got 0" in html_body
 
 
 # ---------------------------------------------------------------------------

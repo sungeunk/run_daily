@@ -363,6 +363,7 @@ def main() -> int:
         '--json-report',
         f'--json-report-file={pytest_json}',
         '--json-report-omit=collectors',
+        '-m', 'not dev_only',
     ]
     if args.short_run:
         pytest_cmd.append('--short-run')

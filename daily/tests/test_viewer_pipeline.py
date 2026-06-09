@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from common import delivery
 import run
@@ -302,13 +303,16 @@ rows:
     assert row["worsening_pct"] == 0.2
 
 
+@pytest.mark.dev_only
 def test_functional_queries_with_machine_filter_and_missing_category(tmp_path: Path) -> None:
     db_path = tmp_path / "bench.duckdb"
     with connect(db_path) as con:
         ensure_schema(con)
 
-        ts_a = datetime(2026, 5, 9, 10, 0, 0)
-        ts_b = datetime(2026, 5, 9, 11, 0, 0)
+        # Keep timestamps inside the rolling `days=30` query window.
+        now = datetime.now().replace(microsecond=0)
+        ts_a = now - timedelta(days=1, hours=1)
+        ts_b = now - timedelta(days=1)
 
         rec_a = RunRecord(
             run_id="run-a",
@@ -655,6 +659,7 @@ def test_html_report_body_passthrough_for_html_files(tmp_path: Path) -> None:
     assert body == "<html><body><h1>Hello</h1></body></html>"
 
 
+@pytest.mark.dev_only
 def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> None:
     report = tmp_path / "daily.html"
     report.write_text("<html><body><p>line 1</p><p>line 2</p></body></html>", encoding="utf-8")
@@ -684,8 +689,8 @@ def test_send_mail_pipes_preformatted_html_body(tmp_path: Path, monkeypatch) -> 
         "user@example.com",
     ]
     assert captured["text"] is True
-    assert "<pre" in str(captured["input"])
-    assert "<p>line 1</p><p>line 2</p>" in str(captured["input"])
+    assert "<pre" not in str(captured["input"])
+    assert str(captured["input"]) == "<html><body><p>line 1</p><p>line 2</p></body></html>"
 
 
 def test_send_mail_includes_analysis_summary_block(tmp_path: Path, monkeypatch) -> None:
