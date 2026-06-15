@@ -21,6 +21,8 @@ import platform
 import shlex
 import subprocess
 import tempfile
+from email.message import EmailMessage
+from email.utils import formatdate
 from pathlib import Path
 from typing import Iterable
 
@@ -158,6 +160,26 @@ def _resolve_host(relay_server: str | None) -> str:
     return relay_server or os.environ.get('MAIL_RELAY_SERVER') or DEFAULT_BACKUP_HOST
 
 
+def _build_html_email_message(recipients: str, subject: str, html_body: str) -> bytes:
+    """Build a UTF-8 multipart email (plain + html) as RFC-compliant bytes."""
+    msg = EmailMessage()
+    msg['To'] = recipients
+    msg['Subject'] = subject
+    msg['Date'] = formatdate(localtime=True)
+
+    sender = os.environ.get('DAILY_MAIL_FROM', '').strip()
+    if sender:
+        msg['From'] = sender
+
+    msg.set_content(
+        'This message contains an HTML report. '
+        'Please use an HTML-capable email client to view the formatted content.',
+        charset='utf-8',
+    )
+    msg.add_alternative(html_body, subtype='html', charset='utf-8')
+    return msg.as_bytes()
+
+
 def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     """Return the public URL for a backed-up artefact.
 
@@ -247,26 +269,49 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
             return False
         id_rsa = Path(user_profile) / '.ssh' / 'id_rsa'
         relay = _resolve_host(relay_server)
-        # Remote mail via ssh — the Windows build doesn't have ``mail(1)``.
-        quoted_title = shlex.quote(full_title)
-        quoted_to = shlex.quote(recipients)
-        remote_cmd = (f'mail --content-type=text/html -s {quoted_title} '
-                      f'{quoted_to}')
-        with tempfile.NamedTemporaryFile('w', encoding='utf-8',
-                                         suffix='.html', delete=False) as tmp:
-            tmp.write(body)
-            body_file = Path(tmp.name)
-        cmd = (f'ssh -i "{id_rsa}" {relay} "{remote_cmd}" '
-               f'< "{body_file}"')
+        # Remote send via ssh + sendmail so MIME headers/charset are preserved.
+        raw_message = _build_html_email_message(recipients, full_title, body)
+        cmd = [
+            'ssh',
+            '-i',
+            str(id_rsa),
+            '-o',
+            'BatchMode=yes',
+            '-o',
+            'ConnectTimeout=20',
+            relay,
+            '/usr/sbin/sendmail -t -oi',
+        ]
         log.info('send_mail: %s → %s', full_title, recipients)
         try:
-            return subprocess.call(cmd, shell=True) == 0
+            result = subprocess.run(cmd, input=raw_message, timeout=60)
+            if result.returncode == 0:
+                return True
+            log.warning('send_mail: sendmail path failed (rc=%d), falling back to mail(1)', result.returncode)
+        except subprocess.TimeoutExpired:
+            log.warning('send_mail: sendmail path timed out on %s, falling back to mail(1)', relay)
+
+        # Fallback: legacy remote mail command.
+        # Keep command shell-safe and stream body via SSH stdin.
+        quoted_title = shlex.quote(full_title)
+        quoted_to = shlex.quote(recipients)
+        remote_cmd = f'mail --content-type=text/html -s {quoted_title} {quoted_to}'
+        with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.html', delete=False) as tmp:
+            tmp.write(body)
+            body_file = Path(tmp.name)
+
+        shell_cmd = (
+            f'ssh -i "{id_rsa}" -o BatchMode=yes -o ConnectTimeout=20 '
+            f'{relay} "{remote_cmd}" < "{body_file}"'
+        )
+        try:
+            return subprocess.call(shell_cmd, shell=True) == 0
         finally:
             body_file.unlink(missing_ok=True)
     else:
         cmd = [
             'mail',
-            '--content-type=text/html',
+            '--content-type=text/html; charset=UTF-8',
             '-s',
             full_title,
             recipients,

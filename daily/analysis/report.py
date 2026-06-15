@@ -181,25 +181,27 @@ def render_analysis_html(result: AnalysisResult) -> str:
         delta_s = _delta_style(row.verdict, row.within_fluctuation)
         cv_s = _cv_style(row.history_cv)
         fluct = _fluct_badge(row.within_fluctuation) if show_fluct else ""
+        delta_style = f"{delta_s};white-space:nowrap" if delta_s else "white-space:nowrap"
+        cv_style = f"{cv_s};white-space:nowrap" if cv_s else "white-space:nowrap"
         return (
-            "<tr>"
-            f"<td>{html.escape(k.model)}</td>"
-            f"<td>{html.escape(k.precision)}</td>"
-            f"<td style='white-space:nowrap'>{k.in_token}&nbsp;/&nbsp;{k.out_token}</td>"
-            f"<td>{html.escape(k.exec_mode)}</td>"
-            f"<td class='num' style='white-space:nowrap'>{_fmt_num(row.current_value, unit)}</td>"
-            f"<td class='num' style='white-space:nowrap'>{_fmt_num(row.baseline_value, unit)}</td>"
-            f"<td class='num' style='{delta_s};white-space:nowrap'>{_fmt_pct(row.improvement_pct)}{fluct}</td>"
-            f"<td class='num'>{row.history_count}</td>"
-            f"<td class='num' style='white-space:nowrap'>{_fmt_num(row.history_sigma, unit)}</td>"
-            f"<td class='num' style='{cv_s};white-space:nowrap'>{_fmt_cv(row.history_cv)}</td>"
-            f"<td style='font-size:11px;color:#6b7280'>{html.escape(row.reference_source)}</td>"
+            "<tr>\n"
+            f"<td>{html.escape(k.model)}</td>\n"
+            f"<td>{html.escape(k.precision)}</td>\n"
+            f"<td style='white-space:nowrap'>{k.in_token}&nbsp;/&nbsp;{k.out_token}</td>\n"
+            f"<td>{html.escape(k.exec_mode)}</td>\n"
+            f"<td class='num' style='white-space:nowrap'>{_fmt_num(row.current_value, unit)}</td>\n"
+            f"<td class='num' style='white-space:nowrap'>{_fmt_num(row.baseline_value, unit)}</td>\n"
+            f"<td class='num' style='{delta_style}'>{_fmt_pct(row.improvement_pct)}{fluct}</td>\n"
+            f"<td class='num'>{row.history_count}</td>\n"
+            f"<td class='num' style='white-space:nowrap'>{_fmt_num(row.history_sigma, unit)}</td>\n"
+            f"<td class='num' style='{cv_style}'>{_fmt_cv(row.history_cv)}</td>\n"
+            f"<td style='font-size:11px;color:#6b7280'>{html.escape(row.reference_source)}</td>\n"
             "</tr>"
         )
 
-    improved_table  = "".join(_row_html(r) for r in improved_rows)  or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
-    regressed_table = "".join(_row_html(r) for r in regressed_rows) or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
-    all_table       = "".join(_row_html(r, show_fluct=True) for r in all_rows)
+    improved_table  = "\n".join(_row_html(r) for r in improved_rows)  or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
+    regressed_table = "\n".join(_row_html(r) for r in regressed_rows) or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
+    all_table       = "\n".join(_row_html(r, show_fluct=True) for r in all_rows)
     failed_rows = ""
     if result.functional.issues:
         rows: list[str] = []
@@ -212,7 +214,7 @@ def render_analysis_html(result: AnalysisResult) -> str:
                 f"<td style='white-space:pre-wrap'>{html.escape(msg)}</td>"
                 "</tr>"
             )
-        failed_rows = "".join(rows)
+        failed_rows = "\n".join(rows)
 
     baseline_text = "not found"
     if result.baseline.status == "found":
@@ -253,7 +255,7 @@ def render_analysis_html(result: AnalysisResult) -> str:
 
     thead = "<tr>" + "".join(_th(l, t) for l, t in COL_DEFS) + "</tr>"
 
-    col_legend_rows = "".join(
+    col_legend_rows = "\n".join(
         f"<tr><td style='font-weight:700;white-space:nowrap;padding:5px 10px 5px 0'>{l}</td>"
         f"<td style='color:#374151;padding:5px 0'>{html.escape(t)}</td></tr>"
         for l, t in COL_DEFS
@@ -277,29 +279,43 @@ def render_analysis_html(result: AnalysisResult) -> str:
         body {{ margin: 0; background: radial-gradient(circle at top right, #e7eef9 0%, var(--bg) 38%); color: var(--text); font-family: "Segoe UI", "Noto Sans", sans-serif; }}
         .wrap {{ max-width: 1380px; margin: 0 auto; padding: 24px; }}
         .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; box-shadow: 0 8px 28px rgba(21, 34, 56, 0.06); }}
-        .grid2 {{ display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-        .grid3 {{ display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+        .layout-row {{ width: 100%; border-collapse: separate; border-spacing: 14px 0; table-layout: fixed; }}
+        .layout-row td {{ vertical-align: top; }}
+        .layout-row.stats td {{ width: 33.333%; }}
+        .layout-row.summary td {{ width: 50%; }}
         h1 {{ margin: 0 0 4px; font-size: 26px; letter-spacing: 0.2px; }}
         h2 {{ margin: 0 0 10px; font-size: 16px; color: var(--accent); }}
         h3 {{ margin: 0 0 8px; font-size: 14px; font-weight: 700; }}
-        .kvs {{ display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; align-items: baseline; }}
-        .kvs .k {{ color: var(--muted); white-space: nowrap; }}
+        .kvs-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+        .kvs-table td {{ border: 0; padding: 4px 0; vertical-align: top; }}
+        .kvs-table .k {{ color: var(--muted); white-space: nowrap; width: 170px; padding-right: 12px; }}
         .muted {{ color: var(--muted); }}
         .badge {{ display: inline-block; padding: 4px 12px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; }}
         .stat-block {{ text-align: center; padding: 10px 6px; }}
         .stat-block .val {{ font-size: 28px; font-weight: 700; }}
         .stat-block .lbl {{ font-size: 11px; color: var(--muted); margin-top: 2px; }}
         table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-        th {{ background: #f3f7fe; font-weight: 700; padding: 9px 8px; text-align: left; position: sticky; top: 0; }}
+        th {{ background: #f3f7fe; font-weight: 700; padding: 9px 8px; text-align: left; }}
         td {{ border-bottom: 1px solid var(--line); padding: 7px 8px; }}
         .num, .num-h {{ text-align: right; font-variant-numeric: tabular-nums; }}
         tr:hover td {{ background: #f8faff; }}
-        details > summary {{ cursor: pointer; font-weight: 700; font-size: 14px; padding: 6px 2px; color: var(--accent); user-select: none; }}
-        details > summary:hover {{ opacity: 0.75; }}
         .legend-table {{ font-size: 13px; width: 100%; border-collapse: collapse; }}
         .legend-table tr:nth-child(even) td {{ background: #f8fafc; }}
-        @media (max-width: 980px) {{ .grid2, .grid3 {{ grid-template-columns: 1fr; }} .wrap {{ padding: 14px; }} }}
+        @media (max-width: 980px) {{
+            .layout-row, .layout-row tbody, .layout-row tr, .layout-row td {{ display: block; width: 100% !important; }}
+            .layout-row td {{ padding-bottom: 14px; }}
+            .wrap {{ padding: 14px; }}
+        }}
     </style>
+    <!--[if mso]>
+    <style>
+        .layout-row td {{
+            display: block !important;
+            width: 100% !important;
+            padding-bottom: 14px !important;
+        }}
+    </style>
+    <![endif]-->
 </head>
 <body>
 <div class="wrap">
@@ -314,69 +330,84 @@ def render_analysis_html(result: AnalysisResult) -> str:
     </div>
 
     <!-- Top stat row -->
-    <div class="grid3" style="margin-bottom:14px">
-        <div class="card stat-block">
-            <div class="val" style="color:{'#b42318' if result.performance.regressed else '#18794e'}">{result.performance.regressed}</div>
-            <div class="lbl">Regressions</div>
-        </div>
-        <div class="card stat-block">
-            <div class="val" style="color:{'#18794e' if result.performance.improved else '#6b7280'}">{result.performance.improved}</div>
-            <div class="lbl">Improvements</div>
-        </div>
-        <div class="card stat-block">
-            <div class="val">{result.performance.compared}</div>
-            <div class="lbl">Series Compared</div>
-        </div>
-    </div>
+    <table role="presentation" class="layout-row stats" style="margin-bottom:14px">
+        <tr>
+            <td>
+                <div class="card stat-block">
+                    <div class="val" style="color:{'#b42318' if result.performance.regressed else '#18794e'}">{result.performance.regressed}</div>
+                    <div class="lbl">Regressions</div>
+                </div>
+            </td>
+            <td>
+                <div class="card stat-block">
+                    <div class="val" style="color:{'#18794e' if result.performance.improved else '#6b7280'}">{result.performance.improved}</div>
+                    <div class="lbl">Improvements</div>
+                </div>
+            </td>
+            <td>
+                <div class="card stat-block">
+                    <div class="val">{result.performance.compared}</div>
+                    <div class="lbl">Series Compared</div>
+                </div>
+            </td>
+        </tr>
+    </table>
 
     <!-- Summary + Methodology -->
-    <div class="grid2" style="margin-bottom:14px">
-        <div class="card">
-            <h2>Run Summary</h2>
-            <div class="kvs">
-                <div class="k">Current OV</div><div>{_safe_text(current.ov_version if current else None)}</div>
-                <div class="k">Current purpose</div><div>{_safe_text(current.purpose if current else None)}</div>
-                <div class="k">Machine</div><div>{_safe_text(current.machine_name if current else None)}</div>
-                <div class="k">GPU driver</div><div>{_safe_text(current.gpu_driver_version if current else None)}</div>
-                <div class="k">GPU info</div><div>{_safe_text(current.gpu_info if current else None)}</div>
-                <div class="k">Host info</div><div>{_safe_text(current.host_info if current else None)}</div>
-                <div class="k">Memory size</div><div>{_safe_text(current.memory_size if current else None)}</div>
-                <div class="k">Memory speed</div><div>{_safe_text(current.memory_speed if current else None)}</div>
-                <div class="k">Baseline</div><div>{html.escape(baseline_text)}</div>
-                <div class="k">Selection reason</div><div>{html.escape(result.baseline.selection_reason or "—")}</div>
-                <div class="k">Functional</div><div>failed={result.functional.failed}&nbsp;&nbsp;error={result.functional.error}&nbsp;&nbsp;skipped={result.functional.skipped}</div>
-                <div class="k">Perf same</div><div>{result.performance.same} ({fluctuation_same} by fluctuation guard)</div>
-            </div>
-        </div>
-        <div class="card">
-            <h2>Analysis Methodology</h2>
-            <div style="font-size:13px;line-height:1.65;color:#374151">
-                <b>Reference</b> = mean of the best <b>top-5</b> runs from a <b>10-run history window</b> (same machine · model · precision · mode).<br>
-                <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
-                <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
-            </div>
-        </div>
-    </div>
+    <table role="presentation" class="layout-row summary" style="margin-bottom:14px">
+        <tr>
+            <td>
+                <div class="card">
+                    <h2>Run Summary</h2>
+                    <table role="presentation" class="kvs-table">
+                        <tr><td class="k">Current OV</td><td>{_safe_text(current.ov_version if current else None)}</td></tr>
+                        <tr><td class="k">Current purpose</td><td>{_safe_text(current.purpose if current else None)}</td></tr>
+                        <tr><td class="k">Machine</td><td>{_safe_text(current.machine_name if current else None)}</td></tr>
+                        <tr><td class="k">GPU driver</td><td>{_safe_text(current.gpu_driver_version if current else None)}</td></tr>
+                        <tr><td class="k">GPU info</td><td>{_safe_text(current.gpu_info if current else None)}</td></tr>
+                        <tr><td class="k">Host info</td><td>{_safe_text(current.host_info if current else None)}</td></tr>
+                        <tr><td class="k">Memory size</td><td>{_safe_text(current.memory_size if current else None)}</td></tr>
+                        <tr><td class="k">Memory speed</td><td>{_safe_text(current.memory_speed if current else None)}</td></tr>
+                        <tr><td class="k">Baseline</td><td>{html.escape(baseline_text)}</td></tr>
+                        <tr><td class="k">Selection reason</td><td>{html.escape(result.baseline.selection_reason or "—")}</td></tr>
+                        <tr><td class="k">Functional</td><td>failed={result.functional.failed}&nbsp;&nbsp;error={result.functional.error}&nbsp;&nbsp;skipped={result.functional.skipped}</td></tr>
+                        <tr><td class="k">Perf same</td><td>{result.performance.same} ({fluctuation_same} by fluctuation guard)</td></tr>
+                    </table>
+                </div>
+            </td>
+            <td>
+                <div class="card">
+                    <h2>Analysis Methodology</h2>
+                    <div style="font-size:13px;line-height:1.65;color:#374151">
+                        <b>Reference</b> = mean of the best <b>top-5</b> runs from a <b>10-run history window</b> (same machine · model · precision · mode).<br>
+                        <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
+                        <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
 
-    <!-- Column legend (collapsible) -->
+    <!-- Column legend -->
     <div class="card" style="margin-bottom:14px">
-        <details>
-            <summary>Column Reference Guide</summary>
-            <div style="margin-top:10px;overflow-x:auto">
-                <table class="legend-table">
-                    <thead><tr>
-                        <th style="width:110px;background:#f3f7fe">Column</th>
-                        <th style="background:#f3f7fe">Description</th>
-                    </tr></thead>
-                    <tbody>{col_legend_rows}</tbody>
-                </table>
-            </div>
-        </details>
+        <h2>Column Reference Guide</h2>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
+            Outlook compatibility mode: this section is always expanded.
+        </div>
+        <div style="margin-top:10px;overflow-x:auto">
+            <table class="legend-table">
+                <thead><tr>
+                    <th style="width:110px;background:#f3f7fe">Column</th>
+                    <th style="background:#f3f7fe">Description</th>
+                </tr></thead>
+                <tbody>{col_legend_rows}</tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Functional issues -->
     <div class="card" style="margin-bottom:14px">
-        <h2>&#x1F6A8; Failed Tests</h2>
+        <h2>Failed Tests</h2>
         <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
             Showing up to 10 failed/error tests from this run.
         </div>
@@ -396,7 +427,7 @@ def render_analysis_html(result: AnalysisResult) -> str:
 
     <!-- Top Regressions -->
     <div class="card" style="margin-bottom:14px">
-        <h2>&#x26A0;&#xFE0F; Top Regressions</h2>
+        <h2>Top Regressions</h2>
         <div style="overflow-x:auto">
             <table>
                 <thead>{thead}</thead>
@@ -407,7 +438,7 @@ def render_analysis_html(result: AnalysisResult) -> str:
 
     <!-- Top Improvements -->
     <div class="card" style="margin-bottom:14px">
-        <h2>&#x2705; Top Improvements</h2>
+        <h2>Top Improvements</h2>
         <div style="overflow-x:auto">
             <table>
                 <thead>{thead}</thead>
@@ -416,17 +447,15 @@ def render_analysis_html(result: AnalysisResult) -> str:
         </div>
     </div>
 
-    <!-- All rows (collapsible) -->
+    <!-- All rows -->
     <div class="card">
-        <details>
-            <summary>All Performance Results ({len(all_rows)} series)</summary>
-            <div style="margin-top:10px;overflow-x:auto">
-                <table>
-                    <thead>{thead}</thead>
-                    <tbody>{all_table}</tbody>
-                </table>
-            </div>
-        </details>
+        <h2>All Performance Results ({len(all_rows)} series)</h2>
+        <div style="margin-top:10px;overflow-x:auto">
+            <table>
+                <thead>{thead}</thead>
+                <tbody>{all_table}</tbody>
+            </table>
+        </div>
     </div>
 
 </div>
