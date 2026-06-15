@@ -626,6 +626,10 @@ def get_url(commit_id: str) -> str | None:
     url_list = [
         'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/commit',
         'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/master/pre_commit',
+        'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2026/3/commit',
+        'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2026/2/commit',
+        'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2026/1/commit',
+        'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2026/0/commit',
         'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/4/commit',
         'http://ov-share-03.iotg.sclab.intel.com/volatile/openvino_ci/private_builds/dldt/releases/2025/3/commit',
     ]
