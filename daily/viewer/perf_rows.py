@@ -113,21 +113,10 @@ def _sd_genai_rows(m: dict) -> Iterable[dict]:
                    value=float(gen_sec), unit='s')
 
 
-def _sd_dgfx_rows(m: dict) -> Iterable[dict]:
-    for d in m.get('data', []) or []:
-        sec = d.get('pipeline_sec')
-        if sec is None:
-            continue
-        yield dict(model=m.get('model', ''), precision=m.get('precision', ''),
-                   in_cat=0, out_cat=0, exec_mode='pipeline',
-                   value=float(sec), unit='s')
-
-
 _TYPE_HANDLERS = {
     'llm_benchmark':  _llm_benchmark_rows,
     'benchmark_app':  _benchmark_app_rows,
     'sd_genai':       _sd_genai_rows,
-    'sd_dgfx':        _sd_dgfx_rows,
     # chat_sample intentionally omitted — no perf data.
 }
 

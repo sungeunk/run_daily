@@ -16,8 +16,8 @@ List without running::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
+import platform
 
 import pytest
 
@@ -41,10 +41,15 @@ class BenchmarkCase:
     precision: str
     apply_chat_template: bool = True
     prompt_type: str = PROMPT_TYPE_32_1K
+    ptl_only: bool = False
 
     @property
     def test_id(self) -> str:
         return f'{self.model}-{self.precision}'
+
+
+def _is_ptl_machine() -> bool:
+    return 'PTL' in platform.node().upper()
 
 
 CASES: list[BenchmarkCase] = [
@@ -62,6 +67,7 @@ CASES: list[BenchmarkCase] = [
     BenchmarkCase('phi-3.5-vision-instruct', OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('qwen2-7b-instruct',      OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('qwen2.5-7b-instruct',    OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('qwen3.6-35b-a3b',        OV_FP16_4BIT_DEFAULT, ptl_only=True),
 ]
 
 
@@ -97,6 +103,9 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase) -> str:
 @pytest.mark.parametrize('case', CASES, ids=lambda c: c.test_id)
 def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
                        run_subprocess, record_metrics):
+    if case.ptl_only and not _is_ptl_machine():
+        pytest.skip(f'{case.model} runs only on PTL machines')
+
     cmd = _build_cmd(daily_config, case)
 
     # Attach metadata even on failure so the report builder can still render

@@ -18,10 +18,7 @@ from download_ov_nightly import generate_manifest
 # import all class in test_cases directory
 from test_cases.test_benchmark import TestBenchmark
 from test_cases.test_benchmark_app import TestBenchmarkapp
-from test_cases.test_chat_sample import TestChatSample
-from test_cases.test_measured_usage_cpp import TestMeasuredUsageCpp
-from test_cases.test_stable_diffusion_genai import TestStableDiffusionGenai
-from test_cases.test_stable_diffusion_DGfx_E2E_AI import TestStableDiffusionDGfxE2eAi
+from test_cases.test_benchmark_image_generation import TestBenchmarkImageGeneration
 
 
 def convert_url(filename) -> str:
@@ -76,26 +73,12 @@ def generate_csv_raw_data(result_root) -> list:
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
                 batch = cmd_item[CmdItemKey.test_config]['batch']
                 for result_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', f'batch:{batch}', __get_inf(result_item, 0, fps_to_ms)])
+                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', f'batch:{batch}', __get_inf(result_item, 0)])
 
         while len(raw_data_list) < 2: raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
-    def raw_data_for_measure_usage(key_tuple):
-        raw_data_list = []
-        for cmd_item in result_root.get(key_tuple, []):
-            if cmd_item.get(CmdItemKey.return_code, -1) == 0:
-                peak_mem_usage_size = sizestr_to_num(cmd_item[CmdItemKey.peak_mem_usage_size])
-                peak_mem_usage_percent = cmd_item[CmdItemKey.peak_mem_usage_percent]
-
-                for result_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], 'memory size', peak_mem_usage_size])
-                    raw_data_list.append([key_tuple[0], key_tuple[1], result_item[CmdItemKey.DataItemKey.in_token], result_item[CmdItemKey.DataItemKey.out_token], 'memory percent', peak_mem_usage_percent])
-
-        while len(raw_data_list) < 16: raw_data_list.append([key_tuple[0], key_tuple[1]])
-        return raw_data_list
-
-    def raw_data_for_stablediffusion(key_tuple, args={}):
+    def raw_data_for_benchmark_image_generation(key_tuple, args={}):
         raw_data_list = []
         for cmd_item in result_root.get(key_tuple, []):
             if cmd_item.get(CmdItemKey.return_code, -1) == 0:
@@ -105,40 +88,29 @@ def generate_csv_raw_data(result_root) -> list:
         while len(raw_data_list) < args.get('data_num', 1): raw_data_list.append([key_tuple[0], key_tuple[1]])
         return raw_data_list
 
-    def raw_data_for_stablediffusion_dgfx(key_tuple, args={}):
-        raw_data_list = []
-        for cmd_item in result_root.get(key_tuple, []):
-            if cmd_item.get(CmdItemKey.return_code, -1) == 0:
-                for data_item in cmd_item.get(CmdItemKey.data_list, []):
-                    raw_data_list.append([key_tuple[0], key_tuple[1], '', '', 'pipeline', __get_inf(data_item, 0, sec_to_ms)])
-
-        while len(raw_data_list) < args.get('data_num', 1): raw_data_list.append([key_tuple[0], key_tuple[1]])
-        return raw_data_list
-
     MODEL_REPORT_CONFIG = [
-        [(ModelName.baichuan2_7b_chat,      ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [(ModelName.chatglm3_6b,            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [("glm-4-9b-chat-hf",               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [(ModelName.gemma_7b_it,            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [(ModelName.llama_2_7b_chat_hf,     ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [(ModelName.minicpm_1b_sft,         ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [(ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark, {'data_num':2}],
-        [('flux.1-schnell',                 ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion, {'data_num':2}],
-        [('whisper-large-v3',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestStableDiffusionGenai),      raw_data_for_stablediffusion, {'data_num':2}],
-        [('qwen_usage',                     ModelConfig.INT8,                   TestMeasuredUsageCpp),          raw_data_for_measure_usage],
-        [('Resnet50',                       ModelConfig.INT8,                   TestBenchmarkapp),              raw_data_for_benchmarkapp],
-        [('stable-diffusion-v1-5',          ModelConfig.FP16,                   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
-        [('stable-diffusion-v2-1',          ModelConfig.FP16,                   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
-        [('stable-diffusion-v3.0',          ModelConfig.FP16,                   TestStableDiffusionDGfxE2eAi),  raw_data_for_stablediffusion_dgfx],
-        [('stable-diffusion-xl',            ModelConfig.FP16,                   TestStableDiffusionDGfxE2eAi),  raw_data_for_stablediffusion_dgfx],
-        [('lcm-dreamshaper-v7',             ModelConfig.FP16,                   TestStableDiffusionGenai),      raw_data_for_stablediffusion],
+        [('Resnet50',                         ModelConfig.INT8,                   TestBenchmarkapp),              raw_data_for_benchmarkapp],
+        [('gemma-2-9b-it',                    ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('gemma-3-4b-it',                    ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('gemma-4-26b-a4b-it',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('gemma-4-e2b-it',                   ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('gpt-oss-20b',                      ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('llama-3.1-8b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('llama-3.2-1b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('minicpm4-0.5b',                    ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('minicpm4-8b',                      ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('mistral-7b-instruct-v0.2',         ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('phi-3.5-mini-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('phi-3.5-vision-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('phi-4-mini-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('phi-4-multimodal-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen3-8b',                         ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen3-vl-4b-instruct',             ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen3.5-9b',                       ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen3.6-35b-a3b',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('flux.1-schnell',                   ModelConfig.OV_FP16_INT4_SYM_CW,    TestBenchmarkImageGeneration),  raw_data_for_benchmark_image_generation],
+        [('stable-diffusion-v1-5',            ModelConfig.FP16,                   TestBenchmarkImageGeneration),  raw_data_for_benchmark_image_generation],
+        [('stable-diffusion-3.5-large-turbo', ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmarkImageGeneration),  raw_data_for_benchmark_image_generation],
     ]
 
     table = []
@@ -341,11 +313,8 @@ def get_test_list(target:str=''):
 
     all_test_list = [
         TestBenchmark,
-        # TestMeasuredUsageCpp,
-        TestStableDiffusionGenai,
-        TestStableDiffusionDGfxE2eAi,
+        TestBenchmarkImageGeneration,
         TestBenchmarkapp,
-        TestChatSample,
     ]
     target_list = target.split(',')
     test_list = []

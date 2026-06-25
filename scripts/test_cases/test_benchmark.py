@@ -12,20 +12,25 @@ from .test_template import *
 class TestBenchmark(TestTemplate):
 
     CONFIG_MAP = {
-        (ModelName.baichuan2_7b_chat,      ModelConfig.OV_FP16_4BIT_DEFAULT): [{"APPLY_CHAT_TEMPLATE": False}],
-        (ModelName.chatglm3_6b,            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.gemma_7b_it,            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ("glm-4-9b-chat-hf",               ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.llama_2_7b_chat_hf,     ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('gemma-2-9b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # text_gen
+        ('gemma-3-4b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # visual_text_gen
+        ('gemma-4-26b-a4b-it',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('gemma-4-e2b-it',                 ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('gpt-oss-20b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('llama-2-7b-chat-hf',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.minicpm_1b_sft,         ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('minicpm-v-2_6',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('llama-3.2-1b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('minicpm4-0.5b',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('minicpm4-8b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        (ModelName.phi_3_mini_4k_instruct, ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('qwen2-7b-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('qwen2.5-7b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('phi-4-mini-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('phi-4-multimodal-instruct',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # visual_text_gen
+        ('qwen3-8b',                       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('qwen3-vl-4b-instruct',           ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('qwen3.5-9b',                     ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen"}],
+        ('qwen3.6-35b-a3b',                ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen"}],
     }
 
     def __get_configs():
@@ -44,13 +49,16 @@ class TestBenchmark(TestTemplate):
 
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num} {"--optimum" if args.optimum else "" }'
-                if config.get("APPLY_CHAT_TEMPLATE", True):
-                    cmd += f' --apply_chat_template'
+
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num}  --apply_chat_template'
+                task = config.get("TASK")
+                if task:
+                    cmd += f' -t {task}'
                 if not args.prompt_permutation:
                     cmd += f' --disable_prompt_permutation'
-                if not args.continuous_batch:
-                    cmd += f' --load_config {convert_path("res/config_wa.json")}'
+                load_config = config.get("LOAD_CONFIG")
+                if load_config:
+                    cmd += f' --load_config {convert_path(load_config)}'
 
                 prompt_type = config.get(PROMPT_TYPE_KEY, PROMPT_TYPE_DEFAULT)
                 PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/{prompt_type}/{key_tuple[0]}.jsonl')

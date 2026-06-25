@@ -53,7 +53,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='Target OpenVINO device (override: $DAILY_DEVICE)')
     group.addoption('--model-dir', default=_default_model_dir(),
                     help='Root directory for models')
-    group.addoption('--model-date', default='WW45_llm-optimum_2025.4.0-20381-RC1',
+    group.addoption('--model-date', default='WW24_llm-optimum_2026.3.0-22130',
                     help='Model cache subdirectory under --model-dir')
     group.addoption('--cache-dir', default=None,
                     help='OpenVINO cache directory (defaults to <repo>/llm-cache)')

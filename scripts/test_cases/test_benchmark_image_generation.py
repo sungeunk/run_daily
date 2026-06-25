@@ -7,13 +7,11 @@ from common_utils import *
 from .test_template import *
 
 
-class TestStableDiffusionGenai(TestTemplate):
+class TestBenchmarkImageGeneration(TestTemplate):
     CONFIG_MAP = {
-        ('stable-diffusion-v1-5', ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
-        ('stable-diffusion-v2-1', ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
-        ('lcm-dreamshaper-v7',    ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
-        ('flux.1-schnell',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('whisper-large-v3',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('flux.1-schnell',                      ModelConfig.OV_FP16_INT4_SYM_CW):  [{}],
+        ('stable-diffusion-v1-5',               ModelConfig.FP16):                 [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('stable-diffusion-3.5-large-turbo',    ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
     }
 
     def __get_configs():
@@ -32,11 +30,14 @@ class TestStableDiffusionGenai(TestTemplate):
 
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --genai --output_dir {args.output_dir}'
+                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --output_dir {args.output_dir}'
 
+                load_config = config.get("LOAD_CONFIG")
+                if load_config:
+                    cmd += f' --load_config {convert_path(load_config)}'
                 prompt_type = config.get(PROMPT_TYPE_KEY, PROMPT_TYPE_DEFAULT)
                 PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/{prompt_type}/{key_tuple[0]}.jsonl')
-                cmd += f' -pf {PROMPT_PATH}'
+                cmd += f' -pf {PROMPT_PATH} -pi 0'
 
                 ret_dict[key_tuple] = [{CmdItemKey.cmd: cmd}]
 

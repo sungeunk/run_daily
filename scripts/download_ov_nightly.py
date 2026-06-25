@@ -608,8 +608,8 @@ def get_list_of_openvino_master(args: argparse.Namespace) -> tuple[list, bool]:
         ret_list.append(url)
 
         # Stop once we have 10 valid URLs
-        if len(ret_list) >= 10:
-            break
+        # if len(ret_list) >= 10:
+        #     break
 
     log.info('Found valid URL list from openvino/master:')
     if not ret_list:

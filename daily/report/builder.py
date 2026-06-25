@@ -236,32 +236,6 @@ def _render_sd_genai(tests: list[dict]) -> str:
     ) + '\n'
 
 
-def _render_sd_dgfx(tests: list[dict]) -> str:
-    subset = _filter(tests, 'sd_dgfx')
-    if not subset:
-        return ''
-
-    rows = []
-    for t in subset:
-        m = t['metrics']
-        if t['outcome'] != 'passed':
-            rows.append([m.get('model', ''), m.get('precision', ''),
-                         'FAIL', '', '', ''])
-            continue
-        for d in m.get('data', []):
-            rows.append([
-                m['model'], m['precision'],
-                f"{d.get('pipeline_sec', 0):.2f}" if d.get('pipeline_sec') is not None else '',
-                d.get('batch_size', ''), d.get('steps', ''), d.get('size', ''),
-            ])
-
-    return '[RESULT] stable_diffusion_DGfx_E2E_AI\n' + tabulate(
-        rows,
-        headers=['model', 'precision', 'pipeline (s)', 'batch', 'steps', 'size'],
-        tablefmt='github', stralign='right',
-    ) + '\n'
-
-
 def _render_chat_sample(tests: list[dict]) -> str:
     subset = _filter(tests, 'chat_sample')
     if not subset:
@@ -286,7 +260,6 @@ _SECTION_RENDERERS = [
     _render_llm_benchmark,
     _render_benchmark_app,
     _render_sd_genai,
-    _render_sd_dgfx,
     _render_chat_sample,
 ]
 

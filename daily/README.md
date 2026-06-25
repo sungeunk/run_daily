@@ -316,7 +316,7 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 
 모든 테스트 포팅 + 백업/메일 + xlsx 업데이트 완료.
 
-- [x] llm_benchmark           (14 케이스)
+- [x] llm_benchmark           (15 케이스)
 - [x] benchmark_app           (2 케이스)
 - [x] chat_sample             (1 케이스)
 - [x] stable_diffusion_genai  (5 케이스, whisper + flux 포함)

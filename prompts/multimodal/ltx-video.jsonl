@@ -1,0 +1,1 @@
+{"num_steps": "25", "width": "256", "height": "256", "guidance_scale": "3.0", "prompt": "A cat plays with ball on the christmas tree.", "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted",  "num_frames": "9", "frame_rate": "25"}

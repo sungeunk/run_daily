@@ -213,10 +213,7 @@ def main():
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
 
     # config for test
-    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW45_llm-optimum_2025.4.0-20381-RC1')
-    parser.add_argument('--genai', help='[deprecated] enable genai option for llm benchmark', action='store_true')
-    parser.add_argument('--optimum', help='enable optimum option for llm benchmark', action='store_true')
-    parser.add_argument('--continuous_batch', help='enable continuous batch pipeline for llm benchmark', action='store_true')
+    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW24_llm-optimum_2026.3.0-22130')
     parser.add_argument('--prompt_permutation', help='enable prompt_permutation for llm benchmark', action='store_true')
     parser.add_argument('--test', help='run tests with short config', action='store_true')
     parser.add_argument('--timeout', help='set timeout [unit: seconds].', type=int, default=1800)

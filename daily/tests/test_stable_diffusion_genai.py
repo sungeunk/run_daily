@@ -13,6 +13,7 @@ from parsers.stable_diffusion_genai import parse_output
 
 
 OV_FP16_4BIT_DEFAULT = 'OV_FP16-4BIT_DEFAULT'
+OV_FP16_INT4_SYM_CW = 'OV_FP16-INT4_SYM_CW'
 FP16 = 'FP16'
 PROMPT_TYPE_MULTIMODAL = 'multimodal'
 PROMPT_TYPE_32_1K = '32_1024'
@@ -33,7 +34,7 @@ CASES: list[SdGenaiCase] = [
     SdGenaiCase('stable-diffusion-v1-5', FP16, PROMPT_TYPE_MULTIMODAL),
     SdGenaiCase('stable-diffusion-v2-1', FP16, PROMPT_TYPE_MULTIMODAL),
     SdGenaiCase('lcm-dreamshaper-v7',    FP16, PROMPT_TYPE_MULTIMODAL),
-    SdGenaiCase('flux.1-schnell',        OV_FP16_4BIT_DEFAULT),
+    SdGenaiCase('flux.1-schnell',        OV_FP16_INT4_SYM_CW),
     SdGenaiCase('whisper-large-v3',      OV_FP16_4BIT_DEFAULT, PROMPT_TYPE_MULTIMODAL),
 ]
 
