@@ -95,6 +95,7 @@ def generate_csv_raw_data(result_root) -> list:
         [('gemma-4-26b-a4b-it',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('gemma-4-e2b-it',                   ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('gpt-oss-20b',                      ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('llama-2-7b-chat-hf',               ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('llama-3.1-8b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('llama-3.2-1b-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('minicpm4-0.5b',                    ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
@@ -104,8 +105,8 @@ def generate_csv_raw_data(result_root) -> list:
         [('phi-3.5-vision-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('phi-4-mini-instruct',              ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('phi-4-multimodal-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
-        [('qwen3-8b',                         ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('qwen3-vl-4b-instruct',             ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
+        [('qwen3-8b',                         ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('qwen3.5-9b',                       ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('qwen3.6-35b-a3b',                  ModelConfig.OV_FP16_4BIT_DEFAULT,   TestBenchmark),                 raw_data_for_benchmark],
         [('flux.1-schnell',                   ModelConfig.OV_FP16_INT4_SYM_CW,    TestBenchmarkImageGeneration),  raw_data_for_benchmark_image_generation],
@@ -132,8 +133,7 @@ def get_static_info_from_raw_data(raw_data_table) -> tuple[int, int]:
     for item in raw_data_table:
         if len(item) == 6 and is_float(item[5]):
             success_count += 1
-            if item[0] != 'qwen_usage':
-                value_list.append(float(item[5]))
+            value_list.append(float(item[5]))
 
     geomean = geometric_mean(value_list) if len(value_list) else 0
     return geomean, success_count
@@ -191,7 +191,6 @@ def generate_csv_table(result_root, format_number=True) -> list:
             table.append([label, '', '', '', '', 0])
 
     # Add summary rows
-    csv_table.append(['', '', '', '', '', ''])
     csv_table.append(['Success count', '', '', '', '', success_count])
     csv_table.append(['geomean', '', '', '', '', f'{float(geomean):.2f}'])
 
@@ -234,10 +233,6 @@ def __get_data_item(parent_list, index):
 
 def compare_result_item_map(fos, callback, this_result_root, ref_map={}):
     SKIP_KEY_LIST = [
-        'qwen_usage',
-        'stable-diffusion-v1-5',
-        'stable-diffusion-v2-1',
-        'lcm-dreamshaper-v7',
         'Resnet50',
     ]
 

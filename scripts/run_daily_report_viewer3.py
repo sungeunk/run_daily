@@ -11,15 +11,16 @@ from typing import List, Dict, Tuple, Optional
 
 # --- Constants ---
 ROOT_DAILY_REPORT = Path('/var/www/html/daily')
-METADATA_COLS = ['model', 'precision', 'in', 'out', 'execution']
+METADATA_COLS = ['model', 'precision', 'in', 'out', 'execution', 'unit']
 
 
 # --- Data Loading and Parsing Functions ---
 
-def parse_report_file(filepath: Path) -> Tuple[str, str]:
-    """Extracts the purpose and commit ID from a .report file."""
+def parse_report_file(filepath: Path) -> Tuple[str, str, str]:
+    """Extracts the purpose, commit ID, and GPU driver from a .report file."""
     purpose = "N/A"
     commit_id = "N/A"
+    gpu_driver = "N/A"
     try:
         with filepath.open('r', encoding='utf8') as f:
             content = f.read()
@@ -29,13 +30,19 @@ def parse_report_file(filepath: Path) -> Tuple[str, str]:
             commit_match = re.search(r'\| +OpenVINO +\|.*?-(\d+)-([\da-fA-F]+)', content)
             if commit_match:
                 commit_id = f"{commit_match.group(1)}-{commit_match.group(2)}"
+            
+            # Try to find DRIVER_VERSION (newer format)
+            driver_match = re.search(r'\| +DRIVER_VERSION +\|([^|]+)\|', content)
+            if driver_match:
+                versions = driver_match.group(1).split('|')
+                gpu_driver = versions[0].strip() if versions else "N/A"
     except IOError as e:
         st.error(f"Error reading {filepath}: {e}")
-    return purpose, commit_id
+    return purpose, commit_id, gpu_driver
 
 def get_report_metadata(report_path: Path) -> Dict[str, str]:
     """Extracts all metadata from a report file path."""
-    purpose, commit_id = parse_report_file(report_path)
+    purpose, commit_id, gpu_driver = parse_report_file(report_path)
     
     match = re.search(r'\.(\d{8})_(\d+)\.', report_path.name)
     if match:
@@ -48,11 +55,12 @@ def get_report_metadata(report_path: Path) -> Dict[str, str]:
         workweek, datetime_key = "N/A", "N/A"
         
     return {
-        'filename': report_path.name,
-        'purpose': purpose,
-        'commit_id': commit_id,
+        'datetime': datetime_key,
         'workweek': workweek,
-        'datetime': datetime_key
+        'openvino_version': commit_id,
+        'purpose': purpose,
+        'gpu_driver': gpu_driver,
+        'filename': report_path.name,
     }
 
 def load_all_reports(directory: Path) -> pd.DataFrame:
@@ -66,6 +74,11 @@ def load_all_reports(directory: Path) -> pd.DataFrame:
     df = pd.DataFrame(data)
     df.set_index('datetime', inplace=True)
     df.sort_index(ascending=False, inplace=True)
+    
+    # Reorder columns: workweek, openvino_version, purpose, gpu_driver, filename
+    column_order = ['workweek', 'openvino_version', 'purpose', 'gpu_driver', 'filename']
+    df = df[[col for col in column_order if col in df.columns]]
+    
     return df
 
 def load_perf_df_from_pickle(pickle_path: Path, first_df: bool) -> pd.DataFrame:
@@ -102,23 +115,80 @@ def generate_excel_paste_data(df: pd.DataFrame, report_df: pd.DataFrame) -> Tupl
     if df.empty:
         return None, ""
 
-    perf_cols = [col for col in df.columns if col not in METADATA_COLS]
-    if not perf_cols:
-        return df, "No performance data columns found to generate Excel string."
+    # Reorder rows: summary rows first, then models
+    priority_order = [
+        'Resnet50',
+        'Success count',
+        'geomean',
+        'geomean (LLM/2nd/Short)',
+        'geomean (LLM/1st/Short)',
+        'geomean (LLM/2nd/Long)',
+        'geomean (LLM/1st/Long)',
+    ]
+    
+    # Separate priority rows and other rows
+    priority_rows = []
+    other_rows = []
+    
+    for idx, row in df.iterrows():
+        model = row.get('model', '')
+        if model in priority_order:
+            priority_rows.append((priority_order.index(model), idx, row))
+        else:
+            other_rows.append((idx, row))
+    
+    # Sort priority rows by order, then concatenate with other rows
+    priority_rows.sort(key=lambda x: x[0])
+    reordered_df = pd.concat(
+        [pd.DataFrame([row[2] for row in priority_rows])] +
+        [pd.DataFrame([row[1] for row in other_rows])],
+        ignore_index=True
+    )
+    
+    # Add 'unit' column based on execution type
+    def get_unit(row):
+        execution = str(row.get('execution', ''))
+        model = str(row.get('model', ''))
+        if execution == 'memory percent':
+            return '%'
+        elif execution == 'memory size':
+            return 'GB'
+        elif model == 'Success count':
+            return 'count'
+        elif model == 'Resnet50' or execution.startswith('batch:'):
+            return 'fps'
+        else:
+            return 'ms'
 
-    perf_df = df[perf_cols]
+    reordered_df.insert(
+        reordered_df.columns.get_loc('execution') + 1,
+        'unit',
+        reordered_df.apply(get_unit, axis=1)
+    )
+
+    perf_cols = [col for col in reordered_df.columns if col not in METADATA_COLS]
+    if not perf_cols:
+        return reordered_df, "No performance data columns found to generate Excel string."
+
+    perf_df = reordered_df[perf_cols].copy()
+    is_fps_row = reordered_df['unit'] == 'fps'
+    for col in perf_cols:
+        perf_df[col] = perf_df[col].where(
+            ~is_fps_row,
+            perf_df[col].apply(lambda v: f'{float(v):.0f}' if pd.notna(v) and v != '' else v)
+        )
     data_str = perf_df.to_csv(sep='\t', index=False, header=False, float_format='%.2f')
 
     valid_perf_cols = [pc for pc in perf_cols if pc in report_df.index]
     header_data = report_df.loc[valid_perf_cols]
     
-    commit_line = "\t".join(header_data["commit_id"])
+    commit_line = "\t".join(header_data["openvino_version"])
     ww_line = "\t".join(header_data["workweek"])
     date_line = "\t".join(header_data.index)
 
     full_paste_string = "\n\n" + "\n".join([commit_line, ww_line, '', date_line, data_str])
     
-    return df, full_paste_string
+    return reordered_df, full_paste_string
 
 # --- Streamlit UI ---
 
@@ -141,7 +211,7 @@ def main():
     is_daily_list = st.sidebar.checkbox("Filter by Standard Servers", value=True)
     
     if is_daily_list:
-        server_options = ['DUT4015PTLH', 'ARLH-01', 'LNL-03', 'MTL-01', 'BMG-02', 'dg2alderlake']
+        server_options = ['PTLH-01', 'PTLH-02', 'ARLH-01', 'LNL-03', 'LNL-04', 'MTL-01', 'BMG-02', 'dg2alderlake']
     else:
         server_options = sorted([d.name for d in args.report_dir.iterdir() if d.is_dir()])
     
@@ -223,6 +293,9 @@ def main():
                     
                     # Filter data for the current execution type
                     execution_df = model_df[model_df['execution'] == execution_type].copy()
+                    
+                    # Filter out incomplete rows (those with in=0 and out=0 from padding)
+                    execution_df = execution_df[~((execution_df['in'] == 0) & (execution_df['out'] == 0))].copy()
                     
                     # Create a label for the lines within this chart
                     execution_df['label'] = (execution_df['precision'].astype(str) + 
