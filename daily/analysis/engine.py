@@ -166,37 +166,60 @@ def _fetch_comparison_rows(
     else:
         run_id = rec.run_id
         rec_ctx = rec
-    if baseline_info.status != "found" or not baseline_info.run_id:
-        return []
 
     history_map = _load_series_history(con, rec_ctx, config) if rec_ctx is not None else {}
 
-    db_rows = con.execute(
-        """
-        SELECT
-            COALESCE(c.model, b.model) AS model,
-            COALESCE(c.precision, b.precision) AS precision,
-            COALESCE(c.in_token, b.in_token) AS in_token,
-            COALESCE(c.out_token, b.out_token) AS out_token,
-            COALESCE(c.exec_mode, b.exec_mode) AS exec_mode,
-            c.unit AS current_unit,
-            b.unit AS baseline_unit,
-            c.value AS current_value,
-            b.value AS baseline_value
-        FROM perf c
-        FULL OUTER JOIN perf b
-          ON c.model     = b.model
-         AND c.precision = b.precision
-         AND c.in_token  = b.in_token
-         AND c.out_token = b.out_token
-         AND c.exec_mode = b.exec_mode
-         AND c.run_id = ?
-         AND b.run_id = ?
-        WHERE c.run_id = ? OR b.run_id = ?
-        ORDER BY model, precision, in_token, out_token, exec_mode
-        """,
-        [run_id, baseline_info.run_id, run_id, baseline_info.run_id],
-    ).fetchall()
+    # If baseline exists, use FULL OUTER JOIN to compare current vs baseline
+    # Otherwise, fetch only current run's performance data
+    has_baseline = baseline_info.status == "found" and baseline_info.run_id
+
+    if has_baseline:
+        db_rows = con.execute(
+            """
+            SELECT
+                COALESCE(c.model, b.model) AS model,
+                COALESCE(c.precision, b.precision) AS precision,
+                COALESCE(c.in_token, b.in_token) AS in_token,
+                COALESCE(c.out_token, b.out_token) AS out_token,
+                COALESCE(c.exec_mode, b.exec_mode) AS exec_mode,
+                c.unit AS current_unit,
+                b.unit AS baseline_unit,
+                c.value AS current_value,
+                b.value AS baseline_value
+            FROM perf c
+            FULL OUTER JOIN perf b
+              ON c.model     = b.model
+             AND c.precision = b.precision
+             AND c.in_token  = b.in_token
+             AND c.out_token = b.out_token
+             AND c.exec_mode = b.exec_mode
+             AND c.run_id = ?
+             AND b.run_id = ?
+            WHERE c.run_id = ? OR b.run_id = ?
+            ORDER BY model, precision, in_token, out_token, exec_mode
+            """,
+            [run_id, baseline_info.run_id, run_id, baseline_info.run_id],
+        ).fetchall()
+    else:
+        # No baseline: fetch only current run's perf data
+        db_rows = con.execute(
+            """
+            SELECT
+                c.model,
+                c.precision,
+                c.in_token,
+                c.out_token,
+                c.exec_mode,
+                c.unit AS current_unit,
+                NULL AS baseline_unit,
+                c.value AS current_value,
+                NULL AS baseline_value
+            FROM perf c
+            WHERE c.run_id = ?
+            ORDER BY model, precision, in_token, out_token, exec_mode
+            """,
+            [run_id],
+        ).fetchall()
 
     result: list[ComparisonRow] = []
 
@@ -239,16 +262,33 @@ def _fetch_comparison_rows(
             )
             continue
 
-        if current_value is None or baseline_value is None:
+        # If no baseline, show current value only with empty comparison fields
+        if baseline_value is None:
             result.append(
                 ComparisonRow(
                     key=key,
                     unit=unit,
                     current_value=float("nan") if current_value is None else current_value,
-                    baseline_value=float("nan") if baseline_value is None else baseline_value,
+                    baseline_value=float("nan"),
+                    improvement_pct=None,
+                    verdict="same",  # no baseline to compare against
+                    history_count=history_stats["count"],
+                    reference_source="no_baseline",
+                )
+            )
+            continue
+
+        if current_value is None:
+            result.append(
+                ComparisonRow(
+                    key=key,
+                    unit=unit,
+                    current_value=float("nan"),
+                    baseline_value=baseline_value,
                     improvement_pct=None,
                     verdict=verdict_from_pct(None, config),
                     history_count=history_stats["count"],
+                    reference_source="baseline",
                 )
             )
             continue
