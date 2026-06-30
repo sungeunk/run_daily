@@ -16,29 +16,39 @@ profile: default
 description: "Standard LLM daily row order. Mirrors the historical FIXED_ROW_ORDER."
 
 rows:
-  # baichuan2-7b-chat
-  - {model: baichuan2-7b-chat,       precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: baichuan2-7b-chat,       precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: baichuan2-7b-chat,       precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: baichuan2-7b-chat,       precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # Resnet50 (benchmark_app)
+  - {model: Resnet50,                precision: INT8,                 in_spec: '0',   out_spec: '0',   exec_mode: 'batch:1'}
+  - {model: Resnet50,                precision: INT8,                 in_spec: '0',   out_spec: '0',   exec_mode: 'batch:64'}
 
-  # chatglm3-6b
-  - {model: chatglm3-6b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: chatglm3-6b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: chatglm3-6b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: chatglm3-6b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # gemma-2-9b-it
+  - {model: gemma-2-9b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-2-9b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: gemma-2-9b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-2-9b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # glm-4-9b-chat-hf
-  - {model: glm-4-9b-chat-hf,        precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: glm-4-9b-chat-hf,        precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: glm-4-9b-chat-hf,        precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: glm-4-9b-chat-hf,        precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # gemma-3-4b-it
+  - {model: gemma-3-4b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-3-4b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: gemma-3-4b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-3-4b-it,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # gemma-7b-it
-  - {model: gemma-7b-it,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: gemma-7b-it,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: gemma-7b-it,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: gemma-7b-it,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # gemma-4-26b-a4b-it
+  - {model: gemma-4-26b-a4b-it,      precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-4-26b-a4b-it,      precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: gemma-4-26b-a4b-it,      precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-4-26b-a4b-it,      precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+
+  # gemma-4-e2b-it
+  - {model: gemma-4-e2b-it,          precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-4-e2b-it,          precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: gemma-4-e2b-it,          precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: gemma-4-e2b-it,          precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+
+  # gpt-oss-20b
+  - {model: gpt-oss-20b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: gpt-oss-20b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: gpt-oss-20b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: gpt-oss-20b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
   # llama-2-7b-chat-hf
   - {model: llama-2-7b-chat-hf,      precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
@@ -52,23 +62,29 @@ rows:
   - {model: llama-3.1-8b-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
   - {model: llama-3.1-8b-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # minicpm-1b-sft
-  - {model: minicpm-1b-sft,          precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: minicpm-1b-sft,          precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: minicpm-1b-sft,          precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: minicpm-1b-sft,          precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # llama-3.2-1b-instruct
+  - {model: llama-3.2-1b-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: llama-3.2-1b-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: llama-3.2-1b-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: llama-3.2-1b-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+
+  # minicpm4-0.5b
+  - {model: minicpm4-0.5b,           precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: minicpm4-0.5b,           precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: minicpm4-0.5b,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: minicpm4-0.5b,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+
+  # minicpm4-8b
+  - {model: minicpm4-8b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: minicpm4-8b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: minicpm4-8b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: minicpm4-8b,             precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
   # mistral-7b-instruct-v0.2
   - {model: mistral-7b-instruct-v0.2, precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
   - {model: mistral-7b-instruct-v0.2, precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
   - {model: mistral-7b-instruct-v0.2, precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
   - {model: mistral-7b-instruct-v0.2, precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
-
-  # phi-3-mini-4k-instruct
-  - {model: phi-3-mini-4k-instruct,  precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: phi-3-mini-4k-instruct,  precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: phi-3-mini-4k-instruct,  precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: phi-3-mini-4k-instruct,  precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
   # phi-3.5-mini-instruct
   - {model: phi-3.5-mini-instruct,   precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
@@ -82,33 +98,43 @@ rows:
   - {model: phi-3.5-vision-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: '1032', out_spec: '256', exec_mode: '1st'}
   - {model: phi-3.5-vision-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: '1032', out_spec: '256', exec_mode: '2nd'}
 
-  # qwen2-7b-instruct
-  - {model: qwen2-7b-instruct,       precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: qwen2-7b-instruct,       precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: qwen2-7b-instruct,       precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: qwen2-7b-instruct,       precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # phi-4-mini-instruct
+  - {model: phi-4-mini-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: phi-4-mini-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: phi-4-mini-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: phi-4-mini-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # qwen2.5-7b-instruct
-  - {model: qwen2.5-7b-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
-  - {model: qwen2.5-7b-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
-  - {model: qwen2.5-7b-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: qwen2.5-7b-instruct,     precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # phi-4-multimodal-instruct
+  - {model: phi-4-multimodal-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: phi-4-multimodal-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: phi-4-multimodal-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: phi-4-multimodal-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # minicpm-v-2_6 (long only)
-  - {model: minicpm-v-2_6,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
-  - {model: minicpm-v-2_6,           precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+  # qwen3-8b
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # whisper-large-v3 (out_token categorises audio clip length)
-  - {model: whisper-large-v3,        precision: OV_FP16-4BIT_DEFAULT, in_spec: '0',   out_spec: short, exec_mode: pipeline}
-  - {model: whisper-large-v3,        precision: OV_FP16-4BIT_DEFAULT, in_spec: '0',   out_spec: long,  exec_mode: pipeline}
+  # qwen3-vl-4b-instruct
+  - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
-  # Resnet50 (benchmark_app)
-  - {model: Resnet50,                precision: INT8,                  in_spec: '0',   out_spec: '0',   exec_mode: 'batch:1'}
-  - {model: Resnet50,                precision: INT8,                  in_spec: '0',   out_spec: '0',   exec_mode: 'batch:64'}
+  # qwen3.5-9b
+  - {model: qwen3.5-9b,              precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3.5-9b,              precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: qwen3.5-9b,              precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3.5-9b,              precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
+
+  # qwen3.6-35b-a3b
+  - {model: qwen3.6-35b-a3b,         precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3.6-35b-a3b,         precision: OV_FP16-4BIT_DEFAULT, in_spec: short, out_spec: '256', exec_mode: '2nd'}
+  - {model: qwen3.6-35b-a3b,         precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3.6-35b-a3b,         precision: OV_FP16-4BIT_DEFAULT, in_spec: long,  out_spec: '256', exec_mode: '2nd'}
 
   # Stable Diffusion family (token-agnostic; '*' matches any in/out)
-  - {model: stable-diffusion-v1-5,   precision: FP16,                  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
-  - {model: stable-diffusion-v2-1,   precision: FP16,                  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
-  - {model: stable-diffusion-v3.0,   precision: FP16,                  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
-  - {model: stable-diffusion-xl,     precision: FP16,                  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
-  - {model: lcm-dreamshaper-v7,      precision: FP16,                  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
+  - {model: flux.1-schnell,                   precision: OV_FP16-INT4_SYM_CW,  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
+  - {model: stable-diffusion-v1-5,            precision: FP16,                 in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
+  - {model: stable-diffusion-3.5-large-turbo, precision: OV_FP16-4BIT_DEFAULT, in_spec: '*',   out_spec: '*',   exec_mode: pipeline}

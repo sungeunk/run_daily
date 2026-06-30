@@ -287,17 +287,6 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help='Free-text tag used in the mail subject')
     p.add_argument('--pip-freeze', action='store_true',
                    help='Also write pip-freeze output alongside the report')
-
-    # --- shared xlsx append ---
-    p.add_argument('--xlsx-update', type=Path, default=None,
-                   help='Path to OneDrive-synced master xlsx; appends a '
-                        'new column with this run\'s numbers.')
-    p.add_argument('--xlsx-sheet', default=None,
-                   help='Sheet name in --xlsx-update (default: first sheet)')
-    p.add_argument('--xlsx-key-cols', default='1,2,3,4,5',
-                   help='1-based columns holding model,precision,in,out,exec')
-    p.add_argument('--xlsx-header-rows', type=int, default=3,
-                   help='Header row count above the first data row')
     return p.parse_known_args()
 
 
@@ -427,25 +416,6 @@ def main() -> int:
         send_mail(mail_report, args.mail, args.description,
                   suffix_title=suffix, now_stamp=stamp,
                   summary_json=summary_json)
-
-    if args.xlsx_update:
-        from viewer.perf_rows import flatten, as_lookup
-        from viewer.xlsx_update import XlsxTarget, update_master_xlsx
-
-        lookup = as_lookup(flatten(summary))
-        meta = summary.get('meta', {})
-        headers = (meta.get('ov_version', ''),
-                   meta.get('workweek', ''),
-                   meta.get('stamp', stamp))
-        target = XlsxTarget(
-            path=args.xlsx_update,
-            sheet=args.xlsx_sheet,
-            key_cols=tuple(int(x) for x in args.xlsx_key_cols.split(',')),
-            header_rows=args.xlsx_header_rows,
-        )
-        matched, total = update_master_xlsx(target, lookup, headers)
-        print(f'[run.py] xlsx updated: {matched}/{total} rows '
-              f'→ {args.xlsx_update}')
 
     # Run completed end-to-end. Test pass/fail is reflected in the JSON
     # summary and the mail/backup artefacts; don't double-report via exit

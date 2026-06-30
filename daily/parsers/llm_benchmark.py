@@ -19,7 +19,9 @@ to match the old behaviour.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from statistics import geometric_mean
 from typing import TypedDict
 
@@ -97,3 +99,45 @@ def parse_output(output: str) -> list[LlmDataItem]:
             continue
 
     return ret
+
+
+def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
+    """Parse benchmark.py JSON report into a list of per-prompt data items.
+    
+    Uses pre-computed results_averaged from benchmark.py.
+    Extracts first_infer_latency and second_infer_avg_latency values.
+    """
+    with open(report_json_path, 'r') as f:
+        report = json.load(f)
+    
+    perfdata = report.get('perfdata', {})
+    results = perfdata.get('results', [])
+    results_averaged = perfdata.get('results_averaged', {})
+    
+    if not results_averaged or len(results) < 2:
+        # Need results_averaged data and at least warmup + 1 actual result
+        return []
+    
+    # Build perf list from averaged metrics using infer latencies
+    perf = []
+    if 'first_infer_latency' in results_averaged:
+        perf.append(results_averaged['first_infer_latency'])
+    if 'second_infer_avg_latency' in results_averaged:
+        perf.append(results_averaged['second_infer_avg_latency'])
+    
+    # Token counts from first actual result (iteration 1)
+    # Find the first result with iteration >= 1
+    first_actual_result = {}
+    for r in results:
+        if r.get('iteration', -1) >= 1:
+            first_actual_result = r
+            break
+    
+    in_token = first_actual_result.get('input_size', 0)
+    out_token = first_actual_result.get('infer_count', first_actual_result.get('output_size', 0))
+    
+    return [{
+        'in_token': in_token,
+        'out_token': out_token,
+        'perf': perf if perf else None,
+    }] if perf else []

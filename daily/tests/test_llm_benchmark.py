@@ -17,13 +17,15 @@ List without running::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import platform
+import time
 
 import pytest
 
 from common.config import DailyConfig
 from common.fs_utils import convert_path
-from parsers.llm_benchmark import parse_output
+from parsers.llm_benchmark import parse_json_report
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +43,7 @@ class BenchmarkCase:
     precision: str
     apply_chat_template: bool = True
     prompt_type: str = PROMPT_TYPE_32_1K
+    task: str | None = None
     ptl_only: bool = False
 
     @property
@@ -48,30 +51,34 @@ class BenchmarkCase:
         return f'{self.model}-{self.precision}'
 
 
+CASES: list[BenchmarkCase] = [
+    BenchmarkCase('gemma-2-9b-it',          OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('gemma-3-4b-it',          OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('gemma-4-26b-a4b-it',     OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('gemma-4-e2b-it',         OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('gpt-oss-20b',            OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('llama-2-7b-chat-hf',     OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('llama-3.1-8b-instruct',  OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('llama-3.2-1b-instruct',  OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('minicpm4-0.5b',          OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('minicpm4-8b',            OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('mistral-7b-instruct-v0.2', OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('phi-3.5-mini-instruct',  OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('phi-3.5-vision-instruct', OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('phi-4-mini-instruct',    OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('phi-4-multimodal-instruct', OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('qwen3-8b',               OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('qwen3-vl-4b-instruct',   OV_FP16_4BIT_DEFAULT, prompt_type=PROMPT_TYPE_MULTIMODAL),
+    BenchmarkCase('qwen3.5-9b',             OV_FP16_4BIT_DEFAULT, task='visual_text_gen'),
+    BenchmarkCase('qwen3.6-35b-a3b',        OV_FP16_4BIT_DEFAULT, task='visual_text_gen', ptl_only=True),
+]
+
+
 def _is_ptl_machine() -> bool:
     return 'PTL' in platform.node().upper()
 
 
-CASES: list[BenchmarkCase] = [
-    BenchmarkCase('baichuan2-7b-chat',      OV_FP16_4BIT_DEFAULT, apply_chat_template=False),
-    BenchmarkCase('chatglm3-6b',            OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('gemma-7b-it',            OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('glm-4-9b-chat-hf',       OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('llama-2-7b-chat-hf',     OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('llama-3.1-8b-instruct',  OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('minicpm-1b-sft',         OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('minicpm-v-2_6',          OV_FP16_4BIT_DEFAULT, prompt_type=PROMPT_TYPE_MULTIMODAL),
-    BenchmarkCase('mistral-7b-instruct-v0.2', OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('phi-3-mini-4k-instruct', OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('phi-3.5-mini-instruct',  OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('phi-3.5-vision-instruct', OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('qwen2-7b-instruct',      OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('qwen2.5-7b-instruct',    OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('qwen3.6-35b-a3b',        OV_FP16_4BIT_DEFAULT, ptl_only=True),
-]
-
-
-def _build_cmd(cfg: DailyConfig, case: BenchmarkCase) -> str:
+def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) -> str:
     model_path = convert_path(
         f'{cfg.model_dir}/{cfg.model_date}/{case.model}/pytorch/ov/{case.precision}'
     )
@@ -89,9 +96,12 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase) -> str:
     ]
     if case.apply_chat_template:
         parts.append('--apply_chat_template')
+    if case.task:
+        parts.append(f'-t {case.task}')
     parts.append('--disable_prompt_permutation')
     parts.append(f'--load_config {convert_path(str(cfg.wa_config_path))}')
     parts.append(f'-pf {prompt_path}')
+    parts.append(f'-rj {convert_path(str(json_report_path))}')
 
     return ' '.join(parts)
 
@@ -106,7 +116,12 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     if case.ptl_only and not _is_ptl_machine():
         pytest.skip(f'{case.model} runs only on PTL machines')
 
-    cmd = _build_cmd(daily_config, case)
+    # Generate JSON report filename with timestamp to avoid overwrites
+    output_dir = Path(daily_config.output_dir)
+    timestamp = int(time.time())
+    json_report_path = output_dir / f'llm_bench_{case.test_id}_{timestamp}.json'
+    
+    cmd = _build_cmd(daily_config, case, json_report_path)
 
     # Attach metadata even on failure so the report builder can still render
     # a row for this case. We overwrite with the full payload on success.
@@ -119,7 +134,17 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     })
 
     result = run_subprocess(cmd)
-    data = parse_output(result.output)
+    
+    # Verify benchmark completed successfully
+    assert result.returncode == 0, (
+        f'llm_bench exited with {result.returncode}; see raw log for details'
+    )
+    assert json_report_path.exists(), (
+        f'JSON report not generated at {json_report_path}'
+    )
+    
+    # Parse JSON report instead of console output
+    data = parse_json_report(json_report_path)
 
     record_metrics({
         'test_type': 'llm_benchmark',
@@ -131,7 +156,4 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'data': data,
     })
 
-    assert result.returncode == 0, (
-        f'llm_bench exited with {result.returncode}; see raw log for details'
-    )
-    assert data, 'parser returned no data rows'
+    assert data, 'JSON parser returned no data rows'
