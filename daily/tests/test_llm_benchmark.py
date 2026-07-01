@@ -78,6 +78,25 @@ def _is_ptl_machine() -> bool:
     return 'PTL' in platform.node().upper()
 
 
+# Models known to time out on specific platforms — skip them to avoid blocking runs.
+# Keys are case-insensitive substrings matched against platform.node().
+SKIP_MODELS_BY_PLATFORM: dict[str, list[str]] = {
+    'MTL-01':  ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+    'BMG-02':  ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
+    'dg2alderlake':    ['qwen3.6-35b-a3b'],
+    'ARLH-01': ['qwen3.6-35b-a3b'],
+}
+
+
+def _get_skip_reason(model: str) -> str | None:
+    """Return a skip reason if *model* is blocked on the current machine."""
+    node = platform.node().upper()
+    for platform_key, models in SKIP_MODELS_BY_PLATFORM.items():
+        if platform_key.upper() in node and model in models:
+            return f'{model} is skipped on {platform_key} (timeout risk)'
+    return None
+
+
 def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) -> str:
     model_path = convert_path(
         f'{cfg.model_dir}/{cfg.model_date}/{case.model}/pytorch/ov/{case.precision}'
@@ -115,6 +134,10 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
                        run_subprocess, record_metrics):
     if case.ptl_only and not _is_ptl_machine():
         pytest.skip(f'{case.model} runs only on PTL machines')
+
+    skip_reason = _get_skip_reason(case.model)
+    if skip_reason:
+        pytest.skip(skip_reason)
 
     # Generate JSON report filename with timestamp to avoid overwrites
     output_dir = Path(daily_config.output_dir)
