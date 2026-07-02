@@ -32,3 +32,4 @@ transformers==4.57.6
 
 -r requirements.windows.txt ; sys_platform == 'win32'
 -r requirements.ubuntu.txt ; sys_platform == 'linux'
+-r daily/requirements.txt
