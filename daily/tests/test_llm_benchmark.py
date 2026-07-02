@@ -85,7 +85,7 @@ def _is_ptl_machine() -> bool:
 SKIP_MODELS_BY_PLATFORM: dict[str, list[str]] = {
     'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
     'PTL': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
-    'BMG': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
+    'BMG': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
     'DG2': ['qwen3.6-35b-a3b'],
     'ARL': ['qwen3.6-35b-a3b'],
 }
