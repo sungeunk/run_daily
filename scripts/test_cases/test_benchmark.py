@@ -1,15 +1,37 @@
 #!/usr/bin/env python3
 
 import re
+import sys
 import time
 
+from pathlib import Path
 from statistics import geometric_mean
 
 from common_utils import *
 from .test_template import *
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+try:
+    from daily.common.gpu_platform import get_device_platform_key
+except Exception:
+    # Fallback for environments where daily package is unavailable.
+    def get_device_platform_key(device: str, host_name: str | None = None) -> str | None:
+        return None
+
+
 class TestBenchmark(TestTemplate):
+
+    SKIP_MODELS_BY_PLATFORM = {
+        'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+        'PTL': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
+        'BMG': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+        'DG2': ['qwen3.6-35b-a3b'],
+        'ARL': ['qwen3.6-35b-a3b'],
+    }
 
     CONFIG_MAP = {
         ('gemma-2-9b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # text_gen
@@ -33,6 +55,12 @@ class TestBenchmark(TestTemplate):
         ('qwen3.6-35b-a3b',                ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen"}],
     }
 
+    def _get_skip_reason(model_name: str, device: str) -> str | None:
+        platform_key = get_device_platform_key(device)
+        if platform_key and model_name in __class__.SKIP_MODELS_BY_PLATFORM.get(platform_key, []):
+            return f'{model_name} is skipped on {platform_key} (timeout risk)'
+        return None
+
     def __get_configs():
         ret_configs = {}
         for key_tuple, config_list in __class__.CONFIG_MAP.items():
@@ -42,12 +70,18 @@ class TestBenchmark(TestTemplate):
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
+        device = str(args.device)
         ret_dict = {}
 
         for key_tuple, config_list in __class__.__get_configs().items():
             ret_dict.setdefault(key_tuple, [])
 
             for config in config_list:
+                skip_reason = __class__._get_skip_reason(key_tuple[0], device)
+                if skip_reason:
+                    log.info(f'Skip benchmark case ({key_tuple[0]}): {skip_reason}')
+                    continue
+
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
 
                 cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num}  --apply_chat_template'
