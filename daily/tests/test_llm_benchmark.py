@@ -25,6 +25,7 @@ import pytest
 
 from common.config import DailyConfig
 from common.fs_utils import convert_path
+from common.gpu_platform import get_device_platform_key
 from parsers.llm_benchmark import parse_json_report
 
 
@@ -78,22 +79,23 @@ def _is_ptl_machine() -> bool:
     return 'PTL' in platform.node().upper()
 
 
-# Models known to time out on specific platforms — skip them to avoid blocking runs.
-# Keys are case-insensitive substrings matched against platform.node().
+# Models known to time out on specific GPU platforms — skip them to avoid
+# blocking runs. Keys are normalized platform identifiers resolved from the
+# selected OpenVINO device (daily_config.device).
 SKIP_MODELS_BY_PLATFORM: dict[str, list[str]] = {
-    'MTL-01':  ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
-    'BMG-02':  ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
-    'dg2alderlake':    ['qwen3.6-35b-a3b'],
-    'ARLH-01': ['qwen3.6-35b-a3b'],
+    'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+    'PTL': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
+    'BMG': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
+    'DG2': ['qwen3.6-35b-a3b'],
+    'ARL': ['qwen3.6-35b-a3b'],
 }
 
 
-def _get_skip_reason(model: str) -> str | None:
-    """Return a skip reason if *model* is blocked on the current machine."""
-    node = platform.node().upper()
-    for platform_key, models in SKIP_MODELS_BY_PLATFORM.items():
-        if platform_key.upper() in node and model in models:
-            return f'{model} is skipped on {platform_key} (timeout risk)'
+def _get_skip_reason(model: str, device: str) -> str | None:
+    """Return a skip reason if *model* is blocked on the selected device."""
+    platform_key = get_device_platform_key(device)
+    if platform_key and model in SKIP_MODELS_BY_PLATFORM.get(platform_key, []):
+        return f'{model} is skipped on {platform_key} (timeout risk)'
     return None
 
 
@@ -135,7 +137,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     if case.ptl_only and not _is_ptl_machine():
         pytest.skip(f'{case.model} runs only on PTL machines')
 
-    skip_reason = _get_skip_reason(case.model)
+    skip_reason = _get_skip_reason(case.model, daily_config.device)
     if skip_reason:
         pytest.skip(skip_reason)
 
