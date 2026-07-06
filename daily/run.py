@@ -274,7 +274,7 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     p.add_argument('--short-run', action='store_true',
                    help='Use reduced token counts / iterations')
     p.add_argument('-k', dest='keyword', default=None,
-                   help='pytest -k expression for selecting tests')
+                   help='pytest -k expression. Use "|" to separate multiple keywords (e.g. "qwen3|phi-4") — converted to "or" for pytest')
     p.add_argument('--tests', default=None,
                    help='Test path(s) to run (defaults to daily/tests)')
 
@@ -329,7 +329,7 @@ def _run_analysis(text_report: Path, summary_json: Path) -> Path | None:
 def main() -> int:
     args, passthrough = _parse_args()
 
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     stamp = _now_stamp()
@@ -357,7 +357,8 @@ def main() -> int:
     if args.short_run:
         pytest_cmd.append('--short-run')
     if args.keyword:
-        pytest_cmd.extend(['-k', args.keyword])
+        keyword_expr = ' or '.join(k.strip() for k in args.keyword.split('|') if k.strip())
+        pytest_cmd.extend(['-k', keyword_expr])
     pytest_cmd.extend(passthrough)
 
     print(f'[run.py] pytest: {" ".join(pytest_cmd)}', flush=True)
