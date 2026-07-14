@@ -9,4 +9,5 @@ for /f "tokens=*" %%a in ('python -c "from openvino import get_version; print(ge
     set "VERSION=%%a"
 )
 
-python daily\run.py -k "whisper and large and v3"
+:: TimedOUT: gemma-4-26b-a4b-it
+python daily\run.py -k "gpt-oss-20b|qwen3.6-35b-a3b" --device GPU.1
