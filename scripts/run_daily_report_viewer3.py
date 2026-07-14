@@ -211,7 +211,7 @@ def main():
     is_daily_list = st.sidebar.checkbox("Filter by Standard Servers", value=True)
     
     if is_daily_list:
-        server_options = ['PTLH-01', 'PTLH-02', 'ARLH-01', 'LNL-03', 'LNL-04', 'MTL-01', 'BMG-02', 'dg2alderlake']
+        server_options = ['PTLH-01', 'PTLH-02', 'ARLH-01', 'LNL-03', 'LNL-04', 'MTL-01', 'RAPTOR-ELLY', 'BMG-02', 'dg2alderlake']
     else:
         server_options = sorted([d.name for d in args.report_dir.iterdir() if d.is_dir()])
     
