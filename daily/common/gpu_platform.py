@@ -6,6 +6,18 @@ import os
 import platform
 
 
+_PLATFORM_LABEL_KEYS = ('A770', 'B70',
+                        'NVL', 'PTL', 'LNL', 'ARL', 'MTL', 'ADL', 'BMG', 'DG2', 'PVC', 'DG1', 'XE_LP')
+
+
+def _get_platform_key_from_labels(labels: str) -> str | None:
+    label_set = {label.strip().upper() for label in labels.split() if label.strip()}
+    for platform_key in _PLATFORM_LABEL_KEYS:
+        if platform_key in label_set:
+            return platform_key
+    return None
+
+
 def _get_pyopencl_signature(device: str) -> str | None:
     """Best-effort Intel GPU signature from pyopencl for the selected device."""
     try:
@@ -96,9 +108,13 @@ def _collect_openvino_signature(device: str) -> str | None:
 @lru_cache(maxsize=32)
 def get_device_platform_key(device: str, host_name: str | None = None) -> str | None:
     """Resolve a normalized Intel GPU platform key for an OpenVINO device."""
-    override_key = os.environ.get('DAILY_PLATFORM_KEY')
-    if override_key:
-        return override_key.strip().upper()
+    target_device_name = os.environ.get('TARGET_DEVICE_NAME')
+    if target_device_name:
+        return target_device_name.strip().upper()
+
+    jenkins_platform_key = _get_platform_key_from_labels(os.environ.get('NODE_LABELS', ''))
+    if jenkins_platform_key:
+        return jenkins_platform_key
 
     signature = _collect_openvino_signature(device)
     if not signature:

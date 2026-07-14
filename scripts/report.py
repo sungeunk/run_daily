@@ -427,7 +427,7 @@ def generate_report_str(args, result_root:dict, PROCESS_TIME) -> str:
     last_cmd = ''
     for key, cmd_item_list in result_root.items():
         for cmd_item in cmd_item_list:
-            cmd = cmd_item.get(CmdItemKey.cmd, '')
+            cmd = format_cmd_for_log(cmd_item.get(CmdItemKey.cmd, ''))
             if last_cmd != cmd:
                 out.write(f'[CMD][{key}] {cmd}\n')
                 last_cmd = cmd

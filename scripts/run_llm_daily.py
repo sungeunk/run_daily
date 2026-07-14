@@ -107,7 +107,7 @@ def run_daily(args):
             # remove all cache before run each tests
             remove_cache(args)
             with CmdHelper(cmd_item) as helper:
-                log.info(f'cmd: {cmd_item[CmdItemKey.cmd]}')
+                log.info(f'cmd: {format_cmd_for_log(cmd_item[CmdItemKey.cmd])}')
                 output, return_code = call_cmd(args, cmd_item[CmdItemKey.cmd])
 
                 cmd_item[CmdItemKey.raw_log] = output

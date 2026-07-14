@@ -3,6 +3,8 @@
 import re
 import time
 
+from pathlib import Path
+
 from common_utils import *
 from .test_template import *
 
@@ -20,26 +22,38 @@ class TestBenchmarkImageGeneration(TestTemplate):
             ret_configs[(key_tuple[0], key_tuple[1], __class__)] = config_list
         return ret_configs
 
+    def __get_load_config_args(cfg, config) -> list[str]:
+        load_config = config.get("LOAD_CONFIG")
+        if load_config:
+            load_config_path = Path(load_config)
+            if not load_config_path.is_absolute():
+                load_config_path = cfg.PWD / load_config_path
+            return ['--load_config', convert_path(str(load_config_path))]
+        else:
+            return []
+
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
         ret_dict = {}
 
         for key_tuple, config_list in __class__.__get_configs().items():
-            ret_dict.setdefault(key_tuple, [])
-
             for config in config_list:
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -n 1 --output_dir {args.output_dir}'
-
-                load_config = config.get("LOAD_CONFIG")
-                if load_config:
-                    cmd += f' --load_config {convert_path(load_config)}'
+                cmd = [
+                    'python', APP_PATH,
+                    '-m', MODEL_PATH,
+                    '-d', str(args.device),
+                    '-mc', '1',
+                    '-n', '1',
+                    '--output_dir', convert_path(str(args.output_dir)),
+                ]
+                cmd.extend(__class__.__get_load_config_args(cfg, config))
                 prompt_type = config.get(PROMPT_TYPE_KEY, PROMPT_TYPE_DEFAULT)
                 PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/{prompt_type}/{key_tuple[0]}.jsonl')
-                cmd += f' -pf {PROMPT_PATH} -pi 0'
+                cmd.extend(['-pf', PROMPT_PATH, '-pi', '0'])
 
-                ret_dict[key_tuple] = [{CmdItemKey.cmd: cmd}]
+                ret_dict.setdefault(key_tuple, []).append({CmdItemKey.cmd: cmd})
 
         return ret_dict
 

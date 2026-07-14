@@ -28,7 +28,7 @@ class TestBenchmark(TestTemplate):
     SKIP_MODELS_BY_PLATFORM = {
         'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
         'PTL': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
-        'BMG': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+        'BMG': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
         'DG2': ['qwen3.6-35b-a3b'],
         'ARL': ['qwen3.6-35b-a3b'],
     }
@@ -36,8 +36,8 @@ class TestBenchmark(TestTemplate):
     CONFIG_MAP = {
         ('gemma-2-9b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # text_gen
         ('gemma-3-4b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # visual_text_gen
-        ('gemma-4-26b-a4b-it',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('gemma-4-e2b-it',                 ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
+        ('gemma-4-26b-a4b-it',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('gemma-4-e2b-it',                 ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
         ('gpt-oss-20b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('llama-2-7b-chat-hf',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
@@ -51,8 +51,8 @@ class TestBenchmark(TestTemplate):
         ('phi-4-multimodal-instruct',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # visual_text_gen
         ('qwen3-8b',                       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
         ('qwen3-vl-4b-instruct',           ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
-        ('qwen3.5-9b',                     ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen"}],
-        ('qwen3.6-35b-a3b',                ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen"}],
+        ('qwen3.5-9b',                     ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen", "LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('qwen3.6-35b-a3b',                ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen", "LOAD_CONFIG":"res/config.enable_PA.json"}],
     }
 
     def _get_skip_reason(model_name: str, device: str) -> str | None:
@@ -67,6 +67,14 @@ class TestBenchmark(TestTemplate):
             ret_configs[(key_tuple[0], key_tuple[1], __class__)] = config_list
         return ret_configs
 
+    def __add_load_config(cmd, cfg, config) -> list[str]:
+        load_config = config.get("LOAD_CONFIG")
+        if load_config:
+            load_config_path = Path(load_config)
+            if not load_config_path.is_absolute():
+                load_config_path = cfg.PWD / load_config_path
+            cmd.extend(['--load_config', convert_path(str(load_config_path))])
+
     def get_command_spec(args) -> dict:
         cfg = GlobalConfig()
         APP_PATH = convert_path(f'{cfg.PWD}/openvino.genai/tools/llm_bench/benchmark.py')
@@ -74,8 +82,6 @@ class TestBenchmark(TestTemplate):
         ret_dict = {}
 
         for key_tuple, config_list in __class__.__get_configs().items():
-            ret_dict.setdefault(key_tuple, [])
-
             for config in config_list:
                 skip_reason = __class__._get_skip_reason(key_tuple[0], device)
                 if skip_reason:
@@ -84,21 +90,29 @@ class TestBenchmark(TestTemplate):
 
                 MODEL_PATH = convert_path(f'{args.model_dir}/{cfg.MODEL_DATE}/{key_tuple[0]}/pytorch/ov/{key_tuple[1]}')
 
-                cmd = f'python {APP_PATH} -m {MODEL_PATH} -d {args.device} -mc 1 -ic {cfg.out_token_length} -n {cfg.benchmark_iter_num}  --apply_chat_template'
+                cmd = [
+                    'python', APP_PATH,
+                    '-m', MODEL_PATH,
+                    '-d', str(args.device),
+                    '-mc', '1',
+                    '-ic', str(cfg.out_token_length),
+                    '-n', str(cfg.benchmark_iter_num),
+                    '--apply_chat_template',
+                ]
+
+
                 task = config.get("TASK")
                 if task:
-                    cmd += f' -t {task}'
+                    cmd.extend(['-t', task])
                 if not args.prompt_permutation:
-                    cmd += f' --disable_prompt_permutation'
-                load_config = config.get("LOAD_CONFIG")
-                if load_config:
-                    cmd += f' --load_config {convert_path(load_config)}'
+                    cmd.append('--disable_prompt_permutation')
+                __class__.__add_load_config(cmd, cfg, config)
 
                 prompt_type = config.get(PROMPT_TYPE_KEY, PROMPT_TYPE_DEFAULT)
                 PROMPT_PATH = convert_path(f'{cfg.PWD}/prompts/{prompt_type}/{key_tuple[0]}.jsonl')
-                cmd += f' -pf {PROMPT_PATH}'
+                cmd.extend(['-pf', PROMPT_PATH])
 
-                ret_dict[key_tuple].append({CmdItemKey.cmd: cmd})
+                ret_dict.setdefault(key_tuple, []).append({CmdItemKey.cmd: cmd})
         return ret_dict
 
     def parse_output(args, output) -> list[dict]:

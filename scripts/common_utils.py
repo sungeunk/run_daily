@@ -6,6 +6,7 @@ import logging as log
 import os
 import platform
 import re
+import shlex
 import stat
 import subprocess
 import time
@@ -134,14 +135,18 @@ def force_delete_file(file_path):
         return False
 
 
-#
-# WA: At subprocess.popen(cmd, ...), the cmd should be string on ubuntu or be string array on windows.
-#
-def convert_cmd_for_popen(cmd) -> str:
+def convert_cmd_for_popen(cmd):
     if isinstance(cmd, list) or is_windows():
         return cmd
     else:
-        return cmd.split()
+        return shlex.split(cmd)
+
+def format_cmd_for_log(cmd) -> str:
+    if isinstance(cmd, list):
+        if is_windows():
+            return subprocess.list2cmdline(cmd)
+        return shlex.join(cmd)
+    return cmd
 
 def convert_path(path):
     if is_windows():
