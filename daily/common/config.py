@@ -37,6 +37,7 @@ class DailyConfig:
     device: str
     timeout_sec: int
     short_run: bool           # replaces --test: shorten tokens/iters
+    tee_raw_log: bool
     out_token_length: int
     benchmark_iter_num: int
     ov_version: str
@@ -81,6 +82,7 @@ def build_config(
     device: str = 'GPU',
     timeout_sec: int = 1800,
     short_run: bool = False,
+    tee_raw_log: bool = False,
 ) -> DailyConfig:
     now = dt.datetime.now().strftime('%Y%m%d_%H%M')
     ov_version = _ov_get_version()
@@ -101,6 +103,7 @@ def build_config(
         device=device,
         timeout_sec=timeout_sec,
         short_run=short_run,
+        tee_raw_log=tee_raw_log,
         out_token_length=out_token_length,
         benchmark_iter_num=benchmark_iter_num,
         ov_version=ov_version,

@@ -273,6 +273,8 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     p.add_argument('--daily-timeout', type=int, default=1800)
     p.add_argument('--short-run', action='store_true',
                    help='Use reduced token counts / iterations')
+    p.add_argument('--verbose', action='store_true',
+                   help='Also stream the raw subprocess log to the terminal')
     p.add_argument('-k', dest='keyword', default=None,
                    help='pytest -k expression. Use "|" to separate multiple keywords (e.g. "qwen3|phi-4") — converted to "or" for pytest')
     p.add_argument('--tests', default=None,
@@ -356,6 +358,8 @@ def main() -> int:
     ]
     if args.short_run:
         pytest_cmd.append('--short-run')
+    if args.verbose:
+        pytest_cmd.extend(['--tee-raw-log', '-s'])
     if args.keyword:
         keyword_expr = ' or '.join(k.strip() for k in args.keyword.split('|') if k.strip())
         pytest_cmd.extend(['-k', keyword_expr])

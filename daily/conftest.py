@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -63,6 +64,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='Per-subprocess timeout in seconds')
     group.addoption('--short-run', action='store_true',
                     help='Reduced token/iter counts for quick smoke runs')
+    group.addoption('--tee-raw-log', action='store_true',
+                    help='Also stream the session raw log to stdout')
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +90,7 @@ def daily_config(request: pytest.FixtureRequest) -> DailyConfig:
         device=opt('--device'),
         timeout_sec=opt('--daily-timeout'),
         short_run=opt('--short-run'),
+        tee_raw_log=opt('--tee-raw-log'),
     )
     return cfg
 
@@ -94,8 +98,9 @@ def daily_config(request: pytest.FixtureRequest) -> DailyConfig:
 class RawLogSink:
     """Thread-safe append-only writer for the session raw log."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, tee_to_stdout: bool = False):
         self._path = path
+        self._tee_to_stdout = tee_to_stdout
         self._lock = threading.Lock()
         self._fp = open(path, 'w', encoding='utf-8', buffering=1)
 
@@ -106,6 +111,9 @@ class RawLogSink:
     def write(self, text: str) -> None:
         with self._lock:
             self._fp.write(text)
+            if self._tee_to_stdout:
+                sys.stdout.write(text)
+                sys.stdout.flush()
 
     def section(self, title: str) -> None:
         banner = f'\n===== {title} =====\n'
@@ -120,7 +128,8 @@ class RawLogSink:
 
 @pytest.fixture(scope='session')
 def raw_log(daily_config: DailyConfig) -> RawLogSink:
-    sink = RawLogSink(daily_config.raw_log_path)
+    sink = RawLogSink(daily_config.raw_log_path,
+                      tee_to_stdout=daily_config.tee_raw_log)
     sink.write(f'# Daily run {daily_config.now}\n')
     sink.write(f'# OpenVINO: {daily_config.ov_version}\n')
     sink.write(f'# Device:   {daily_config.device}\n\n')
