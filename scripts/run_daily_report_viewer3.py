@@ -16,6 +16,76 @@ METADATA_COLS = ['model', 'precision', 'in', 'out', 'execution', 'unit']
 
 # --- Data Loading and Parsing Functions ---
 
+def split_markdown_row(line: str) -> list[str]:
+    """Splits a markdown table row into stripped cells."""
+    return [cell.strip() for cell in line.strip().strip('|').split('|')]
+
+def is_discrete_gpu_name(device_name: str) -> bool:
+    """Returns True when a device name looks like a discrete Intel GPU."""
+    name = device_name.upper()
+    integrated_tokens = ('UHD GRAPHICS', 'IRIS', 'INTEL(R) GRAPHICS', '(IGPU)')
+    if any(token in name for token in integrated_tokens):
+        return False
+    discrete_tokens = (
+        'ARC(TM) A',
+        'ARC(TM) B',
+        'ARC(TM) PRO',
+        'ARC PRO',
+        'FLEX',
+        'DATA CENTER GPU MAX',
+        'BATTLEMAGE',
+        'ALCHEMIST',
+        'DG2',
+        'BMG',
+        'PVC',
+    )
+    return any(token in name for token in discrete_tokens)
+
+def select_gpu_driver(device_names: list[str], driver_versions: list[str]) -> str:
+    """Selects the dGPU driver when both iGPU and dGPU entries are present."""
+    driver_pairs = [
+        (device_name, driver_version)
+        for device_name, driver_version in zip(device_names, driver_versions)
+        if driver_version
+    ]
+    for device_name, driver_version in driver_pairs:
+        if is_discrete_gpu_name(device_name):
+            return driver_version
+    return driver_pairs[0][1] if driver_pairs else "N/A"
+
+def extract_gpu_driver(content: str) -> str:
+    """Extracts the most relevant GPU driver from the GPU Info markdown table."""
+    lines = content.splitlines()
+    for line_index, line in enumerate(lines):
+        if line.strip() != 'GPU Info:':
+            continue
+
+        header_cells = None
+        driver_cells = None
+        for table_line in lines[line_index + 1:]:
+            if not table_line.strip().startswith('|'):
+                if header_cells is not None:
+                    break
+                continue
+
+            cells = split_markdown_row(table_line)
+            if len(cells) < 2:
+                continue
+            if cells[0] == '':
+                header_cells = cells[1:]
+            elif cells[0] == 'DRIVER_VERSION':
+                driver_cells = cells[1:]
+                break
+
+        if header_cells and driver_cells:
+            return select_gpu_driver(header_cells, driver_cells)
+
+    driver_match = re.search(r'\| +DRIVER_VERSION +\|(.+)\|', content)
+    if driver_match:
+        versions = [version.strip() for version in driver_match.group(1).split('|') if version.strip()]
+        return versions[0] if versions else "N/A"
+    return "N/A"
+
 def parse_report_file(filepath: Path) -> Tuple[str, str, str]:
     """Extracts the purpose, commit ID, and GPU driver from a .report file."""
     purpose = "N/A"
@@ -30,12 +100,7 @@ def parse_report_file(filepath: Path) -> Tuple[str, str, str]:
             commit_match = re.search(r'\| +OpenVINO +\|.*?-(\d+)-([\da-fA-F]+)', content)
             if commit_match:
                 commit_id = f"{commit_match.group(1)}-{commit_match.group(2)}"
-            
-            # Try to find DRIVER_VERSION (newer format)
-            driver_match = re.search(r'\| +DRIVER_VERSION +\|([^|]+)\|', content)
-            if driver_match:
-                versions = driver_match.group(1).split('|')
-                gpu_driver = versions[0].strip() if versions else "N/A"
+            gpu_driver = extract_gpu_driver(content)
     except IOError as e:
         st.error(f"Error reading {filepath}: {e}")
     return purpose, commit_id, gpu_driver
