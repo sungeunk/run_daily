@@ -349,7 +349,7 @@ def main() -> int:
         f'--model-dir={args.model_dir}',
         f'--model-date={args.model_date}',
         f'--cache-dir={args.cache_dir}',
-        f'--output-dir={args.output_dir}',
+        f'--output-dir={output_dir}',
         f'--daily-timeout={args.daily_timeout}',
         '--json-report',
         f'--json-report-file={pytest_json}',
