@@ -27,6 +27,7 @@ from typing import TypedDict
 
 
 class LlmDataItem(TypedDict, total=False):
+    prompt_idx: int
     in_token: int
     out_token: int
     perf: list[float]
@@ -103,41 +104,50 @@ def parse_output(output: str) -> list[LlmDataItem]:
 
 def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
     """Parse benchmark.py JSON report into a list of per-prompt data items.
-    
-    Uses pre-computed results_averaged from benchmark.py.
-    Extracts first_infer_latency and second_infer_avg_latency values.
+
+    Warm-up iteration 0 is excluded. Remaining rows are averaged per
+    ``prompt_idx`` so multi-prompt benchmark runs keep one report row per
+    prompt, matching the stdout parser contract.
     """
-    with open(report_json_path, 'r') as f:
+    with open(report_json_path, 'r', encoding='utf-8') as f:
         report = json.load(f)
-    
+
     perfdata = report.get('perfdata', {})
     results = perfdata.get('results', [])
-    results_averaged = perfdata.get('results_averaged', {})
-    
-    if not results_averaged or len(results) < 2:
-        # Need results_averaged data and at least warmup + 1 actual result
+
+    prompt_rows: dict[int, list[dict]] = {}
+    for row in results:
+        if row.get('iteration', -1) < 1:
+            continue
+        prompt_idx = row.get('prompt_idx', 0)
+        if not isinstance(prompt_idx, int):
+            prompt_idx = 0
+        prompt_rows.setdefault(prompt_idx, []).append(row)
+
+    if not prompt_rows:
         return []
-    
-    # Build perf list from averaged metrics using infer latencies
-    perf = []
-    if 'first_infer_latency' in results_averaged:
-        perf.append(results_averaged['first_infer_latency'])
-    if 'second_infer_avg_latency' in results_averaged:
-        perf.append(results_averaged['second_infer_avg_latency'])
-    
-    # Token counts from first actual result (iteration 1)
-    # Find the first result with iteration >= 1
-    first_actual_result = {}
-    for r in results:
-        if r.get('iteration', -1) >= 1:
-            first_actual_result = r
-            break
-    
-    in_token = first_actual_result.get('input_size', 0)
-    out_token = first_actual_result.get('infer_count', first_actual_result.get('output_size', 0))
-    
-    return [{
-        'in_token': in_token,
-        'out_token': out_token,
-        'perf': perf if perf else None,
-    }] if perf else []
+
+    parsed: list[LlmDataItem] = []
+    for prompt_idx in sorted(prompt_rows):
+        rows = prompt_rows[prompt_idx]
+        first_infer = [float(row['first_infer_latency']) for row in rows
+                       if 'first_infer_latency' in row]
+        second_infer = [float(row['second_infer_avg_latency']) for row in rows
+                        if 'second_infer_avg_latency' in row]
+        perf = []
+        if first_infer:
+            perf.append(sum(first_infer) / len(first_infer))
+        if second_infer:
+            perf.append(sum(second_infer) / len(second_infer))
+        if not perf:
+            continue
+
+        first_row = rows[0]
+        parsed.append({
+            'prompt_idx': prompt_idx,
+            'in_token': first_row.get('input_size', 0),
+            'out_token': first_row.get('infer_count', first_row.get('output_size', 0)),
+            'perf': perf,
+        })
+
+    return parsed

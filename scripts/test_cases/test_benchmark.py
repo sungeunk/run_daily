@@ -27,7 +27,7 @@ class TestBenchmark(TestTemplate):
 
     SKIP_MODELS_BY_PLATFORM = {
         'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
-        'PTL': ['qwen3.6-35b-a3b'],
+        'PTL': [''],
         'BMG': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b', 'gpt-oss-20b'],
         'DG2': ['qwen3.6-35b-a3b'],
         'ARL': ['qwen3.6-35b-a3b'],

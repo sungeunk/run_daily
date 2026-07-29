@@ -154,7 +154,7 @@ def _render_llm_benchmark(tests: list[dict]) -> str:
         m = t['metrics']
         if t['outcome'] != 'passed':
             rows.append([m.get('model', ''), m.get('precision', ''),
-                         '', '', 'FAIL', 'FAIL'])
+                         '', '', '', 'FAIL', 'FAIL'])
             continue
         for d in m.get('data', []):
             perf = d.get('perf', [])
@@ -165,16 +165,16 @@ def _render_llm_benchmark(tests: list[dict]) -> str:
             if len(perf) > 1:
                 second_vals.append(perf[1])
             rows.append([m['model'], m['precision'],
-                         d.get('in_token', ''), d.get('out_token', ''),
-                         first, second])
+                         d.get('prompt_idx', ''), d.get('in_token', ''),
+                         d.get('out_token', ''), first, second])
 
-    rows.append(['', '', '', '', '-', '-'])
-    rows.append(['geomean (1st)', '', '', '', _gm(first_vals), ''])
-    rows.append(['geomean (2nd)', '', '', '', '', _gm(second_vals)])
+    rows.append(['', '', '', '', '', '-', '-'])
+    rows.append(['geomean (1st)', '', '', '', '', _gm(first_vals), ''])
+    rows.append(['geomean (2nd)', '', '', '', '', '', _gm(second_vals)])
 
     return '[RESULT] llm_benchmark\n' + tabulate(
         rows,
-        headers=['model', 'precision', 'in token', 'out token',
+        headers=['model', 'precision', 'prompt', 'in token', 'out token',
                  '1st inf (ms)', '2nd inf (ms)'],
         tablefmt='github', stralign='right',
     ) + '\n'

@@ -422,6 +422,11 @@ def main() -> int:
                   suffix_title=suffix, now_stamp=stamp,
                   summary_json=summary_json)
 
+    if raw_logs:
+        print(f'[run.py] raw log:        {raw_logs[-1]}')
+    else:
+        print(f'[run.py] raw log:        not found for daily.{stamp}.*.raw')
+
     # Run completed end-to-end. Test pass/fail is reflected in the JSON
     # summary and the mail/backup artefacts; don't double-report via exit
     # code.

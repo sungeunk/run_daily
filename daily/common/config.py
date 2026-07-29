@@ -60,6 +60,9 @@ class DailyConfig:
 
     @property
     def wa_config_path(self) -> Path:
+        config_path = os.environ.get('LLM_BENCH_CONFIG')
+        if config_path:
+            return Path(convert_path(config_path))
         return self.repo_root / 'res' / 'config_wa.json'
 
     @property
