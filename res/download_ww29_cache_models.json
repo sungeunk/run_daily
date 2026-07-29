@@ -1,0 +1,28 @@
+{
+  "server": "ov-share-13",
+  "cache_commit": "WW29_llm-optimum_2026.3.0-22446-RC2",
+  "model": [
+    {"name": ["flux.1-schnell"], "framework": ["pytorch"], "precision": ["OV_FP16-INT4_SYM_CW"]},
+    {"name": ["gemma-2-9b-it"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["gemma-3-4b-it"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["gemma-4-26b-a4b-it"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["gemma-4-e2b-it"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["gpt-oss-20b"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["llama-2-7b-chat-hf"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["llama-3.1-8b-instruct"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["llama-3.2-1b-instruct"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["minicpm4-0.5b"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["minicpm4-8b"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["mistral-7b-instruct-v0.2"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["phi-3.5-mini-instruct"], "framework": ["pytorch"], "precision": ["FP16"]},
+    {"name": ["phi-3.5-vision-instruct"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["phi-4-mini-instruct"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["phi-4-multimodal-instruct"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["qwen3-8b"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["qwen3-vl-4b-instruct"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["qwen3.5-9b"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["qwen3.6-35b-a3b"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["stable-diffusion-3.5-large-turbo"], "framework": ["pytorch"], "precision": ["OV_FP16-4BIT_DEFAULT"]},
+    {"name": ["stable-diffusion-v1-5"], "framework": ["pytorch"], "precision": ["FP16"]}
+  ]
+}
