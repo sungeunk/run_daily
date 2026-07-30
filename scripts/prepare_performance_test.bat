@@ -41,9 +41,12 @@ powercfg -setactive scheme_current
 
 echo [2/6] Enabling Game Mode and HAGS...
 
-reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f >nul
-:: NOTE: HAGS change requires reboot to take effect
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f >nul
+:: NOTE: Game Mode OFF — compute workloads (LLM inference) are not recognized as games;
+::       enabling it can restrict GPU compute scheduling and reduce throughput.
+reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 0 /f >nul
+:: NOTE: HAGS OFF — continuous GPU compute workloads suffer scheduling overhead with HAGS enabled.
+::       Requires reboot to take effect.
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 1 /f >nul
 
 :: ----------------------------------------
 :: Stop background services
