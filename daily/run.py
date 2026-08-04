@@ -215,6 +215,48 @@ def _collect_runtime_meta(device: str) -> dict:
     }
 
 
+def _package_version(module_name: str) -> str | None:
+    """Best-effort version string for an installed OpenVINO companion package."""
+    try:
+        import importlib
+
+        mod = importlib.import_module(module_name)
+    except Exception:
+        return None
+
+    for attr in ('get_version', '__version__'):
+        value = getattr(mod, attr, None)
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                value = None
+        if value:
+            return str(value)
+    return None
+
+
+def _genai_commit() -> str | None:
+    """HEAD sha of the openvino.genai checkout the benchmark script runs from."""
+    genai_dir = REPO_ROOT / 'openvino.genai'
+    if not (genai_dir / '.git').exists():
+        return None
+    try:
+        proc = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=str(genai_dir),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    sha = proc.stdout.strip().lower()
+    return sha or None
+
+
 def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
     """Run-level metadata that downstream consumers (viewer, xlsx) need.
 
@@ -227,6 +269,13 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         ov_version = _ov_version()
     except Exception:
         ov_version = 'none'
+
+    # openvino.genai / openvino_tokenizers versions: the DB schema, RunRecord
+    # and writer all carry these columns, but only the legacy pickle loader
+    # ever populated them. Fill them here so the new summary.json path stops
+    # writing NULLs and a genai-only regression stays attributable.
+    genai_version = _package_version('openvino_genai')
+    tok_version = _package_version('openvino_tokenizers')
 
     # workweek from stamp (YYYYMMDD_HHMM)
     try:
@@ -253,6 +302,9 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         'ov_version':     ov_version,
         'ov_build':       build,
         'ov_sha':         sha,
+        'genai_version':  genai_version,
+        'genai_commit':   _genai_commit(),
+        'tok_commit':     tok_version,
         'short_run':      bool(args.short_run),
         **_collect_runtime_meta(args.device),
     }
@@ -383,7 +435,9 @@ def main() -> int:
     # Import lazily so `python run.py --help` works without tabulate installed.
     sys.path.insert(0, str(DAILY_DIR))
     from report.builder import build_reports
-    from common.delivery import (mail_title_suffix, scp_backup, send_mail,
+    from common.delivery import (backup_server_url, mail_title_suffix,
+                                 prepend_links, prepend_links_html,
+                                 render_links_block, scp_backup, send_mail,
                                  write_pip_freeze)
 
     extra_meta = _collect_meta(stamp, args)
@@ -410,9 +464,25 @@ def main() -> int:
         write_pip_freeze(pip_freeze_file)
         print(f'[run.py] pip freeze:     {pip_freeze_file}')
 
+    # Artefacts published on the relay, in link-block order. The HTML report
+    # was previously generated but never uploaded, so it is included here too.
+    to_upload = [text_report, summary_json, pytest_json, pip_freeze_file]
+    if html_report:
+        to_upload.append(html_report)
+    to_upload.extend(raw_logs)
+
+    # Prepend the published-artefact links *before* scp/mail so both the
+    # uploaded copy and the mailed body carry them. URLs are derived from the
+    # filenames, so this doesn't depend on the upload succeeding — but only
+    # add them when the files will actually be published.
     if args.backup:
-        to_upload = [text_report, summary_json, pytest_json, pip_freeze_file]
-        to_upload.extend(raw_logs)
+        links_block = render_links_block(to_upload)
+        if links_block:
+            prepend_links(text_report, links_block)
+            if html_report:
+                prepend_links_html(html_report, links_block)
+            print(f'[run.py] links:          {backup_server_url(None, "")}')
+
         scp_backup(to_upload)
 
     if args.mail:

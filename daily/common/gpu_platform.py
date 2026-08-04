@@ -6,7 +6,7 @@ import os
 import platform
 
 
-_PLATFORM_LABEL_KEYS = ('A770', 'B70',
+_PLATFORM_LABEL_KEYS = ('A770', 'B70', 'B580',
                         'NVL', 'PTL', 'LNL', 'ARL', 'MTL', 'ADL', 'BMG', 'DG2', 'PVC', 'DG1', 'XE_LP')
 
 
@@ -105,6 +105,50 @@ def _collect_openvino_signature(device: str) -> str | None:
     return signature
 
 
+# Marketing SKU labels worth distinguishing *within* one architecture,
+# because capability differs enough to change which models can run (e.g.
+# BMG B580 12GB vs. Pro B70 16GB). Ordered longest-first so 'B580' wins
+# before a hypothetical 'B5' prefix.
+_SKU_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ('B580', ('ARC(TM) B580', 'B580')),
+    ('B570', ('ARC(TM) B570', 'B570')),
+    ('B70',  ('ARC(TM) PRO B70', 'ARC PRO B70', 'PRO B70', 'B70')),
+    ('B60',  ('ARC(TM) PRO B60', 'ARC PRO B60', 'PRO B60', 'B60')),
+    ('B50',  ('ARC(TM) PRO B50', 'ARC PRO B50', 'PRO B50', 'B50')),
+    ('A770', ('ARC(TM) A770', 'A770')),
+    ('A750', ('ARC(TM) A750', 'A750')),
+)
+
+
+@lru_cache(maxsize=32)
+def get_device_sku_key(device: str, host_name: str | None = None) -> str | None:
+    """Resolve the marketing SKU label (e.g. 'B580', 'B70') for a device.
+
+    Returns None when the SKU can't be determined or isn't one we
+    distinguish. Callers should treat that as "use the architecture key
+    alone" — see SKIP_MODELS_BY_SKU in tests/test_llm_benchmark.py.
+    """
+    explicit = os.environ.get('TARGET_DEVICE_NAME')
+    if explicit:
+        candidate = explicit.strip().upper()
+        if any(candidate == sku for sku, _ in _SKU_PATTERNS):
+            return candidate
+
+    sources = [
+        os.environ.get('TARGET_DEVICE_NAME', ''),
+        os.environ.get('NODE_LABELS', ''),
+        _collect_openvino_signature(device) or '',
+    ]
+    haystack = ' '.join(s.upper() for s in sources if s)
+    if not haystack:
+        return None
+
+    for sku, tokens in _SKU_PATTERNS:
+        if any(token in haystack for token in tokens):
+            return sku
+    return None
+
+
 @lru_cache(maxsize=32)
 def get_device_platform_key(device: str, host_name: str | None = None) -> str | None:
     """Resolve a normalized Intel GPU platform key for an OpenVINO device."""
@@ -131,9 +175,13 @@ def get_device_platform_key(device: str, host_name: str | None = None) -> str | 
     if any(token in signature for token in ('ALDER LAKE', 'RAPTOR LAKE', 'ADL', 'RPL', 'UHD GRAPHICS 770')):
         return 'ADL'
 
+    # 'ARC PRO B' does not match the real device name 'Arc(TM) Pro B70
+    # Graphics' because of the '(TM)' between the two words — match the
+    # Pro form explicitly as well.
     if any(token in signature for token in (
         'BMG', 'BATTLEMAGE', 'XE2', 'ARC(TM) B570', 'ARC(TM) B580',
-        'ARC(TM) B50', 'ARC(TM) B60', 'ARC(TM) B70', 'ARC PRO B',
+        'ARC(TM) B50', 'ARC(TM) B60', 'ARC(TM) B70',
+        'ARC PRO B', 'ARC(TM) PRO B',
     )):
         return 'BMG'
 

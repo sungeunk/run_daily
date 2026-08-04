@@ -25,7 +25,7 @@ import pytest
 
 from common.config import DailyConfig
 from common.fs_utils import convert_path
-from common.gpu_platform import get_device_platform_key
+from common.gpu_platform import get_device_platform_key, get_device_sku_key
 from parsers.llm_benchmark import parse_json_report
 
 
@@ -80,22 +80,71 @@ def _is_ptl_machine() -> bool:
 
 
 # Models known to time out on specific GPU platforms — skip them to avoid
-# blocking runs. Keys are normalized platform identifiers resolved from the
-# selected OpenVINO device (daily_config.device).
+# blocking runs. Keys are architecture identifiers resolved from the selected
+# OpenVINO device (daily_config.device) via get_device_platform_key().
+#
+# Kept in sync with TestBenchmark.SKIP_MODELS_BY_PLATFORM in
+# scripts/test_cases/test_benchmark.py (the old runner), which is the source
+# of truth for what actually times out. The old table is a flat dict mixing
+# architectures and SKUs; here the architecture entries live below and the
+# SKU entries in SKIP_MODELS_BY_SKU. An architecture absent from both tables
+# runs the full model list.
 SKIP_MODELS_BY_PLATFORM: dict[str, list[str]] = {
-    'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+    # Panther Lake — the only rig large enough for qwen3.6-35b-a3b.
     'PTL': [],
-    'BMG': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
-    'DG2': ['qwen3.6-35b-a3b'],
     'ARL': ['qwen3.6-35b-a3b'],
+    'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+    'DG2': ['qwen3.6-35b-a3b'],
+    # No 'BMG' entry on purpose: the old table keys every Battlemage limit
+    # off the B580 / B70 SKUs, which differ from each other (see
+    # SKIP_MODELS_BY_SKU). qwen3.6-35b-a3b is additionally gated to PTL rigs
+    # by BenchmarkCase.ptl_only, so it stays skipped on Battlemage even when
+    # the SKU can't be resolved.
 }
+
+# Per-SKU skips, matched independently of the architecture key above and
+# added to it. Capability varies enough *within* one architecture that a
+# single arch list can't express it: on BMG, B580 times out on
+# gemma-4-26b-a4b-it at 1688 ms/token while Pro B70 completes it — observed
+# on 4 consecutive daily runs (2026-08-01..04). These mirror the 'B580' /
+# 'B70' entries in the old runner's flat table. Keys must match
+# get_device_sku_key() return values.
+SKIP_MODELS_BY_SKU: dict[str, list[str]] = {
+    'B580': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
+    'B70':  ['gpt-oss-20b'],
+    'A770': [],
+}
+
+
+def _resolve_platform(device: str) -> tuple[str | None, str | None]:
+    """Return ``(platform_key, sku_key)`` for the selected device.
+
+    Both lookups are independent and either may be None. When
+    $TARGET_DEVICE_NAME / Jenkins $NODE_LABELS names a SKU, the platform key
+    *is* that SKU label — it simply won't match SKIP_MODELS_BY_PLATFORM, and
+    SKIP_MODELS_BY_SKU supplies the limits instead.
+    """
+    platform_key = get_device_platform_key(device)
+    return (platform_key.strip().upper() if platform_key else None,
+            get_device_sku_key(device))
+
+
+def _skipped_models(platform_key: str | None, sku: str | None) -> list[str]:
+    """Effective skip list: platform entry plus any SKU-specific entry."""
+    models = list(SKIP_MODELS_BY_PLATFORM.get(platform_key, [])) if platform_key else []
+    if sku:
+        models.extend(SKIP_MODELS_BY_SKU.get(sku, []))
+    return models
 
 
 def _get_skip_reason(model: str, device: str) -> str | None:
     """Return a skip reason if *model* is blocked on the selected device."""
-    platform_key = get_device_platform_key(device)
-    if platform_key and model in SKIP_MODELS_BY_PLATFORM.get(platform_key, []):
-        return f'{model} is skipped on {platform_key} (timeout risk)'
+    platform_key, sku = _resolve_platform(device)
+    if not platform_key and not sku:
+        return None
+    if model in _skipped_models(platform_key, sku):
+        label = '/'.join(dict.fromkeys(k for k in (platform_key, sku) if k))
+        return f'{model} is skipped on {label} (timeout risk)'
     return None
 
 

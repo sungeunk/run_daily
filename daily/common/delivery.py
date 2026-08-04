@@ -191,6 +191,105 @@ def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     return f'{base_url.rstrip("/")}/daily2/{platform.node()}/{filename}'
 
 
+def artefact_links(files: Iterable[Path], *, base_url: str | None = None
+                   ) -> list[tuple[str, str]]:
+    """Return ``(label, url)`` pairs for artefacts published on the relay.
+
+    Labels are derived from the filename suffix so the report header reads
+    ``report`` / ``html`` / ``raw`` rather than the full stamped filename.
+    Ordered most-useful-first; unknown suffixes keep their extension as the
+    label and sort last.
+    """
+    label_order = {
+        'report': (0, 'report'),
+        'html': (1, 'html'),
+        'raw': (2, 'raw log'),
+        'summary.json': (3, 'summary json'),
+        'pytest.json': (4, 'pytest json'),
+        'requirements.txt': (5, 'requirements'),
+    }
+
+    def _classify(name: str) -> tuple[int, str]:
+        # Match the longest compound suffix first ('summary.json' before 'json').
+        for suffix, entry in sorted(label_order.items(), key=lambda kv: -len(kv[0])):
+            if name.endswith(f'.{suffix}'):
+                return entry
+        return (99, Path(name).suffix.lstrip('.') or 'file')
+
+    entries = []
+    for f in files:
+        name = Path(f).name
+        rank, label = _classify(name)
+        entries.append((rank, label, backup_server_url(base_url, name)))
+
+    return [(label, url) for _, label, url in sorted(entries, key=lambda e: (e[0], e[1]))]
+
+
+def render_links_block(files: Iterable[Path], *, base_url: str | None = None
+                       ) -> str:
+    """Return the ``[ Links ]`` text block for the top of the daily report.
+
+    Empty string when there is nothing to link, so callers can prepend
+    unconditionally.
+    """
+    links = artefact_links(files, base_url=base_url)
+    if not links:
+        return ''
+
+    width = max(len(label) for label, _ in links)
+    lines = ['[ Links ]']
+    lines.extend(f'- {label.ljust(width)}  {url}' for label, url in links)
+    return '\n'.join(lines) + '\n'
+
+
+def prepend_links(report_path: Path, links_block: str) -> None:
+    """Insert ``links_block`` at the top of the plain-text report."""
+    current = report_path.read_text(encoding='utf-8')
+    report_path.write_text(links_block + '\n' + current, encoding='utf-8')
+
+
+def prepend_links_html(html_path: Path, links_block: str) -> None:
+    """Insert the same links into the HTML report as a small link list.
+
+    Parses the ``- label  url`` lines back out of *links_block* so the text
+    and HTML reports can't drift apart.
+    """
+    items = []
+    for line in links_block.splitlines():
+        line = line.strip()
+        if not line.startswith('- '):
+            continue
+        label, _, url = line[2:].rpartition('  ')
+        label, url = label.strip(), url.strip()
+        if not url:
+            continue
+        items.append(
+            f'<li><a href="{html.escape(url, quote=True)}">'
+            f'{html.escape(label or url)}</a></li>'
+        )
+    if not items:
+        return
+
+    block = (
+        '<div style="margin:0 0 14px;font-family:Consolas,Monaco,monospace;'
+        'font-size:13px">'
+        '<strong>Links</strong>'
+        f'<ul style="margin:6px 0 0 18px;padding:0">{"".join(items)}</ul>'
+        '</div>'
+    )
+
+    current = html_path.read_text(encoding='utf-8')
+    marker = '<body>'
+    idx = current.find(marker)
+    if idx == -1:
+        html_path.write_text(block + current, encoding='utf-8')
+        return
+    insert_at = idx + len(marker)
+    html_path.write_text(
+        current[:insert_at] + block + current[insert_at:], encoding='utf-8'
+    )
+
+
 def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
                ) -> list[Path]:
     """Copy ``files`` to the backup server via scp.
