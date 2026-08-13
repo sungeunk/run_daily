@@ -16,23 +16,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
 try:
-    from daily.common.gpu_platform import get_device_platform_key
+    from daily.common.llm_benchmark_skip import get_skip_reason as get_llm_benchmark_skip_reason
 except Exception:
     # Fallback for environments where daily package is unavailable.
-    def get_device_platform_key(device: str, host_name: str | None = None) -> str | None:
+    def get_llm_benchmark_skip_reason(model: str, device: str) -> str | None:
         return None
 
 
 class TestBenchmark(TestTemplate):
-
-    SKIP_MODELS_BY_PLATFORM = {
-        'MTL': ['gemma-4-26b-a4b-it', 'gpt-oss-20b', 'qwen3.6-35b-a3b'],
-        'PTL': [''],
-        'B580': ['gemma-4-26b-a4b-it', 'qwen3.6-35b-a3b'],
-        'B70': [],
-        'DG2': ['qwen3.6-35b-a3b'],
-        'ARL': ['qwen3.6-35b-a3b'],
-    }
 
     CONFIG_MAP = {
         ('gemma-2-9b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # text_gen
@@ -56,12 +47,6 @@ class TestBenchmark(TestTemplate):
         ('qwen3.6-35b-a3b',                ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen", "LOAD_CONFIG":"res/config.enable_PA.json"}],
     }
 
-    def _get_skip_reason(model_name: str, device: str) -> str | None:
-        platform_key = get_device_platform_key(device)
-        if platform_key and model_name in __class__.SKIP_MODELS_BY_PLATFORM.get(platform_key, []):
-            return f'{model_name} is skipped on {platform_key} (timeout risk)'
-        return None
-
     def __get_configs():
         ret_configs = {}
         for key_tuple, config_list in __class__.CONFIG_MAP.items():
@@ -84,7 +69,7 @@ class TestBenchmark(TestTemplate):
 
         for key_tuple, config_list in __class__.__get_configs().items():
             for config in config_list:
-                skip_reason = __class__._get_skip_reason(key_tuple[0], device)
+                skip_reason = get_llm_benchmark_skip_reason(key_tuple[0], device)
                 if skip_reason:
                     log.info(f'Skip benchmark case ({key_tuple[0]}): {skip_reason}')
                     continue
