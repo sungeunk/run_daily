@@ -117,7 +117,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     if case.ptl_only and not _is_ptl_machine():
         pytest.skip(f'{case.model} runs only on PTL machines')
 
-    skip_reason = _get_skip_reason(case.model, daily_config.device)
+    skip_reason = get_skip_reason(case.model, daily_config.device)
     if skip_reason:
         pytest.skip(skip_reason)
 
