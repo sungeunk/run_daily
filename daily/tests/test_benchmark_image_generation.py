@@ -24,6 +24,7 @@ class ImageGenCase:
     model: str
     precision: str
     prompt_type: str = PROMPT_TYPE_32_1K
+    prompt_index: int | None = None
 
     @property
     def test_id(self) -> str:
@@ -31,7 +32,8 @@ class ImageGenCase:
 
 
 CASES: list[ImageGenCase] = [
-    ImageGenCase('flux.1-schnell',        OV_FP16_INT4_SYM_CW),
+    # flux is insensitive to input token size, so only the first prompt is run.
+    ImageGenCase('flux.1-schnell',        OV_FP16_INT4_SYM_CW, prompt_index=0),
     ImageGenCase('stable-diffusion-v1-5', FP16, PROMPT_TYPE_MULTIMODAL),
     ImageGenCase('stable-diffusion-3.5-large-turbo', OV_FP16_4BIT_DEFAULT, PROMPT_TYPE_MULTIMODAL),
 ]
@@ -44,6 +46,7 @@ def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:
     prompt_path = convert_path(
         f'{cfg.prompts_dir}/{case.prompt_type}/{case.model}.jsonl'
     )
+    prompt_index = f' -pi {case.prompt_index}' if case.prompt_index is not None else ''
     return (
         f'python {cfg.llm_bench_script}'
         f' -m {model_path}'
@@ -51,6 +54,7 @@ def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:
         f' -mc 1 -n 1 --genai'
         f' --output_dir {cfg.output_dir}'
         f' -pf {prompt_path}'
+        f'{prompt_index}'
     )
 
 
