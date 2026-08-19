@@ -34,6 +34,7 @@ class SdGenaiItem(TypedDict, total=False):
     input_token_size: int
     output_token_size: int
     infer_count: int
+    image_path: str
 
 
 _FIELDS: list[tuple[str, re.Pattern, type]] = [
@@ -46,6 +47,8 @@ _FIELDS: list[tuple[str, re.Pattern, type]] = [
     ('output_token_size',  re.compile(r'Output size: (\d+)'), int),
     ('infer_count',        re.compile(r'Infer count: (\d+)'), int),
     ('generation_time_sec', re.compile(r'Generation Time: (\d+\.\d+)s'), float),
+    # non-warm-up-only: skipped for [warm-up] lines by the loop below
+    ('image_path',          re.compile(r'Generated:\s*(\S.+\.png)\s*$'), str),
 ]
 
 _RE_START = re.compile(r'\[(\d+)\]\[P(\d+)\] start: ')

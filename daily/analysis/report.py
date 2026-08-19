@@ -7,6 +7,7 @@ persistence layer stay format-agnostic.
 
 from __future__ import annotations
 
+import base64
 import html
 from pathlib import Path
 
@@ -114,9 +115,60 @@ def prepend_to_report(report_path: Path, result: AnalysisResult) -> None:
     report_path.write_text(block + "\n\n" + current, encoding="utf-8")
 
 
-def render_analysis_html(result: AnalysisResult) -> str:
-    """Return a standalone HTML report for analysis-focused review."""
+def _render_image_gallery(summary: dict | None) -> str:
+    """Base64-embed each image_generation test's saved PNG so it survives
+    the mail/upload pipeline without a separate file transfer."""
+    if not summary:
+        return ""
+
+    cards: list[str] = []
+    for test in summary.get("tests", []):
+        m = test.get("metrics", {})
+        if m.get("test_type") != "image_generation" or test.get("outcome") != "passed":
+            continue
+        for d in m.get("data", []):
+            image_path = d.get("image_path")
+            if not image_path:
+                continue
+            path = Path(image_path)
+            if not path.is_file():
+                continue
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            label = f"{m.get('model', '')} / {m.get('precision', '')}"
+            if d.get("input_token_size") is not None:
+                label += f" (in={d['input_token_size']})"
+            cards.append(
+                "<div style='display:inline-block;text-align:center;margin:0 14px 14px 0'>"
+                f"<img src='data:image/png;base64,{encoded}' "
+                "style='max-width:220px;border:1px solid #d9dee7;border-radius:8px' />"
+                f"<div style='font-size:12px;color:#6b7280;margin-top:4px'>{html.escape(label)}</div>"
+                "</div>"
+            )
+
+    if not cards:
+        return ""
+
+    return f"""
+    <div class="card" style="margin-bottom:14px">
+        <h2>Generated Images</h2>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
+            Inline preview of images produced by image_generation tests in this run.
+        </div>
+        <div>{"".join(cards)}</div>
+    </div>
+    """
+
+
+def render_analysis_html(result: AnalysisResult, summary: dict | None = None) -> str:
+    """Return a standalone HTML report for analysis-focused review.
+
+    ``summary`` is the normalised daily summary dict (same shape as
+    ``daily.*.summary.json``); when given, generated images from
+    image_generation tests are embedded as a gallery card.
+    """
     from datetime import datetime as _dt  # noqa: PLC0415
+
+    image_gallery = _render_image_gallery(summary)
 
     improved_rows = sorted(
         [r for r in result.rows if r.verdict == "improved" and r.improvement_pct is not None],
@@ -448,7 +500,7 @@ def render_analysis_html(result: AnalysisResult) -> str:
     </div>
 
     <!-- All rows -->
-    <div class="card">
+    <div class="card" style="margin-bottom:14px">
         <h2>All Performance Results ({len(all_rows)} series)</h2>
         <div style="margin-top:10px;overflow-x:auto">
             <table>
@@ -458,14 +510,17 @@ def render_analysis_html(result: AnalysisResult) -> str:
         </div>
     </div>
 
+    {image_gallery}
+
 </div>
 </body>
 </html>
 """
 
 
-def write_analysis_html(report_path: Path, result: AnalysisResult) -> Path:
+def write_analysis_html(report_path: Path, result: AnalysisResult,
+                        summary: dict | None = None) -> Path:
         """Write an analysis-focused HTML report next to the text report."""
         html_path = report_path.with_suffix(".html")
-        html_path.write_text(render_analysis_html(result), encoding="utf-8")
+        html_path.write_text(render_analysis_html(result, summary), encoding="utf-8")
         return html_path

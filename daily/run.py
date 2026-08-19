@@ -372,7 +372,8 @@ def _run_analysis(text_report: Path, summary_json: Path) -> Path | None:
         write_analysis_to_summary(summary_json, result)
 
         prepend_to_report(text_report, result)
-        html_report = write_analysis_html(text_report, result)
+        summary_data = json.loads(summary_json.read_text(encoding='utf-8'))
+        html_report = write_analysis_html(text_report, result, summary_data)
         print(f'[run.py] analysis summary prepended to {text_report}')
         print(f'[run.py] analysis html report: {html_report}')
         return html_report
