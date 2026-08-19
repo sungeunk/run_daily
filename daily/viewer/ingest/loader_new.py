@@ -97,7 +97,7 @@ def _sd_dgfx_rows(m: dict) -> Iterable[PerfRow]:
 _TYPE_HANDLERS = {
     "llm_benchmark": _llm_rows,
     "benchmark_app": _benchmark_app_rows,
-    "sd_genai":      _sd_genai_rows,
+    "image_generation": _sd_genai_rows,
     "sd_dgfx":       _sd_dgfx_rows,
     # chat_sample has no perf data.
 }

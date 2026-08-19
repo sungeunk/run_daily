@@ -205,7 +205,7 @@ def _render_benchmark_app(tests: list[dict]) -> str:
 
 
 def _render_sd_genai(tests: list[dict]) -> str:
-    subset = _filter(tests, 'sd_genai')
+    subset = _filter(tests, 'image_generation')
     if not subset:
         return ''
 

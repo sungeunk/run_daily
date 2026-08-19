@@ -116,7 +116,7 @@ def _sd_genai_rows(m: dict) -> Iterable[dict]:
 _TYPE_HANDLERS = {
     'llm_benchmark':  _llm_benchmark_rows,
     'benchmark_app':  _benchmark_app_rows,
-    'sd_genai':       _sd_genai_rows,
+    'image_generation': _sd_genai_rows,
     # chat_sample intentionally omitted — no perf data.
 }
 
