@@ -74,6 +74,6 @@ then `python -m viewer.ingest.cli --profile profiles/iGPU.yaml --skip-profile`
 both available in the sidebar.
 
 `in_spec` / `out_spec` accept:
-* `'short'` / `'long'` / `'0'` — match against `in_bucket` / `out_bucket`
+* `'<int>'` — `in_spec`: exact match against `perf.prompt_idx` (the source
+  prompt's index, `0`/`1`/`2`/...); `out_spec`: exact match against `out_token`
 * `'*'` — any (used for SD pipelines where tokens aren't meaningful)
-* `'<int>'` — exact numeric match (e.g. `'802'` for vision prompts)

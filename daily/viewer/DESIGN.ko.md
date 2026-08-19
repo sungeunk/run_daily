@@ -157,7 +157,12 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 ### FIXED_ROW_ORDER replacement
 - **Choice:** YAML profile + DB `display_rows` table.
 - **Rejected:** Python list in code (row별 git diff가 어렵고 version control이 약함); DB-only (git history 없음).
-- **Why:** 사용자가 model을 자주 추가/삭제합니다. YAML은 git에서 review하기 좋고, DB copy는 queries에서 빠른 JOIN을 위해 사용합니다. Match spec (`short` / `long` / `*` / `<int>`)은 code change 없이도 충분히 표현력이 있습니다.
+- **Why:** 사용자가 model을 자주 추가/삭제합니다. YAML은 git에서 review하기 좋고, DB copy는 queries에서 빠른 JOIN을 위해 사용합니다. Match spec (`<prompt_idx>` / `*` / `<int>`)은 code change 없이도 충분히 표현력이 있습니다.
+
+### Excel-paste join key: prompt_idx over token buckets
+- **Problem observed:** `in_spec`이 `'short'`/`'long'` token-count bucket(threshold 100)으로 매칭되던 방식은, 일부 model이 2개보다 많은 prompt를 사용(예: `phi-4-multimodal-instruct`는 4개)하면서 서로 다른 prompt가 같은 `'long'` bucket으로 뭉개져 하나의 `display_rows` row만 매칭될 수 있는 문제가 있었습니다.
+- **Fix:** 원본 `.jsonl`의 prompt index를 `perf.prompt_idx`로 저장하고, `display_rows.in_spec`에 그 index 값을 직접 넣습니다(`'0'`, `'1'`, `'2'`, ...). `build_excel_matrix` / `extra_rows`는 bucket 대신 `prompt_idx`로 매칭합니다.
+- **Migration:** 기존 DB는 `ALTER TABLE ... ADD COLUMN ... DEFAULT 0`으로 `prompt_idx`를 얻습니다. 이 변경 전에 ingest된 기존 row는 `--force`로 재적재하기 전까지 `prompt_idx=0`으로 조회됩니다.
 
 ### Raw tokens in DB vs bucketed
 - **Choice:** raw only.
@@ -249,9 +254,9 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 
 ```text
 spec = '*'                         -> always matches
-spec = 'short'/'long'/'0'          -> matches the corresponding <side>_bucket column
-TRY_CAST(spec AS INTEGER) = token  -> exact numeric match
-else                               -> no match
+TRY_CAST(spec AS INTEGER) = prompt_idx (in_spec) / out_token (out_spec)
+                                    -> exact match
+else                                -> no match
 ```
 
 세 조건은 OR로 묶입니다. `TRY_CAST`는 non-integer string에 대해 `NULL`을 반환하므로 비교가 깔끔하게 실패합니다.

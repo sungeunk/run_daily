@@ -155,7 +155,12 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 ### FIXED_ROW_ORDER replacement
 - **Choice:** YAML profile + DB `display_rows` table.
 - **Rejected:** Python list in code (no version control per-row, harder to diff); DB-only (no git history).
-- **Why:** user adds/removes models frequently. YAML is reviewable in git; DB copy is for fast JOINs in queries. Match spec (`short` / `long` / `*` / `<int>`) is expressive enough without code changes.
+- **Why:** user adds/removes models frequently. YAML is reviewable in git; DB copy is for fast JOINs in queries. Match spec (`<prompt_idx>` / `*` / `<int>`) is expressive enough without code changes.
+
+### Excel-paste join key: prompt_idx over token buckets
+- **Problem observed:** `in_spec` used to match `'short'`/`'long'` token-count buckets (threshold 100). Some models run more than two prompts (e.g. `phi-4-multimodal-instruct` has 4), so multiple distinct prompts collapsed into the same `'long'` bucket and only one could ever be matched by a `display_rows` row.
+- **Fix:** `perf.prompt_idx` (the source `.jsonl` prompt index) is now stored per row and `in_spec` in `display_rows` holds that index directly (`'0'`, `'1'`, `'2'`, ...). `build_excel_matrix` / `extra_rows` match on `prompt_idx` instead of the derived bucket.
+- **Migration:** existing DBs get `prompt_idx` via `ALTER TABLE ... ADD COLUMN ... DEFAULT 0`; historical rows ingested before this change read back as `prompt_idx=0` until re-ingested with `--force`.
 
 ### Raw tokens in DB vs bucketed
 - **Choice:** raw only.
@@ -247,9 +252,9 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 
 ```
 spec = '*'                         -> always matches
-spec = 'short'/'long'/'0'          -> matches the corresponding <side>_bucket column
-TRY_CAST(spec AS INTEGER) = token  -> exact numeric match
-else                               -> no match
+TRY_CAST(spec AS INTEGER) = prompt_idx (in_spec) / out_token (out_spec)
+                                    -> exact match
+else                                -> no match
 ```
 
 All three are OR'd. `TRY_CAST` returns `NULL` for non-integer strings, which cleanly fails the comparison.

@@ -144,14 +144,32 @@ def list_profiles(db_path: Path) -> list[str]:
             "SELECT DISTINCT profile FROM display_rows ORDER BY profile").fetchall()]
 
 
+def success_counts(db_path: Path, run_ids: list[str]) -> dict[str, int]:
+    """Count of perf value rows ingested per run — mirrors the legacy
+    viewer's 'Success count' (number of benchmark data points that produced
+    a parsable value), independent of pytest pass/fail status."""
+    if not run_ids:
+        return {}
+    placeholders = ",".join(["?"] * len(run_ids))
+    with _read_only(db_path) as con:
+        rows = con.execute(
+            f"SELECT run_id, count(*) FROM perf WHERE run_id IN ({placeholders}) "
+            "GROUP BY run_id",
+            run_ids,
+        ).fetchall()
+    return {run_id: count for run_id, count in rows}
+
+
 def build_excel_matrix(db_path: Path, run_ids: list[str],
                        profile: str = "default") -> pd.DataFrame:
     """Return a wide dataframe: rows = display_rows order, columns = run stamps.
 
-    Matching rules (in_spec / out_spec):
-      'short' / 'long' / '0'  → match perf_with_buckets.(in|out)_bucket
-      '*'                     → any
-      otherwise               → exact numeric equality
+    Matching rules:
+      in_spec: '*' → any prompt; otherwise exact match against perf.prompt_idx
+               (prompt index is a stable join key — token counts for the
+               same prompt slot can shift slightly between models/runs,
+               which made bucket-based ('short'/'long') matching brittle).
+      out_spec: '*' → any; otherwise exact numeric equality against out_token
     """
     if not run_ids:
         return pd.DataFrame()
@@ -182,7 +200,9 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
             d.label,
             rs.run_id,
             rs.stamp,
-            p.value
+            p.value,
+            p.in_token,
+            p.unit
         FROM display_rows d
         CROSS JOIN rs
         LEFT JOIN perf_with_buckets p
@@ -192,19 +212,18 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
          AND p.exec_mode = d.exec_mode
          AND (
                d.in_spec = '*'
-            OR d.in_spec = p.in_bucket
-            OR TRY_CAST(d.in_spec AS INTEGER) = p.in_token
+            OR TRY_CAST(d.in_spec AS INTEGER) = p.prompt_idx
          )
          AND (
                d.out_spec = '*'
-            OR d.out_spec = p.out_bucket
             OR TRY_CAST(d.out_spec AS INTEGER) = p.out_token
          )
         WHERE d.profile = ?
     )
         SELECT seq, d_model AS model, d_precision AS precision,
            in_spec, out_spec, d_exec AS exec_mode, label,
-            run_id, stamp, median(value) AS value
+            run_id, stamp, median(value) AS value,
+            max(in_token) AS matched_in_token, max(unit) AS unit
     FROM joined
         GROUP BY seq, d_model, d_precision, in_spec, out_spec, d_exec, label,
               run_id, stamp
@@ -216,11 +235,26 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
     if df.empty:
         return df
 
+    # display_rows.in_spec holds a prompt index (e.g. '0', '1', '2', ...),
+    # not a token count — show the actual matched input token count in the
+    # preview instead of the raw index number.
+    actual_in = df.groupby("seq")["matched_in_token"].max()
+
+    def _resolve_in_spec(spec: str, actual) -> str:
+        if spec != "*" and pd.notna(actual):
+            return str(int(actual))
+        return spec
+
+    df["in_spec"] = [
+        _resolve_in_spec(spec, actual_in.get(seq))
+        for seq, spec in zip(df["seq"], df["in_spec"])
+    ]
+
     # Build one row per (seq, spec) with a column per run stamp. pivot_table
     # drops NaN index values and also explodes on large cross-products when
     # dropna=False, so we do it manually.
     spec_cols = ["seq", "model", "precision", "in_spec", "out_spec",
-                 "exec_mode", "label"]
+                 "exec_mode", "unit", "label"]
     specs = (df[spec_cols]
              .drop_duplicates(subset="seq")
              .sort_values("seq")
@@ -245,11 +279,7 @@ def extra_rows(db_path: Path, run_ids: list[str],
     placeholders = ",".join(["?"] * len(run_ids))
     sql = f"""
     WITH m AS (
-        SELECT DISTINCT model, precision, in_token, out_token, exec_mode,
-               CASE WHEN in_token = 0 THEN '0'
-                    WHEN in_token < 100 THEN 'short' ELSE 'long' END AS in_bucket,
-               CASE WHEN out_token = 0 THEN '0'
-                    WHEN out_token < 100 THEN 'short' ELSE 'long' END AS out_bucket
+        SELECT DISTINCT model, precision, in_token, out_token, exec_mode, prompt_idx
         FROM perf
         WHERE run_id IN ({placeholders})
     )
@@ -262,12 +292,10 @@ def extra_rows(db_path: Path, run_ids: list[str],
      AND d.exec_mode = m.exec_mode
      AND (
            d.in_spec = '*'
-        OR d.in_spec = m.in_bucket
-        OR TRY_CAST(d.in_spec AS INTEGER) = m.in_token
+        OR TRY_CAST(d.in_spec AS INTEGER) = m.prompt_idx
      )
      AND (
            d.out_spec = '*'
-        OR d.out_spec = m.out_bucket
         OR TRY_CAST(d.out_spec AS INTEGER) = m.out_token
      )
     WHERE d.profile IS NULL

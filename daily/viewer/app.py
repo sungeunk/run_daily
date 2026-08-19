@@ -99,6 +99,11 @@ def cached_extra_rows(run_ids: tuple[str, ...], profile: str, _v: float) -> pd.D
 
 
 @st.cache_data(show_spinner=False)
+def cached_success_counts(run_ids: tuple[str, ...], _v: float) -> dict[str, int]:
+    return q.success_counts(DB, list(run_ids))
+
+
+@st.cache_data(show_spinner=False)
 def cached_profiles(_v: float) -> list[str]:
     return q.list_profiles(DB)
 
@@ -131,7 +136,7 @@ def cached_geomean(machine: str, exec_mode: str, in_bucket: str | None,
 # ---------------------------------------------------------------------------
 
 PERF_COL_NON_VALUE = {"model", "precision", "in_spec", "out_spec",
-                      "exec_mode", "label"}
+                      "exec_mode", "unit", "label"}
 
 
 def _stable_y_range(values: pd.Series, min_relative_span: float = 0.10) -> list[float] | None:
@@ -572,6 +577,16 @@ def _tab_excel(cfg: dict) -> None:
         st.warning("Display profile produced no rows.")
         return
 
+    # Synthetic summary row (parity with the legacy report viewer): count of
+    # perf value rows ingested per run, independent of pytest pass/fail.
+    stamp_by_run = {rid: str(runs.set_index("run_id").loc[rid, "stamp"]) for rid in run_ids}
+    counts = cached_success_counts(run_ids, cfg["v"])
+    success_row = {col: "" for col in matrix.columns}
+    success_row.update(model="Success count", unit="count")
+    for rid in run_ids:
+        success_row[stamp_by_run[rid]] = counts.get(rid, 0)
+    matrix = pd.concat([pd.DataFrame([success_row]), matrix], ignore_index=True)
+
     st.markdown("**Paste block**  (tab-separated; headers: OV version / workweek / stamp)")
     meta = runs.set_index("run_id").loc[list(run_ids)]
     stamps = [c for c in matrix.columns if c not in PERF_COL_NON_VALUE]
@@ -581,9 +596,22 @@ def _tab_excel(cfg: dict) -> None:
         "",
         "\t".join(stamps),
     ]
-    data_text = matrix[stamps].to_csv(sep="\t", index=False, header=False,
-                                      float_format="%.2f")
-    paste = "\n".join(header_rows) + "\n" + data_text
+    # FPS/count rows paste as whole numbers; ms/s latency rows keep 2
+    # decimals — mirrors the legacy report viewer's per-row formatting
+    # instead of a single float_format for the whole sheet.
+    def _format_cell(value: object, unit: object) -> str:
+        if pd.isna(value) or value == "":
+            return ""
+        unit_upper = str(unit).upper()
+        return f"{float(value):.0f}" if unit_upper in ("FPS", "COUNT") else f"{float(value):.2f}"
+
+    units = matrix["unit"] if "unit" in matrix.columns else pd.Series("", index=matrix.index)
+    formatted = pd.DataFrame({
+        col: [_format_cell(v, u) for v, u in zip(matrix[col], units)]
+        for col in stamps
+    })
+    data_text = formatted.to_csv(sep="\t", index=False, header=False)
+    paste = "\n\n" + "\n".join(header_rows) + "\n" + data_text
     st.text_area("Copy & paste into Excel", value=paste, height=260)
 
     st.markdown("**Matrix preview**")

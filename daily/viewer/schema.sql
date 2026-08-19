@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS perf (
     exec_mode  TEXT NOT NULL,
     value      DOUBLE,
     unit       TEXT,
+    prompt_idx INTEGER NOT NULL DEFAULT 0,  -- source prompt index (0,1,2,...); more stable join key than token buckets
     PRIMARY KEY (run_id, model, precision, in_token, out_token, exec_mode)
 );
 
@@ -74,12 +75,13 @@ CREATE TABLE IF NOT EXISTS display_rows (
     seq        INTEGER NOT NULL,        -- 0-based row order
     model      TEXT NOT NULL,
     precision  TEXT NOT NULL,
-    in_spec    TEXT NOT NULL,           -- 'short' | 'long' | '0' | '*' | '<int>'
+    in_spec    TEXT NOT NULL,           -- '<prompt_idx>' | '*'
     out_spec   TEXT NOT NULL,
     exec_mode  TEXT NOT NULL,
     label      TEXT,                    -- optional human label
     PRIMARY KEY (profile, seq)
 );
+
 
 CREATE TABLE IF NOT EXISTS analysis_results (
     run_id                TEXT PRIMARY KEY,

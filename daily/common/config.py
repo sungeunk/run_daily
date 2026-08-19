@@ -63,7 +63,7 @@ class DailyConfig:
         config_path = os.environ.get('LLM_BENCH_CONFIG')
         if config_path:
             return Path(convert_path(config_path))
-        return self.repo_root / 'res' / 'config_wa.json'
+        return self.repo_root / 'res' / 'config.enable_PA.json'
 
     @property
     def dgfx_tests_dir(self) -> Path:

@@ -40,6 +40,7 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_info TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_size_gb DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_speed_mhz DOUBLE",
+        "ALTER TABLE perf ADD COLUMN IF NOT EXISTS prompt_idx INTEGER DEFAULT 0",
     ]
     for sql in migrations:
         try:
@@ -148,13 +149,13 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
             dedup: dict[tuple, tuple] = {}
             for p in rec.perf:
                 key = (p.model, p.precision, p.in_token, p.out_token, p.exec_mode)
-                dedup[key] = (rec.run_id, *key, p.value, p.unit)
+                dedup[key] = (rec.run_id, *key, p.value, p.unit, p.prompt_idx)
             con.executemany(
                 """
                 INSERT INTO perf (
                     run_id, model, precision, in_token, out_token,
-                    exec_mode, value, unit
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    exec_mode, value, unit, prompt_idx
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 list(dedup.values()),
             )

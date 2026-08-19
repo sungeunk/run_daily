@@ -47,12 +47,13 @@ def _llm_rows(m: dict) -> Iterable[PerfRow]:
         perf = d.get("perf") or []
         in_tok = int(d.get("in_token") or 0)
         out_tok = int(d.get("out_token") or 0)
+        prompt_idx = int(d.get("prompt_idx") or 0)
         if len(perf) > 0 and perf[0] is not None:
             yield PerfRow(model, precision, in_tok, out_tok, "1st",
-                          float(perf[0]), "ms")
+                          float(perf[0]), "ms", prompt_idx=prompt_idx)
         if len(perf) > 1 and perf[1] is not None:
             yield PerfRow(model, precision, in_tok, out_tok, "2nd",
-                          float(perf[1]), "ms")
+                          float(perf[1]), "ms", prompt_idx=prompt_idx)
 
 
 def _benchmark_app_rows(m: dict) -> Iterable[PerfRow]:

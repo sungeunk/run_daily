@@ -30,6 +30,7 @@ class PerfRow:
     exec_mode: str
     value: float
     unit: str | None = None
+    prompt_idx: int = 0
 
 
 @dataclass
