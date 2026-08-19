@@ -60,8 +60,13 @@ def run_cmd(
     *,
     timeout_sec: int,
     log_sink: Optional[Callable[[str], None]] = None,
+    on_start: Optional[Callable[[int], None]] = None,
 ) -> CmdResult:
-    """Run `cmd`, tee output to `log_sink` line-by-line, return CmdResult."""
+    """Run `cmd`, tee output to `log_sink` line-by-line, return CmdResult.
+
+    ``on_start`` is called with the child PID right after spawn; it is used to
+    attach out-of-process monitoring and must never break the run.
+    """
     start = time.time()
     lines: list[str] = []
 
@@ -86,6 +91,12 @@ def run_cmd(
         _emit(f'[cmd_runner] spawn failed: {e}\n')
         return CmdResult(cmd=cmd_str, returncode=-1, output=''.join(lines),
                          duration_sec=time.time() - start)
+
+    if on_start is not None:
+        try:
+            on_start(proc.pid)
+        except Exception as e:  # noqa: BLE001 — monitoring must not fail the run
+            _emit(f'[cmd_runner] on_start failed: {e}\n')
 
     reader_done = threading.Event()
 

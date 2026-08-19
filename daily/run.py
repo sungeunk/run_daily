@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
@@ -380,6 +381,39 @@ def _run_analysis(text_report: Path, summary_json: Path) -> Path | None:
         return None
 
 
+def _archive_monitor_files(output_dir: Path, stamp: str) -> Path | None:
+    """Bundle this run's machine-monitor samples into one gzip archive.
+
+    The samples are one file per model and only useful together, so they are
+    archived instead of published individually. Originals remain available
+    locally because ``metrics.machine.file`` points to them.
+    """
+    files = sorted(output_dir.glob(f'daily.{stamp}.monitor.*.jsonl'))
+    if not files:
+        return None
+
+    archive = output_dir / f'daily.{stamp}.monitor.tar.gz'
+    try:
+        with tarfile.open(archive, 'w:gz') as tar:
+            for f in files:
+                tar.add(f, arcname=f.name)
+        with tarfile.open(archive, 'r:gz') as tar:
+            archived = {m.name for m in tar.getmembers()}
+    except (OSError, tarfile.TarError) as exc:
+        print(f'[run.py] monitor archive failed: {exc}', file=sys.stderr)
+        return None
+
+    missing = {f.name for f in files} - archived
+    if missing:
+        print(f'[run.py] monitor archive incomplete, keeping originals: {sorted(missing)}',
+              file=sys.stderr)
+        return archive
+
+    size_mb = archive.stat().st_size / (1024 ** 2)
+    print(f'[run.py] monitor archive: {archive} ({len(files)} files, {size_mb:.1f} MB)')
+    return archive
+
+
 def main() -> int:
     args, passthrough = _parse_args()
 
@@ -403,6 +437,7 @@ def main() -> int:
         f'--cache-dir={args.cache_dir}',
         f'--output-dir={output_dir}',
         f'--daily-timeout={args.daily_timeout}',
+        f'--run-stamp={stamp}',
         '--json-report',
         f'--json-report-file={pytest_json}',
         '--json-report-omit=collectors',
@@ -459,6 +494,7 @@ def main() -> int:
     # Find the session raw log — the RawLogSink names it with the OV version
     # stamp, so glob to avoid duplicating that logic.
     raw_logs = sorted(output_dir.glob(f'daily.{stamp}.*.raw'))
+    monitor_archive = _archive_monitor_files(output_dir, stamp)
 
     if args.pip_freeze or args.backup or args.mail:
         write_pip_freeze(pip_freeze_file)
@@ -469,6 +505,8 @@ def main() -> int:
     to_upload = [text_report, summary_json, pytest_json, pip_freeze_file]
     if html_report:
         to_upload.append(html_report)
+    if monitor_archive:
+        to_upload.append(monitor_archive)
     to_upload.extend(raw_logs)
 
     # Prepend the published-artefact links *before* scp/mail so both the

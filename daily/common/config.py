@@ -86,8 +86,11 @@ def build_config(
     timeout_sec: int = 1800,
     short_run: bool = False,
     tee_raw_log: bool = False,
+    now: str | None = None,
 ) -> DailyConfig:
-    now = dt.datetime.now().strftime('%Y%m%d_%H%M')
+    # run.py passes its own stamp so every artefact of one run shares it;
+    # generating it here would drift by a minute across the process boundary.
+    now = now or dt.datetime.now().strftime('%Y%m%d_%H%M')
     ov_version = _ov_get_version()
     stem = f'daily.{now}.{ov_version.replace("/", "_")}'
 

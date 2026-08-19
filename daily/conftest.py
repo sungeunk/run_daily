@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import threading
 from pathlib import Path
@@ -29,6 +30,7 @@ import pytest
 from common.cache import clear_caches
 from common.cmd_runner import CmdResult, run_cmd
 from common.config import DailyConfig, build_config, ensure_utf8_env
+from common.machine_monitor import MachineMonitor
 from common.profiling import HWResourceTracker, ResourceStats, sizeof_fmt
 
 
@@ -66,6 +68,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='Reduced token/iter counts for quick smoke runs')
     group.addoption('--tee-raw-log', action='store_true',
                     help='Also stream the session raw log to stdout')
+    group.addoption('--run-stamp', default=None,
+                    help='YYYYMMDD_HHMM stamp shared by all artefacts (set by run.py)')
+    group.addoption('--monitor-interval-sec', default=0.5, type=float,
+                    help='Machine-state sampling interval (0 disables monitoring)')
+    group.addoption('--monitor-gpu-full', action='store_true',
+                    help='Also sample GPU utilization/memory/power (can stall for 100s of ms)')
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +99,7 @@ def daily_config(request: pytest.FixtureRequest) -> DailyConfig:
         timeout_sec=opt('--daily-timeout'),
         short_run=opt('--short-run'),
         tee_raw_log=opt('--tee-raw-log'),
+        now=opt('--run-stamp'),
     )
     return cfg
 
@@ -153,6 +162,44 @@ def isolate_test(daily_config: DailyConfig, raw_log: RawLogSink,
 
 
 @pytest.fixture
+def machine_monitor(request: pytest.FixtureRequest, daily_config: DailyConfig,
+                    raw_log: RawLogSink) -> Callable[..., MachineMonitor | None]:
+    """Factory for a per-test MachineMonitor; returns ``None`` when disabled.
+
+    Usage::
+
+        monitor = machine_monitor(case.test_id)
+        result = run_subprocess(cmd, monitor=monitor)
+        stats = monitor.stop()
+    """
+    interval_sec = request.config.getoption('--monitor-interval-sec')
+    gpu_full = request.config.getoption('--monitor-gpu-full')
+    created: list[MachineMonitor] = []
+
+    def _make(label: str | None = None) -> MachineMonitor | None:
+        if interval_sec <= 0:
+            return None
+        safe = re.sub(r'[^A-Za-z0-9._-]+', '_', label or request.node.name)
+        out_path = (Path(daily_config.output_dir)
+                    / f'daily.{daily_config.now}.monitor.{safe}.jsonl')
+        monitor = MachineMonitor(
+            out_path,
+            interval_sec=interval_sec,
+            # Outlive the benchmark timeout so the monitor never stops early.
+            max_duration_sec=daily_config.timeout_sec + 300,
+            gpu_full=gpu_full,
+            log_sink=raw_log.write,
+        )
+        created.append(monitor)
+        return monitor
+
+    yield _make
+
+    for monitor in created:
+        monitor.stop()
+
+
+@pytest.fixture
 def run_subprocess(daily_config: DailyConfig, raw_log: RawLogSink
                    ) -> Callable[..., CmdResult]:
     """Run a shell command, teeing stdout into the session raw log.
@@ -160,10 +207,13 @@ def run_subprocess(daily_config: DailyConfig, raw_log: RawLogSink
     ``cmd`` can be a string (shlex-split on POSIX) or a list (passed through).
     ``cwd`` optionally changes the working directory for the duration of the
     call — used by tests whose scripts rely on relative paths.
+    ``monitor`` is a MachineMonitor attached to the spawned process and stopped
+    when the command returns.
     """
     import os
 
-    def _run(cmd, *, cwd: str | None = None) -> CmdResult:
+    def _run(cmd, *, cwd: str | None = None,
+             monitor: MachineMonitor | None = None) -> CmdResult:
         raw_log.write(f'[CMD] {cmd}\n')
         if cwd:
             raw_log.write(f'[CWD] {cwd}\n')
@@ -173,8 +223,11 @@ def run_subprocess(daily_config: DailyConfig, raw_log: RawLogSink
             os.chdir(cwd)
         try:
             result = run_cmd(cmd, timeout_sec=daily_config.timeout_sec,
-                             log_sink=raw_log.write)
+                             log_sink=raw_log.write,
+                             on_start=monitor.start if monitor else None)
         finally:
+            if monitor is not None:
+                monitor.stop()
             if old_cwd:
                 os.chdir(old_cwd)
 

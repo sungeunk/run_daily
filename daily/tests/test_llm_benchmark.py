@@ -113,7 +113,7 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) ->
 
 @pytest.mark.parametrize('case', CASES, ids=lambda c: c.test_id)
 def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
-                       run_subprocess, record_metrics):
+                       run_subprocess, record_metrics, machine_monitor):
     if case.ptl_only and not _is_ptl_machine():
         pytest.skip(f'{case.model} runs only on PTL machines')
 
@@ -127,6 +127,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     json_report_path = output_dir / f'llm_bench_{case.test_id}_{timestamp}.json'
     
     cmd = _build_cmd(daily_config, case, json_report_path)
+    monitor = machine_monitor(case.test_id)
 
     # Attach metadata even on failure so the report builder can still render
     # a row for this case. We overwrite with the full payload on success.
@@ -138,8 +139,22 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'data': [],
     })
 
-    result = run_subprocess(cmd)
-    
+    result = run_subprocess(cmd, monitor=monitor)
+
+    # Machine state is recorded before the asserts so a crash or a timeout can
+    # still be checked against clocks, throttling and memory pressure.
+    machine = monitor.stop() if monitor else None
+    record_metrics({
+        'test_type': 'llm_benchmark',
+        'model': case.model,
+        'precision': case.precision,
+        'cmd': cmd,
+        'returncode': result.returncode,
+        'duration_sec': result.duration_sec,
+        'machine': machine,
+        'data': [],
+    })
+
     # Verify benchmark completed successfully
     assert result.returncode == 0, (
         f'llm_bench exited with {result.returncode}; see raw log for details'
@@ -158,6 +173,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'cmd': cmd,
         'returncode': result.returncode,
         'duration_sec': result.duration_sec,
+        'machine': machine,
         'data': data,
     })
 

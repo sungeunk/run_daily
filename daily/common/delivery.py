@@ -207,6 +207,7 @@ def artefact_links(files: Iterable[Path], *, base_url: str | None = None
         'summary.json': (3, 'summary json'),
         'pytest.json': (4, 'pytest json'),
         'requirements.txt': (5, 'requirements'),
+        'monitor.tar.gz': (6, 'monitor data'),
     }
 
     def _classify(name: str) -> tuple[int, str]:
