@@ -104,6 +104,11 @@ def cached_success_counts(run_ids: tuple[str, ...], _v: float) -> dict[str, int]
 
 
 @st.cache_data(show_spinner=False)
+def cached_legacy_geomean_summary(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.legacy_geomean_summary(DB, list(run_ids))
+
+
+@st.cache_data(show_spinner=False)
 def cached_profiles(_v: float) -> list[str]:
     return q.list_profiles(DB)
 
@@ -577,15 +582,39 @@ def _tab_excel(cfg: dict) -> None:
         st.warning("Display profile produced no rows.")
         return
 
-    # Synthetic summary row (parity with the legacy report viewer): count of
-    # perf value rows ingested per run, independent of pytest pass/fail.
+    # Synthetic summary rows (parity with the legacy report viewer): success
+    # count plus overall/bucketed geomeans, inserted right after the
+    # Resnet50 rows, matching the legacy row order.
     stamp_by_run = {rid: str(runs.set_index("run_id").loc[rid, "stamp"]) for rid in run_ids}
     counts = cached_success_counts(run_ids, cfg["v"])
     success_row = {col: "" for col in matrix.columns}
     success_row.update(model="Success count", unit="count")
     for rid in run_ids:
         success_row[stamp_by_run[rid]] = counts.get(rid, 0)
-    matrix = pd.concat([pd.DataFrame([success_row]), matrix], ignore_index=True)
+
+    geomeans = cached_legacy_geomean_summary(run_ids, cfg["v"])
+    geomean_labels = [
+        ("geomean", "geomean"),
+        ("geomean_2nd_short", "geomean (LLM/2nd/Short)"),
+        ("geomean_1st_short", "geomean (LLM/1st/Short)"),
+        ("geomean_2nd_long", "geomean (LLM/2nd/Long)"),
+        ("geomean_1st_long", "geomean (LLM/1st/Long)"),
+    ]
+    geomean_rows = []
+    for col_name, label in geomean_labels:
+        row = {col: "" for col in matrix.columns}
+        row.update(model=label, unit="")
+        for rid in run_ids:
+            value = geomeans.loc[rid, col_name] if rid in geomeans.index else None
+            row[stamp_by_run[rid]] = value if pd.notna(value) else ""
+        geomean_rows.append(row)
+
+    insert_at = matrix["model"].ne("Resnet50").idxmax() if (matrix["model"] == "Resnet50").any() else 0
+    matrix = pd.concat([
+        matrix.iloc[:insert_at],
+        pd.DataFrame([success_row, *geomean_rows]),
+        matrix.iloc[insert_at:],
+    ], ignore_index=True)
 
     st.markdown("**Paste block**  (tab-separated; headers: OV version / workweek / stamp)")
     meta = runs.set_index("run_id").loc[list(run_ids)]

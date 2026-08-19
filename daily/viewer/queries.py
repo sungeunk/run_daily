@@ -160,6 +160,40 @@ def success_counts(db_path: Path, run_ids: list[str]) -> dict[str, int]:
     return {run_id: count for run_id, count in rows}
 
 
+def legacy_geomean_summary(db_path: Path, run_ids: list[str]) -> pd.DataFrame:
+    """Reproduce the legacy report viewer's summary geomean rows per run:
+    'geomean' (all perf values, SD seconds converted to ms to match the old
+    unit convention) plus 'geomean (LLM/<1st|2nd>/<Short|Long>)' — LLM-only
+    (exec_mode in ('1st','2nd')), bucketed by raw in_token (<400 short,
+    401-1200 long, matching the legacy classify_token_size thresholds)."""
+    if not run_ids:
+        return pd.DataFrame()
+    placeholders = ",".join(["?"] * len(run_ids))
+    sql = f"""
+    WITH base AS (
+        SELECT run_id, exec_mode, in_token,
+               CASE WHEN unit = 's' THEN value * 1000 ELSE value END AS value
+        FROM perf
+        WHERE run_id IN ({placeholders}) AND value > 0
+    )
+    SELECT
+        run_id,
+        exp(avg(ln(value))) AS geomean,
+        exp(avg(ln(value)) FILTER (
+            WHERE exec_mode = '2nd' AND in_token > 0 AND in_token < 400)) AS geomean_2nd_short,
+        exp(avg(ln(value)) FILTER (
+            WHERE exec_mode = '1st' AND in_token > 0 AND in_token < 400)) AS geomean_1st_short,
+        exp(avg(ln(value)) FILTER (
+            WHERE exec_mode = '2nd' AND in_token BETWEEN 401 AND 1200)) AS geomean_2nd_long,
+        exp(avg(ln(value)) FILTER (
+            WHERE exec_mode = '1st' AND in_token BETWEEN 401 AND 1200)) AS geomean_1st_long
+    FROM base
+    GROUP BY run_id
+    """
+    with _read_only(db_path) as con:
+        return con.execute(sql, run_ids).fetchdf().set_index("run_id")
+
+
 def build_excel_matrix(db_path: Path, run_ids: list[str],
                        profile: str = "default") -> pd.DataFrame:
     """Return a wide dataframe: rows = display_rows order, columns = run stamps.
