@@ -209,14 +209,15 @@ def _stable_y_range(values: pd.Series, min_relative_span: float = 0.10) -> list[
 # whatever happens to show up under /var/www/html/daily/ (old, one-off
 # folders often linger there).
 DAILY_MACHINES = (
-    "dg2alderlake",
-    "MTL-01",
+    "PTLH-01",
+    "PTLH-02",
     "ARLH-01",
-    "BMG-02",
     "LNL-03",
     "LNL-04",
-    "DUT4580PTLH",
-    "DUT6047BMGFRD",
+    "MTL-01",
+    "RAPTOR-ELLY",
+    "BMG-02",
+    "dg2alderlake",
 )
 
 DEFAULT_RUN_FILTER = "daily_CB timer"
