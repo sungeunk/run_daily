@@ -10,6 +10,7 @@ import pytest
 from common.config import DailyConfig
 from common.fs_utils import convert_path
 from parsers.stable_diffusion_genai import parse_output
+from viewer.perf_rows import flatten
 
 
 OV_FP16_4BIT_DEFAULT = 'OV_FP16-4BIT_DEFAULT'
@@ -37,6 +38,30 @@ CASES: list[ImageGenCase] = [
     ImageGenCase('stable-diffusion-v1-5', FP16, PROMPT_TYPE_MULTIMODAL),
     ImageGenCase('stable-diffusion-3.5-large-turbo', OV_FP16_4BIT_DEFAULT, PROMPT_TYPE_MULTIMODAL),
 ]
+
+
+@pytest.mark.parametrize('model', [
+    'flux.1-schnell',
+    'stable-diffusion-v1-5',
+    'stable-diffusion-3.5-large-turbo',
+])
+def test_image_generation_model_rows_use_ms_for_excel(model: str):
+    summary = {
+        'tests': [{
+            'outcome': 'passed',
+            'metrics': {
+                'test_type': 'image_generation',
+                'model': model,
+                'precision': 'OV_FP16-4BIT_DEFAULT',
+                'data': [{'generation_time_sec': 1.234, 'input_token_size': 32, 'output_token_size': 0}],
+            },
+        }],
+    }
+
+    rows = flatten(summary)
+    assert len(rows) == 1
+    assert rows[0]['unit'] == 'ms'
+    assert rows[0]['value'] == pytest.approx(1234.0)
 
 
 def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:

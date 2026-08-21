@@ -220,7 +220,7 @@ DAILY_MACHINES = (
     "dg2alderlake",
 )
 
-DEFAULT_RUN_FILTER = "daily_CB timer"
+DEFAULT_RUN_FILTER = "daily"
 
 
 def _sidebar() -> dict:
@@ -599,7 +599,8 @@ def _tab_excel(cfg: dict) -> None:
         return
 
     filt = st.text_input("Filter by purpose/description",
-                         value=DEFAULT_RUN_FILTER, key="excel_filter")
+                         value=DEFAULT_RUN_FILTER, key="excel_filter",
+                         help="Use a shared term such as 'daily' to include both the legacy daily2 runs and the newer daily pipeline runs.")
     view = runs
     if filt:
         mask = (view["purpose"].fillna("").str.contains(filt, case=False) |

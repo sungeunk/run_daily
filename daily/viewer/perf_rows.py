@@ -106,11 +106,12 @@ def _sd_genai_rows(m: dict) -> Iterable[dict]:
             # still match after migration.
             in_cat = int(d.get('input_token_size') or 0)
             out_cat = 0
-        # Multiply by 1000 for ms convention? The old viewer kept SD in
-        # seconds; we preserve that by emitting seconds with unit='s'.
+        # These image-generation pipelines are reported in seconds in the
+        # benchmark output, but the Excel viewer historically expects latency in
+        # milliseconds for comparison tables. Convert here so the UI shows ms.
         yield dict(model=model, precision=precision, in_cat=in_cat,
                    out_cat=out_cat, exec_mode='pipeline',
-                   value=float(gen_sec), unit='s')
+                   value=float(gen_sec) * 1000.0, unit='ms')
 
 
 _TYPE_HANDLERS = {
