@@ -75,6 +75,7 @@ def test_benchmark_app(case: BenchAppCase, daily_config: DailyConfig,
         'cmd': cmd_str,
         'returncode': result.returncode,
         'duration_sec': result.duration_sec,
+        'machine': result.machine,
         'data': data,
     })
 

@@ -80,6 +80,7 @@ def test_benchmark_image_generation(case: ImageGenCase, daily_config: DailyConfi
         'cmd': cmd,
         'returncode': result.returncode,
         'duration_sec': result.duration_sec,
+        'machine': result.machine,
         'data': data,
     })
 

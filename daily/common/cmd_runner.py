@@ -34,6 +34,7 @@ class CmdResult:
     returncode: int
     output: str
     duration_sec: float
+    machine: dict | None = None
 
 
 def _prepare_cmd(cmd: CmdSpec):

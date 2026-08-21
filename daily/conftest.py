@@ -200,20 +200,23 @@ def machine_monitor(request: pytest.FixtureRequest, daily_config: DailyConfig,
 
 
 @pytest.fixture
-def run_subprocess(daily_config: DailyConfig, raw_log: RawLogSink
-                   ) -> Callable[..., CmdResult]:
+def run_subprocess(daily_config: DailyConfig, raw_log: RawLogSink,
+                   request: pytest.FixtureRequest,
+                   machine_monitor) -> Callable[..., CmdResult]:
     """Run a shell command, teeing stdout into the session raw log.
 
     ``cmd`` can be a string (shlex-split on POSIX) or a list (passed through).
     ``cwd`` optionally changes the working directory for the duration of the
     call — used by tests whose scripts rely on relative paths.
-    ``monitor`` is a MachineMonitor attached to the spawned process and stopped
-    when the command returns.
+    ``monitor`` is an optional MachineMonitor attached to the spawned process.
+    When omitted, a per-test monitor is created automatically.
     """
     import os
 
     def _run(cmd, *, cwd: str | None = None,
              monitor: MachineMonitor | None = None) -> CmdResult:
+        active_monitor = monitor or machine_monitor(request.node.name)
+        machine = None
         raw_log.write(f'[CMD] {cmd}\n')
         if cwd:
             raw_log.write(f'[CWD] {cwd}\n')
@@ -224,13 +227,14 @@ def run_subprocess(daily_config: DailyConfig, raw_log: RawLogSink
         try:
             result = run_cmd(cmd, timeout_sec=daily_config.timeout_sec,
                              log_sink=raw_log.write,
-                             on_start=monitor.start if monitor else None)
+                             on_start=active_monitor.start if active_monitor else None)
         finally:
-            if monitor is not None:
-                monitor.stop()
+            if active_monitor is not None:
+                machine = active_monitor.stop()
             if old_cwd:
                 os.chdir(old_cwd)
 
+        result.machine = machine
         raw_log.write(f'[RC ] {result.returncode} '
                       f'(duration {result.duration_sec:.1f}s)\n')
         return result

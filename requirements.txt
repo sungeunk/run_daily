@@ -12,6 +12,7 @@ optimum==2.2.0
 optimum-intel==2.0.0
 safetensors==0.4.6.dev0
 packaging==25.0
+paramiko==3.5.1
 pillow==11.3.0
 pandas==2.2.3
 psutil==6.1.0

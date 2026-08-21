@@ -24,7 +24,7 @@ import tempfile
 from email.message import EmailMessage
 from email.utils import formatdate
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 # publishing (``http://...``) and scp'ing (bare hostname), so we keep one
 # source of truth here and derive both from it.
 DEFAULT_BACKUP_HOST = 'dg2raptorlake.ikor.intel.com'
+DEFAULT_BACKUP_USER = 'sungeunk'
 
 # Remote directory under which every machine's artefacts live. Kept distinct
 # from the legacy ``/var/www/html/daily`` path so the new pytest-based pipeline
@@ -243,6 +244,33 @@ def render_links_block(files: Iterable[Path], *, base_url: str | None = None
     return '\n'.join(lines) + '\n'
 
 
+def _open_ssh_client(relay: str, username: str = DEFAULT_BACKUP_USER) -> Any:
+    """Open an SSH client using the user's agent or default key files."""
+    import paramiko
+
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    client.connect(
+        relay,
+        username=username,
+        timeout=20,
+        banner_timeout=20,
+        auth_timeout=20,
+        allow_agent=True,
+        look_for_keys=True,
+    )
+    return client
+
+
+def _ensure_remote_directory(sftp: Any, remote_dir: str) -> None:
+    """Create the remote directory when it does not already exist."""
+    try:
+        sftp.stat(remote_dir)
+    except OSError:
+        sftp.mkdir(remote_dir)
+
+
 def prepend_links(report_path: Path, links_block: str) -> None:
     """Insert ``links_block`` at the top of the plain-text report."""
     current = report_path.read_text(encoding='utf-8')
@@ -293,7 +321,7 @@ def prepend_links_html(html_path: Path, links_block: str) -> None:
 
 def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
                ) -> list[Path]:
-    """Copy ``files`` to the backup server via scp.
+    """Copy ``files`` to the backup server via Paramiko SFTP.
 
     Returns the list of files that were successfully uploaded.
 
@@ -305,42 +333,42 @@ def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
     remote_dir = f'{REMOTE_BASE_DIR}/{platform.node()}'
     remote = f'{relay}:{remote_dir}/'
 
-    is_windows = platform.system() == 'Windows'
-    scp_bin = 'scp.exe' if is_windows else 'scp'
-    ssh_bin = 'ssh.exe' if is_windows else 'ssh'
-
-    # The legacy ``daily2/`` is owned ``root:www-data`` with 775, so mkdir
-    # only works if the ssh user is in ``www-data``. Probe first; if the dir
-    # is missing *and* we can't create it, surface an actionable error so
-    # the admin knows what to fix rather than watching scp fail mysteriously.
-    probe = subprocess.run(
-        [ssh_bin, relay, f'test -d {remote_dir} || mkdir -p {remote_dir}'],
-        capture_output=True, text=True,
-    )
-    if probe.returncode != 0:
-        log.error(
-            'backup: remote dir %s missing and mkdir failed (rc=%d). '
-            'Add the ssh user to the www-data group on %s, or have an admin '
-            'pre-create %s. ssh stderr: %s',
-            remote_dir, probe.returncode, relay, remote_dir,
-            (probe.stderr or '').strip(),
-        )
+    try:
+        import paramiko
+    except ImportError:
+        log.error('backup: paramiko is required for Python-based SSH backup')
         return []
 
-    uploaded: list[Path] = []
-    for f in files:
-        f = Path(f)
-        if not f.exists():
-            log.error('backup: missing %s', f)
-            continue
-        cmd = [scp_bin, str(f), remote]
-        log.info('backup: %s → %s', f.name, remote)
-        rc = subprocess.call(cmd)
-        if rc == 0:
-            uploaded.append(f)
-        else:
-            log.error('backup: scp failed for %s (rc=%d)', f, rc)
-    return uploaded
+    try:
+        with _open_ssh_client(relay, DEFAULT_BACKUP_USER) as client:
+            with client.open_sftp() as sftp:
+                try:
+                    _ensure_remote_directory(sftp, remote_dir)
+                except (OSError, paramiko.SFTPError) as exc:
+                    log.error(
+                        'backup: remote directory %s is unavailable on %s: %s',
+                        remote_dir, relay, exc,
+                    )
+                    return []
+
+                uploaded: list[Path] = []
+                for f in files:
+                    f = Path(f)
+                    if not f.exists():
+                        log.error('backup: missing %s', f)
+                        continue
+                    remote_path = f'{remote_dir}/{f.name}'
+                    log.info('backup: %s -> %s', f.name, remote)
+                    try:
+                        sftp.put(str(f), remote_path)
+                    except (OSError, paramiko.SFTPError) as exc:
+                        log.error('backup: upload failed for %s: %s', f, exc)
+                        continue
+                    uploaded.append(f)
+                return uploaded
+    except (OSError, paramiko.SSHException) as exc:
+        log.error('backup: SSH connection to %s failed: %s', relay, exc)
+        return []
 
 
 def send_mail(report_path: Path, recipients: str, title: str, *,
@@ -379,7 +407,7 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
             'BatchMode=yes',
             '-o',
             'ConnectTimeout=20',
-            relay,
+            f'{DEFAULT_BACKUP_USER}@{relay}',
             '/usr/sbin/sendmail -t -oi',
         ]
         log.info('send_mail: %s → %s', full_title, recipients)
@@ -402,7 +430,7 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
 
         shell_cmd = (
             f'ssh -i "{id_rsa}" -o BatchMode=yes -o ConnectTimeout=20 '
-            f'{relay} "{remote_cmd}" < "{body_file}"'
+            f'{DEFAULT_BACKUP_USER}@{relay} "{remote_cmd}" < "{body_file}"'
         )
         try:
             return subprocess.call(shell_cmd, shell=True) == 0
