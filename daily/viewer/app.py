@@ -5,8 +5,8 @@ Run with::
 
     streamlit run daily/viewer/app.py -- --db daily/viewer/bench.duckdb
 
-The DB is built by ``python -m viewer.ingest.cli``. This app is a pure
-read-only consumer.
+The DB is built by ``python -m viewer.ingest.cli``. The sidebar can refresh
+the configured daily DB by running the local ingestion script.
 
 Tabs
 ----
@@ -27,6 +27,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -47,6 +48,7 @@ from viewer import queries as q  # noqa: E402
 # ---------------------------------------------------------------------------
 
 DEFAULT_DB = _HERE / "bench.duckdb"
+INGEST_SCRIPT = Path("/var/www/html/daily2/ingest_db.sh")
 
 
 def _resolve_db_path() -> Path:
@@ -76,6 +78,42 @@ def _db_version() -> float:
         return DB.stat().st_mtime
     except FileNotFoundError:
         return 0.0
+
+
+def _refresh_database() -> None:
+    """Rebuild the daily benchmark DB and invalidate cached query results."""
+    if not INGEST_SCRIPT.is_file() or not os.access(INGEST_SCRIPT, os.X_OK):
+        st.error(f"Ingestion script is unavailable: {INGEST_SCRIPT}")
+        return
+
+    progress = st.progress(5, text="Starting database refresh...")
+    with st.status("Refreshing database...", expanded=True) as status:
+        st.write("Running ingestion script")
+        progress.progress(25, text="Ingesting daily benchmark artifacts...")
+        result = subprocess.run(
+            [str(INGEST_SCRIPT)],
+            cwd=INGEST_SCRIPT.parent,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            status.update(label="Database refresh failed", state="error")
+            progress.empty()
+            st.error(f"Ingestion failed with exit code {result.returncode}.")
+            output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+            if output:
+                st.code(output, language="text")
+            return
+
+        progress.progress(90, text="Reloading cached data...")
+        st.cache_data.clear()
+        status.update(label="Database refresh completed", state="complete")
+
+    progress.progress(100, text="Database is up to date")
+    st.session_state["db_refresh_message"] = "Database refresh completed."
+    st.rerun()
 
 
 @st.cache_data(show_spinner=False)
@@ -191,6 +229,11 @@ def _sidebar() -> dict:
         st.sidebar.error(f"DB not found at {DB}")
         st.stop()
     st.sidebar.caption(f"DB: `{DB}`")
+    if st.sidebar.button("Refresh database", width="stretch"):
+        _refresh_database()
+    if message := st.session_state.pop("db_refresh_message", None):
+        st.sidebar.success(message)
+
     all_machines = cached_machines(v)
     if not all_machines:
         st.sidebar.warning("No runs in DB yet — run `viewer.ingest.cli` first.")
