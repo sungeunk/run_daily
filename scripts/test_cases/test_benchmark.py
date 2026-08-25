@@ -26,23 +26,23 @@ except Exception:
 class TestBenchmark(TestTemplate):
 
     CONFIG_MAP = {
-        ('gemma-2-9b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # text_gen
-        ('gemma-3-4b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # visual_text_gen
+        ('gemma-2-9b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}], # text_gen
+        ('gemma-3-4b-it',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}], # visual_text_gen
         ('gemma-4-26b-a4b-it',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
         ('gemma-4-e2b-it',                 ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
-        ('gpt-oss-20b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('llama-2-7b-chat-hf',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('llama-3.2-1b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('minicpm4-0.5b',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('minicpm4-8b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-4-mini-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('phi-4-multimodal-instruct',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{}], # visual_text_gen
-        ('qwen3-8b',                       ModelConfig.OV_FP16_4BIT_DEFAULT): [{}],
-        ('qwen3-vl-4b-instruct',           ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL}],
+        ('gpt-oss-20b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('llama-2-7b-chat-hf',             ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('llama-3.1-8b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('llama-3.2-1b-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('minicpm4-0.5b',                  ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('minicpm4-8b',                    ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('mistral-7b-instruct-v0.2',       ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('phi-3.5-mini-instruct',          ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('phi-3.5-vision-instruct',        ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('phi-4-mini-instruct',            ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('phi-4-multimodal-instruct',      ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}], # visual_text_gen
+        ('qwen3-8b',                       ModelConfig.OV_FP16_4BIT_DEFAULT): [{"LOAD_CONFIG":"res/config.enable_PA.json"}],
+        ('qwen3-vl-4b-instruct',           ModelConfig.OV_FP16_4BIT_DEFAULT): [{PROMPT_TYPE_KEY: PROMPT_TYPE_MULTIMODAL, "LOAD_CONFIG":"res/config.enable_PA.json"}],
         ('qwen3.5-9b',                     ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen", "LOAD_CONFIG":"res/config.enable_PA.json"}],
         ('qwen3.6-35b-a3b',                ModelConfig.OV_FP16_4BIT_DEFAULT): [{"TASK": "visual_text_gen", "LOAD_CONFIG":"res/config.enable_PA.json"}],
     }
