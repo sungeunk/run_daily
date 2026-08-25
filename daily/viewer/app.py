@@ -670,18 +670,29 @@ def _tab_excel(cfg: dict) -> None:
         "",
         "\t".join(stamps),
     ]
+    no_decimal_models = {
+        "flux.1-schnell",
+        "stable-diffusion-v1-5",
+        "stable-diffusion-3.5-large-turbo",
+        "Resnet50",
+        "resnet50",
+    }
     # FPS/count rows paste as whole numbers; ms/s latency rows keep 2
     # decimals — mirrors the legacy report viewer's per-row formatting
     # instead of a single float_format for the whole sheet.
-    def _format_cell(value: object, unit: object) -> str:
+    def _format_cell(value: object, unit: object, model: object) -> str:
         if pd.isna(value) or value == "":
             return ""
         unit_upper = str(unit).upper()
-        return f"{float(value):.0f}" if unit_upper in ("FPS", "COUNT") else f"{float(value):.2f}"
+        number = float(value)
+        if model in no_decimal_models or unit_upper in ("FPS", "COUNT"):
+            return f"{number:.0f}"
+        return f"{number:.2f}"
 
     units = matrix["unit"] if "unit" in matrix.columns else pd.Series("", index=matrix.index)
     formatted = pd.DataFrame({
-        col: [_format_cell(v, u) for v, u in zip(matrix[col], units)]
+        col: [_format_cell(v, u, model)
+              for v, u, model in zip(matrix[col], units, matrix["model"])]
         for col in stamps
     })
     data_text = formatted.to_csv(sep="\t", index=False, header=False)
@@ -689,7 +700,24 @@ def _tab_excel(cfg: dict) -> None:
     st.text_area("Copy & paste into Excel", value=paste, height=260)
 
     st.markdown("**Matrix preview**")
-    st.dataframe(matrix, width="stretch", hide_index=True)
+    def _format_preview_value(model: object, value: object) -> str:
+        if pd.isna(value):
+            return ""
+        number = float(value)
+        if model in no_decimal_models:
+            return f"{number:.0f}"
+        return f"{number:.2f}" if not number.is_integer() else f"{number:.0f}"
+
+    preview = matrix.copy()
+    for col in stamps:
+        preview[col] = [
+            _format_preview_value(model, value)
+            for model, value in zip(preview["model"], preview[col])
+        ]
+    preview = preview.style.set_properties(
+        subset=stamps, **{"text-align": "right"}
+    )
+    st.dataframe(preview, width="stretch", hide_index=True)
 
     extras = cached_extra_rows(run_ids, cfg["profile"], cfg["v"])
     if not extras.empty:

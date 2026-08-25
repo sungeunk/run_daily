@@ -234,9 +234,9 @@ def build_excel_matrix(db_path: Path, run_ids: list[str],
             d.label,
             rs.run_id,
             rs.stamp,
-            p.value,
+            p.viewer_value AS value,
             p.in_token,
-            p.unit
+            p.viewer_unit AS unit
         FROM display_rows d
         CROSS JOIN rs
         LEFT JOIN perf_with_buckets p

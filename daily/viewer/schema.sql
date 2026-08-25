@@ -152,17 +152,35 @@ CREATE INDEX IF NOT EXISTS idx_analysis_status   ON analysis_results(overall_sta
 
 -- Adds 'short' / 'long' / '0' buckets as derived columns. Threshold is
 -- hard-coded (100) to match the historical viewer; change in-place to retune.
+-- These image-generation models emit seconds, but the viewer displays their
+-- latency in milliseconds to match the Excel/report convention.
 CREATE OR REPLACE VIEW perf_with_buckets AS
 SELECT
     p.*,
     CASE
-        WHEN in_token  = 0 THEN '0'
-        WHEN in_token  < 100 THEN 'short'
+        WHEN p.model IN (
+            'flux.1-schnell',
+            'stable-diffusion-v1-5',
+            'stable-diffusion-3.5-large-turbo'
+        ) AND p.unit = 's' THEN p.value * 1000
+        ELSE p.value
+    END AS viewer_value,
+    CASE
+        WHEN p.model IN (
+            'flux.1-schnell',
+            'stable-diffusion-v1-5',
+            'stable-diffusion-3.5-large-turbo'
+        ) AND p.unit = 's' THEN 'ms'
+        ELSE p.unit
+    END AS viewer_unit,
+    CASE
+        WHEN p.in_token  = 0 THEN '0'
+        WHEN p.in_token  < 100 THEN 'short'
         ELSE 'long'
     END AS in_bucket,
     CASE
-        WHEN out_token = 0 THEN '0'
-        WHEN out_token < 100 THEN 'short'
+        WHEN p.out_token = 0 THEN '0'
+        WHEN p.out_token < 100 THEN 'short'
         ELSE 'long'
     END AS out_bucket
 FROM perf p;
@@ -190,8 +208,8 @@ SELECT
     p.in_bucket,
     p.out_bucket,
     p.exec_mode,
-    p.value,
-    p.unit
+    p.viewer_value AS value,
+    p.viewer_unit AS unit
 FROM runs r
 JOIN perf_with_buckets p USING (run_id);
 
