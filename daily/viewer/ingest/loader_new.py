@@ -126,9 +126,15 @@ def _guess_machine(path: Path) -> str:
 def _raw_log_candidate(path: Path) -> Path | None:
     """Find the ``.raw`` file that went with this summary.json.
 
-    daily.<stamp>.<ov_version>.raw  OR  daily.<stamp>.none.raw
+    New format: ``daily.<stamp>.raw``.
+    Legacy formats: ``daily.<stamp>.<ov_version>.raw`` and
+    ``daily.<stamp>.none.raw``.
     """
     stem = path.name.split(".summary.json")[0]  # 'daily.20260419_2339'
+    direct = path.parent / f"{stem}.raw"
+    if direct.exists():
+        return direct
+
     matches = sorted(path.parent.glob(f"{stem}.*.raw"))
     return matches[0] if matches else None
 

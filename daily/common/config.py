@@ -92,7 +92,7 @@ def build_config(
     # generating it here would drift by a minute across the process boundary.
     now = now or dt.datetime.now().strftime('%Y%m%d_%H%M')
     ov_version = _ov_get_version()
-    stem = f'daily.{now}.{ov_version.replace("/", "_")}'
+    stem = f'daily.{now}'
 
     out_token_length = 32 if short_run else 256
     benchmark_iter_num = 1 if short_run else 3
@@ -115,7 +115,7 @@ def build_config(
         ov_version=ov_version,
         now=now,
         raw_log_path=output_dir / f'{stem}.raw',
-        json_report_path=output_dir / f'{stem}.json',
+        json_report_path=output_dir / f'{stem}.pytest.json',
         text_report_path=output_dir / f'{stem}.report',
     )
 

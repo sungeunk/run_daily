@@ -492,9 +492,11 @@ def main() -> int:
     html_report = _run_analysis(text_report, summary_json)
 
     # --- post-run delivery ---
-    # Find the session raw log — the RawLogSink names it with the OV version
-    # stamp, so glob to avoid duplicating that logic.
-    raw_logs = sorted(output_dir.glob(f'daily.{stamp}.*.raw'))
+    # Find the session raw log. New naming is "daily.<stamp>.raw";
+    # keep a legacy fallback for older OV-suffixed logs.
+    raw_logs = sorted(output_dir.glob(f'daily.{stamp}.raw'))
+    if not raw_logs:
+        raw_logs = sorted(output_dir.glob(f'daily.{stamp}.*.raw'))
     monitor_archive = _archive_monitor_files(output_dir, stamp)
 
     if args.pip_freeze or args.backup or args.mail:
@@ -534,7 +536,7 @@ def main() -> int:
     if raw_logs:
         print(f'[run.py] raw log:        {raw_logs[-1]}')
     else:
-        print(f'[run.py] raw log:        not found for daily.{stamp}.*.raw')
+        print(f'[run.py] raw log:        not found for daily.{stamp}.raw')
 
     # Run completed end-to-end. Test pass/fail is reflected in the JSON
     # summary and the mail/backup artefacts; don't double-report via exit
