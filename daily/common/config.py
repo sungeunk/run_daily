@@ -44,7 +44,6 @@ class DailyConfig:
     now: str                  # YYYYMMDD_HHMM timestamp
     raw_log_path: Path
     json_report_path: Path
-    text_report_path: Path
 
     @property
     def bin_dir(self) -> Path:
@@ -116,7 +115,6 @@ def build_config(
         now=now,
         raw_log_path=output_dir / f'{stem}.raw',
         json_report_path=output_dir / f'{stem}.pytest.json',
-        text_report_path=output_dir / f'{stem}.report',
     )
 
 

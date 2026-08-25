@@ -13,10 +13,9 @@
 
 | Track | Flow |
 |---|---|
-| Old | `.pickle` (run_daily2/scripts pipeline) + `.report` (text) → ingest → DuckDB |
 | New | `.summary.json` (`daily/run.py` → `report/builder.py`) → ingest → DuckDB |
 
-- Both tracks converge on the `RunRecord` dataclass, then `writer.upsert_run`.
+- Ingest produces the `RunRecord` dataclass, then `writer.upsert_run`.
 - Viewer consumes DuckDB read-only via `queries.py`; Streamlit app in `app.py`.
 
 ---
@@ -34,7 +33,7 @@ Notes:
 - `perf_with_buckets` derives `in_bucket` / `out_bucket` (`'short'` / `'long'` / `'0'`) with `threshold=100`.
 - `perf_stats` uses correlated subqueries for rolling median + MAD over a 30-day back-window. Kept for legacy point-vs-band helpers; Regression tab now recomputes the selected-series rolling band from purpose-filtered `perf_flat` rows so personal PR results do not pollute the chart.
 - `runs.rawlog_path` stores a FILE PATH, not the log body (old schema stored the whole log in a TEXT column; removed to keep DB small).
-- `runs.source_format` is `'old' | 'new'` — keep this for debugging data provenance.
+- `runs.source_format` is `'old' | 'new'` — kept for debugging data provenance of rows ingested before the legacy loader was removed.
 
 ### `daily/viewer/profiles/default.yaml`
 Replacement for `FIXED_ROW_ORDER`. Controls row order in Excel-paste tab.
@@ -52,12 +51,12 @@ Match spec semantics:
 **Extension:** add e.g. `profiles/iGPU.yaml` for machine-specific rows. Load via `python -m viewer.ingest.cli --profile <yaml>`. Sidebar picks between loaded profiles.
 
 ### `daily/viewer/ingest/record.py`
-`RunRecord` + `DeviceRecord` + `PerfRow` dataclasses. Format-neutral — loaders fill these, writer consumes them.
+`RunRecord` + `DeviceRecord` + `PerfRow` dataclasses. Format-neutral — the loader fills these, writer consumes them.
 
 **Do not** add format-specific fields here. Put them on the loader.
 
 ### `daily/viewer/ingest/_common.py`
-Shared helpers for loaders.
+Shared loader helpers.
 
 Exports: `parse_stamp_from_name`, `workweek_of`, `split_ov_version`, `file_hash` (sha256 content hash of source file), `run_id_of` (sha1 of `machine|iso_ts|report_file`, 20 chars).
 
@@ -66,24 +65,6 @@ Exports: `parse_stamp_from_name`, `workweek_of`, `split_ov_version`, `file_hash`
 
 - **Test-type handlers:** `llm_benchmark`, `benchmark_app`, `sd_genai`, `sd_dgfx`.
 - **Meta handling:** `summary.meta` is optional — falls back to filename stamp + parent-dir machine + `generated_at` ts. Early summary files (before meta landed) still work.
-
-### `daily/viewer/ingest/loader_old.py`
-Legacy `.pickle` + `.report` → `RunRecord`.
-
-- **Pickle trick:** `_TolerantUnpickler.find_class` replaces missing classes (`test_cases.TestBenchmark` etc.) with `_UnknownClass` stubs. Key tuple is `(model, precision, TestClass)` — we read `TestClass.__name__` to dispatch to the correct extractor.
-- **Class handlers:**
-
-| Class | Handler |
-|---|---|
-| `TestBenchmark` | `_benchmark_perf` |
-| `TestBenchmarkapp` | `_benchmark_app_perf` |
-| `TestStableDiffusion` | `_sd_perf_ms` (legacy C++ binary — ms in pickle, divided by 1000 at ingest) |
-| `TestStableDiffusionGenai` | `_sd_perf_sec` (pickle already seconds) |
-| `TestStableDiffusionDGfxE2eAi` | `_sd_perf_sec` (pickle already seconds) |
-
-- **Dropped handlers:** `TestWhisperBase` is legacy; whisper-large-v3 is in GenAI pipeline.
-- **Version parsing:** OV version pulled from filename `daily.<stamp>.<ov_version>.pickle` AND from `.report` text (`Purpose` + `OpenVINO` line). Report text is preferred when present.
-- **SD unit normalization:** All SD pipelines land in the DB as `unit='s'` regardless of source class. Legacy ms pickles are divided by 1000 at load time. This removes the 1000× ambiguity that made SD-XL pipeline look like milliseconds in the viewer.
 
 ### `daily/viewer/ingest/writer.py`
 DuckDB upsert (transactional per `RunRecord`) + display-profile loader.
@@ -94,7 +75,7 @@ DuckDB upsert (transactional per `RunRecord`) + display-profile loader.
 ### `daily/viewer/ingest/cli.py`
 Single CLI; `--root` scans, `--input` handles one file.
 
-- **Auto-detect (`_classify`):** `*.summary.json` → new; `*.pickle` (with sibling `.report`) → old; `*.report` alone → old if sibling pickle exists, else skip.
+- **Detection (`_classify`):** `*.summary.json` → new; anything else is skipped.
 - **Progress:** Inline progress bar. Failures collected and reported at end; not fatal.
 - **Profile load:** The default profile is additive: each ingest CLI invocation loads `profiles/default.yaml` only if that profile is missing. Explicit `--profile` or `--force` refreshes the named profile unless `--skip-profile` is set.
 
@@ -118,7 +99,7 @@ Streamlit entry. 5 tabs.
 
 | Tab | Purpose |
 |---|---|
-| Dashboard | First tab. Selects the latest run whose purpose/description matches `DEFAULT_RUN_FILTER` (fallback: `daily_CB`), then reviews summary / `.report` / `.pytest.json` / `.raw` artifacts to show whether tests actually ran, pass/fail totals, grouped failure causes, per-test pytest-json/summary messages, and the raw pytest log text. Artifact siblings are derived from `source_path` stem (`.summary.json` / `.pickle` suffix stripped) — `report_file` is source-identity only, never fed to text/JSON readers. |
+| Dashboard | First tab. Selects the latest run whose purpose/description matches `DEFAULT_RUN_FILTER` (fallback: `daily_CB`), then reviews summary / `.pytest.json` / `.raw` artifacts to show whether tests actually ran, pass/fail totals, grouped failure causes, per-test pytest-json/summary messages, and the raw pytest log text. Artifact siblings are derived from `source_path` stem (`.summary.json` / `.pickle` suffix stripped) — `report_file` is source-identity only, never fed to text/JSON readers. |
 | Excel | Select runs → wide matrix (profile rows × run stamps) + tab-separated paste block + "extra rows" expander |
 | Regression | MERGED tab (was separate Trend + Regressions). Shows a ranked table of series by worsening %, plus a one-series-at-a-time trend plot for the selected row. Baseline median + recent median rendered as Scatter traces with legend entries; rolling ±2σ band drawn with a visible fill (rgba 0.28) so it reads on bright monitors. |
 | Geomean | `exec_mode × in_bucket × out_bucket` geomean trend + band + latest-point alert (user-requested) |
@@ -270,8 +251,8 @@ cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/
 # Ingest one (new format)
 cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
 
-# Ingest one (old format)
-cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.<ver>.pickle
+# Ingest one
+cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.summary.json
 
 # Force re-ingest
 # (append --force to any of the above)
@@ -311,8 +292,7 @@ DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 
 ## Known gaps & future work
 
-- **Broaden unit-test coverage.** Focused pytest coverage now exists for viewer helpers/loaders/queries/mail-alert formatting. Future work: add more edge-case fixtures for old pickle variants and larger synthetic DuckDB histories.
+- **Broaden unit-test coverage.** Focused pytest coverage now exists for viewer helpers/loader/queries/mail-alert formatting. Future work: add larger synthetic DuckDB histories.
 - **`perf_stats` still uses correlated subqueries (O(n·m) conceptually).** Measured ~0.57s for 322k `perf_stats` rows on 2026-04-27, so no cached table is needed yet. If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest.
 - **Email regression alerts from `run.py`.** Implemented as a best-effort report section before mail delivery. Future work: tune thresholds or add a dedicated HTML table if recipients want richer formatting.
-- **Machine name for pickles ingested from non-canonical locations.** `loader_old.py` derives machine from parent-dir name by default. Use `viewer.ingest.cli --machine <name>` when rescuing fixture or archive files stored outside `/var/www/html/daily/<MACHINE>/`.
 - **Additional display profiles.** The sidebar hides the profile dropdown when only one profile exists. Add an iGPU-focused profile when there is a real second display layout to choose from.

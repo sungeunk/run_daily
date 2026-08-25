@@ -15,8 +15,7 @@ Structure recap::
     }
 
 ``meta`` was added mid-migration — early summary files don't have it. In
-that case we fall back to the filename and a companion ``.report`` text
-file the legacy loader also knows how to parse.
+that case we fall back to the filename.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ from typing import Iterable
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
 from .record import PerfRow, RunRecord
-from .loader_old import _report_runtime_meta
 
 log = logging.getLogger(__name__)
 
@@ -139,27 +137,6 @@ def _raw_log_candidate(path: Path) -> Path | None:
     return matches[0] if matches else None
 
 
-def _report_candidate(path: Path) -> Path | None:
-    report = path.with_name(path.name.removesuffix(".summary.json") + ".report")
-    return report if report.exists() else None
-
-
-def _purpose_from_report(path: Path) -> str | None:
-    report = _report_candidate(path)
-    if report is None:
-        return None
-    try:
-        text = report.read_text(encoding="utf-8", errors="replace")
-    except OSError as e:
-        log.warning("Failed to read %s: %s", report, e)
-        return None
-    for line in text.splitlines():
-        if line.strip().startswith("| Purpose |"):
-            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-            return cells[1] if len(cells) > 1 and cells[1] else None
-    return None
-
-
 def _float_or_none(value) -> float | None:
     if value is None:
         return None
@@ -194,7 +171,7 @@ def load_summary(path: Path) -> RunRecord:
         ts = datetime.fromtimestamp(path.stat().st_mtime)
 
     machine = meta.get("machine") or _guess_machine(path)
-    purpose = meta.get("purpose") or meta.get("description") or _purpose_from_report(path)
+    purpose = meta.get("purpose") or meta.get("description")
     ov_version = meta.get("ov_version")
     ov_build = meta.get("ov_build") or None
     ov_sha = meta.get("ov_sha") or None
@@ -203,24 +180,12 @@ def load_summary(path: Path) -> RunRecord:
         ov_build = ov_build or b
         ov_sha = ov_sha or s
     ww = meta.get("workweek") or workweek_of(ts)
-    report_path = _report_candidate(path)
     host_info = meta.get("host_info")
     host_memory_size_gb = _float_or_none(meta.get("host_memory_size_gb"))
     host_memory_speed_mhz = _float_or_none(meta.get("host_memory_speed_mhz"))
-    gpu_info = meta.get("gpu_info")
+    gpu_info = meta.get("gpu_info") or meta.get("device")
     gpu_driver_version = meta.get("gpu_driver_version")
     devices = []
-    if report_path is not None:
-        fallback_host_info, fallback_memory_size_gb, fallback_memory_speed_mhz, devices = _report_runtime_meta(report_path)
-        host_info = host_info or fallback_host_info
-        host_memory_size_gb = host_memory_size_gb if host_memory_size_gb is not None else fallback_memory_size_gb
-        host_memory_speed_mhz = host_memory_speed_mhz if host_memory_speed_mhz is not None else fallback_memory_speed_mhz
-    if gpu_info is None and devices:
-        gpu_info = devices[0].device
-    if gpu_driver_version is None and devices:
-        gpu_driver_version = devices[0].driver
-    if gpu_info is None:
-        gpu_info = meta.get("device")
 
     rec = RunRecord(
         run_id=run_id_of(machine, ts, path.name),

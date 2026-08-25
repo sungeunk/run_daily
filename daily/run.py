@@ -167,6 +167,102 @@ def _windows_memory_speed_mhz() -> float | None:
     return max(speeds)
 
 
+def _windows_gpu_memory_mb() -> tuple[float | None, float | None]:
+    """Return ``(dedicated_mb, shared_mb)`` for the first hardware adapter via DXGI.
+
+    Shared memory is the system RAM the GPU may borrow; Intel Graphics Software
+    can change it, so it is read live instead of assumed.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _LUID(ctypes.Structure):
+        _fields_ = [('LowPart', wintypes.DWORD), ('HighPart', ctypes.c_long)]
+
+    class _DXGI_ADAPTER_DESC1(ctypes.Structure):
+        _fields_ = [
+            ('Description', ctypes.c_wchar * 128),
+            ('VendorId', ctypes.c_uint),
+            ('DeviceId', ctypes.c_uint),
+            ('SubSysId', ctypes.c_uint),
+            ('Revision', ctypes.c_uint),
+            ('DedicatedVideoMemory', ctypes.c_size_t),
+            ('DedicatedSystemMemory', ctypes.c_size_t),
+            ('SharedSystemMemory', ctypes.c_size_t),
+            ('AdapterLuid', _LUID),
+            ('Flags', ctypes.c_uint),
+        ]
+
+    _DXGI_ADAPTER_FLAG_SOFTWARE = 0x2
+    # IID_IDXGIFactory1 {770aae78-f26f-4dba-a829-253c83d1b387}
+    iid = (ctypes.c_byte * 16)(*(
+        (0x770AAE78).to_bytes(4, 'little')
+        + (0xF26F).to_bytes(2, 'little')
+        + (0x4DBA).to_bytes(2, 'little')
+        + bytes([0xA8, 0x29, 0x25, 0x3C, 0x83, 0xD1, 0xB3, 0x87])
+    ))
+
+    try:
+        dxgi = ctypes.WinDLL('dxgi')
+        factory = ctypes.c_void_p()
+        if dxgi.CreateDXGIFactory1(ctypes.byref(iid), ctypes.byref(factory)) != 0:
+            return None, None
+
+        vtbl = ctypes.cast(factory, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+        enum_adapters = ctypes.WINFUNCTYPE(
+            ctypes.c_long, ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)
+        )(vtbl[12])  # IDXGIFactory1::EnumAdapters1
+
+        index = 0
+        while True:
+            adapter = ctypes.c_void_p()
+            if enum_adapters(factory, index, ctypes.byref(adapter)) != 0:
+                return None, None
+            avtbl = ctypes.cast(
+                adapter, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
+            ).contents
+            get_desc = ctypes.WINFUNCTYPE(
+                ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(_DXGI_ADAPTER_DESC1)
+            )(avtbl[10])  # IDXGIAdapter1::GetDesc1
+            desc = _DXGI_ADAPTER_DESC1()
+            if get_desc(adapter, ctypes.byref(desc)) == 0 and not (
+                desc.Flags & _DXGI_ADAPTER_FLAG_SOFTWARE
+            ):
+                mb = 1024 ** 2
+                return (round(desc.DedicatedVideoMemory / mb, 1),
+                        round(desc.SharedSystemMemory / mb, 1))
+            index += 1
+    except Exception:
+        return None, None
+
+
+def _windows_gpu_shared_memory_override() -> int | None:
+    """Intel ``IncreaseFixedSegment`` setting; 0 means the driver default is in use."""
+    import winreg
+
+    key_path = (r'SYSTEM\CurrentControlSet\Control\Class'
+                r'\{4d36e968-e325-11ce-bfc1-08002be10318}')
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as root:
+            for i in range(16):
+                try:
+                    sub = winreg.EnumKey(root, i)
+                except OSError:
+                    break
+                try:
+                    with winreg.OpenKey(root, sub) as adapter:
+                        desc, _ = winreg.QueryValueEx(adapter, 'DriverDesc')
+                        if 'intel' not in str(desc).lower():
+                            continue
+                        value, _ = winreg.QueryValueEx(adapter, 'IncreaseFixedSegment')
+                        return int(value)
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return None
+
+
 def _collect_runtime_meta(device: str) -> dict:
     """Return best-effort runtime metadata for the current machine."""
     import platform
@@ -195,12 +291,17 @@ def _collect_runtime_meta(device: str) -> dict:
     except Exception:
         pass
 
+    gpu_dedicated_memory_mb = None
+    gpu_shared_memory_mb = None
+    gpu_shared_memory_override = None
     if is_windows:
         win_gpu_info, win_driver = _windows_query_gpu(device)
         if not gpu_info:
             gpu_info = win_gpu_info
         gpu_driver_version = win_driver or gpu_driver_version
         memory_speed_mhz = _windows_memory_speed_mhz()
+        gpu_dedicated_memory_mb, gpu_shared_memory_mb = _windows_gpu_memory_mb()
+        gpu_shared_memory_override = _windows_gpu_shared_memory_override()
     else:
         memory_speed_mhz = None
 
@@ -213,6 +314,9 @@ def _collect_runtime_meta(device: str) -> dict:
         'host_memory_speed_mhz': memory_speed_mhz,
         'gpu_info': gpu_info,
         'gpu_driver_version': gpu_driver_version,
+        'gpu_dedicated_memory_mb': gpu_dedicated_memory_mb,
+        'gpu_shared_memory_mb': gpu_shared_memory_mb,
+        'gpu_shared_memory_override': gpu_shared_memory_override,
     }
 
 
@@ -345,13 +449,13 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
-def _run_analysis(text_report: Path, summary_json: Path) -> Path | None:
-    """Best-effort: ingest output_dir artefacts, then run analysis and update reports."""
+def _run_analysis(html_report: Path, summary_json: Path) -> Path | None:
+    """Best-effort: ingest output_dir artefacts, then run analysis and write the HTML report."""
     output_dir = summary_json.parent
     try:
         from viewer.ingest.cli import discover, ingest_files
         from analysis.engine import analyze_run
-        from analysis.report import prepend_to_report, write_analysis_html
+        from analysis.report import write_analysis_html
         from analysis.persistence import write_analysis_to_summary
 
         files = discover(output_dir, fmt='auto')
@@ -371,10 +475,8 @@ def _run_analysis(text_report: Path, summary_json: Path) -> Path | None:
         result = analyze_run(summary_json, VIEWER_DB)
         write_analysis_to_summary(summary_json, result)
 
-        prepend_to_report(text_report, result)
         summary_data = json.loads(summary_json.read_text(encoding='utf-8'))
-        html_report = write_analysis_html(text_report, result, summary_data)
-        print(f'[run.py] analysis summary prepended to {text_report}')
+        write_analysis_html(html_report, result, summary_data)
         print(f'[run.py] analysis html report: {html_report}')
         return html_report
     except Exception as exc:  # noqa: BLE001 — analysis must not fail the run
@@ -424,7 +526,7 @@ def main() -> int:
     stamp = _now_stamp()
     pytest_json = output_dir / f'daily.{stamp}.pytest.json'
     summary_json = output_dir / f'daily.{stamp}.summary.json'
-    text_report = output_dir / f'daily.{stamp}.report'
+    html_report_path = output_dir / f'daily.{stamp}.html'
     pip_freeze_file = output_dir / f'daily.{stamp}.requirements.txt'
 
     tests_target = args.tests or str(DAILY_DIR / 'tests')
@@ -468,28 +570,26 @@ def main() -> int:
               file=sys.stderr)
         return rc or 2
 
-    # Import lazily so `python run.py --help` works without tabulate installed.
+    # Import lazily so `python run.py --help` works without the report deps installed.
     sys.path.insert(0, str(DAILY_DIR))
     from report.builder import build_reports
     from common.delivery import (backup_server_url, mail_title_suffix,
-                                 prepend_links, prepend_links_html,
+                                 prepend_links_html,
                                  render_links_block, scp_backup, send_mail,
                                  write_pip_freeze)
 
     extra_meta = _collect_meta(stamp, args)
     summary = build_reports(pytest_json,
-                            text_out=text_report,
                             summary_out=summary_json,
                             extra_meta=extra_meta)
 
     totals = summary['totals']
     print(f'[run.py] passed={totals["passed"]} failed={totals["failed"]} '
           f'total={totals["total"]}')
-    print(f'[run.py] text report:    {text_report}')
     print(f'[run.py] summary json:   {summary_json}')
     print(f'[run.py] pytest json:    {pytest_json}')
 
-    html_report = _run_analysis(text_report, summary_json)
+    html_report = _run_analysis(html_report_path, summary_json)
 
     # --- post-run delivery ---
     # Find the session raw log. New naming is "daily.<stamp>.raw";
@@ -503,9 +603,8 @@ def main() -> int:
         write_pip_freeze(pip_freeze_file)
         print(f'[run.py] pip freeze:     {pip_freeze_file}')
 
-    # Artefacts published on the relay, in link-block order. The HTML report
-    # was previously generated but never uploaded, so it is included here too.
-    to_upload = [text_report, summary_json, pytest_json, pip_freeze_file]
+    # Artefacts published on the relay, in link-block order.
+    to_upload = [summary_json, pytest_json, pip_freeze_file]
     if html_report:
         to_upload.append(html_report)
     if monitor_archive:
@@ -519,7 +618,6 @@ def main() -> int:
     if args.backup:
         links_block = render_links_block(to_upload)
         if links_block:
-            prepend_links(text_report, links_block)
             if html_report:
                 prepend_links_html(html_report, links_block)
             print(f'[run.py] links:          {backup_server_url(None, "")}')
@@ -527,11 +625,14 @@ def main() -> int:
         scp_backup(to_upload)
 
     if args.mail:
-        suffix = mail_title_suffix(summary)
-        mail_report = html_report or text_report
-        send_mail(mail_report, args.mail, args.description,
-                  suffix_title=suffix, now_stamp=stamp,
-                  summary_json=summary_json)
+        if html_report:
+            suffix = mail_title_suffix(summary)
+            send_mail(html_report, args.mail, args.description,
+                      suffix_title=suffix, now_stamp=stamp,
+                      summary_json=summary_json)
+        else:
+            print('[run.py] mail skipped: no html report was produced',
+                  file=sys.stderr)
 
     if raw_logs:
         print(f'[run.py] raw log:        {raw_logs[-1]}')

@@ -2,15 +2,11 @@
 
 Usage::
 
-    # Auto-detect: scan a directory and ingest whatever it finds.
+    # Scan a directory and ingest whatever it finds.
     python -m viewer.ingest.cli --root /var/www/html/daily --db bench.duckdb
 
     # Single file.
     python -m viewer.ingest.cli --input output/daily.20260421_2234.summary.json
-    python -m viewer.ingest.cli --input res/daily.20250224_0104.2025.1.0-18257-f77ef0f25b4.pickle
-
-    # Force format.
-    python -m viewer.ingest.cli --root /var/www/html/daily --format old
 
 Files already present in ``runs.file_hash`` are skipped unless --force.
 """
@@ -25,7 +21,6 @@ from pathlib import Path
 from typing import Iterable
 
 from .loader_new import load_summary
-from .loader_old import load_report
 from .writer import (already_ingested, connect, ensure_schema,
                      load_display_profile, profile_exists,
                      profile_name_from_yaml, upsert_run)
@@ -45,21 +40,9 @@ def _iter_new_files(root: Path) -> Iterable[Path]:
     yield from sorted(root.rglob("daily.*.summary.json"))
 
 
-def _iter_old_files(root: Path) -> Iterable[Path]:
-    """Old format is ``.pickle`` + sibling ``.report``; we key off the pickle."""
-    for pkl in sorted(root.rglob("daily.*.pickle")):
-        if pkl.with_suffix(".report").exists():
-            yield pkl
-
-
 def _classify(path: Path) -> str | None:
-    name = path.name
-    if name.endswith(".summary.json"):
+    if path.name.endswith(".summary.json"):
         return "new"
-    if name.endswith(".pickle"):
-        return "old"
-    if name.endswith(".report"):
-        return "old" if path.with_suffix(".pickle").exists() else None
     return None
 
 
@@ -95,12 +78,9 @@ def ingest_files(files: list[tuple[Path, str]], db_path: Path,
     total = len(files)
     for idx, (path, fmt) in enumerate(files, start=1):
         try:
-            if fmt == "new":
-                rec = load_summary(path)
-            elif fmt == "old":
-                rec = load_report(path, machine_override=machine_override)
-            else:
+            if fmt != "new":
                 raise ValueError(f"unknown format {fmt!r}")
+            rec = load_summary(path)
 
             if not force and already_ingested(con, rec.file_hash):
                 skipped += 1
@@ -117,15 +97,9 @@ def ingest_files(files: list[tuple[Path, str]], db_path: Path,
 
 
 def discover(root: Path, *, fmt: str) -> list[tuple[Path, str]]:
-    if fmt in ("new", "auto"):
-        new_files = [(p, "new") for p in _iter_new_files(root)]
-    else:
-        new_files = []
-    if fmt in ("old", "auto"):
-        old_files = [(p, "old") for p in _iter_old_files(root)]
-    else:
-        old_files = []
-    return new_files + old_files
+    if fmt not in ("new", "auto"):
+        return []
+    return [(p, "new") for p in _iter_new_files(root)]
 
 
 # ---------------------------------------------------------------------------
@@ -138,14 +112,14 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--root", type=Path,
                        help="Scan a directory tree for daily artefacts.")
     group.add_argument("--input", type=Path,
-                       help="Ingest a single summary.json/.pickle/.report file.")
+                       help="Ingest a single summary.json file.")
 
     ap.add_argument("--db", type=Path, default=DEFAULT_DB)
-    ap.add_argument("--format", choices=("auto", "old", "new"), default="auto")
+    ap.add_argument("--format", choices=("auto", "new"), default="auto")
     ap.add_argument("--force", action="store_true",
                     help="Re-ingest files even if the hash matches.")
     ap.add_argument("--machine", default=None,
-                    help="Override machine name for old-format pickle/report inputs.")
+                    help="Override machine name.")
     ap.add_argument("--profile", type=Path, default=DEFAULT_PROFILE,
                     help="Display profile YAML to (re-)load into display_rows.")
     ap.add_argument("--skip-profile", action="store_true",

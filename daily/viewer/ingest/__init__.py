@@ -1,12 +1,7 @@
 """Ingest package: turn daily-run artefacts into DuckDB rows.
 
-Two input formats are supported:
-
-* 'new' — ``daily.<stamp>.summary.json`` (the format run.py emits today).
-* 'old' — ``daily.<stamp>.<version>.pickle`` plus the companion ``.report``
-  text file. Produced by the legacy scripts/report.py pipeline.
-
-Both paths converge on :class:`RunRecord`, which :mod:`writer` upserts into
+Input format: ``daily.<stamp>.summary.json`` (the format run.py emits).
+It is parsed into :class:`RunRecord`, which :mod:`writer` upserts into
 DuckDB.
 """
 

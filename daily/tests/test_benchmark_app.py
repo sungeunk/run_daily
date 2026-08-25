@@ -61,6 +61,7 @@ def test_benchmark_app(case: BenchAppCase, daily_config: DailyConfig,
         'precision': case.precision,
         'batch': case.batch,
         'cmd': cmd_str,
+        'expected_series': 1,
         'data': [],
     })
 

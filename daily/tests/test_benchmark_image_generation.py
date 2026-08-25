@@ -64,13 +64,26 @@ def test_image_generation_model_rows_use_ms_for_excel(model: str):
     assert rows[0]['value'] == pytest.approx(1234.0)
 
 
+def _prompt_path(cfg: DailyConfig, case: ImageGenCase) -> str:
+    return convert_path(f'{cfg.prompts_dir}/{case.prompt_type}/{case.model}.jsonl')
+
+
+def _expected_series(cfg: DailyConfig, case: ImageGenCase) -> int:
+    """Series this case would produce: one pipeline timing per prompt run."""
+    if case.prompt_index is not None:
+        return 1
+    try:
+        with open(_prompt_path(cfg, case), 'r', encoding='utf-8') as fp:
+            return sum(1 for line in fp if line.strip())
+    except OSError:
+        return 0
+
+
 def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:
     model_path = convert_path(
         f'{cfg.model_dir}/{cfg.model_date}/{case.model}/pytorch/ov/{case.precision}'
     )
-    prompt_path = convert_path(
-        f'{cfg.prompts_dir}/{case.prompt_type}/{case.model}.jsonl'
-    )
+    prompt_path = _prompt_path(cfg, case)
     prompt_index = f' -pi {case.prompt_index}' if case.prompt_index is not None else ''
     return (
         f'python {cfg.llm_bench_script}'
@@ -92,6 +105,7 @@ def test_benchmark_image_generation(case: ImageGenCase, daily_config: DailyConfi
         'model': case.model,
         'precision': case.precision,
         'cmd': cmd,
+        'expected_series': _expected_series(daily_config, case),
         'data': [],
     })
 

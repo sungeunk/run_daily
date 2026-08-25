@@ -319,8 +319,6 @@ def _read_text_file(path: Path | None, max_chars: int = 120_000) -> str:
 
 # Artifact resolvers: `source_path` is the authoritative anchor (always
 # absolute, written by both loaders). Siblings are derived from its stem.
-# `report_file` stores the source filename, NOT a `.report` path — do not
-# feed it through `_existing_path` expecting a text report.
 _SOURCE_SUFFIXES = (".summary.json", ".pickle")
 
 
@@ -352,11 +350,6 @@ def _summary_path_for_run(run: pd.Series) -> Path | None:
     if run.get("source_format") == "new":
         return _source_path_for_run(run)
     return _sibling(run, ".summary.json")
-
-
-def _report_path_for_run(run: pd.Series) -> Path | None:
-    """Return the `.report` text path. Same stem for both formats."""
-    return _sibling(run, ".report")
 
 
 def _pytest_json_path_for_run(run: pd.Series) -> Path | None:
@@ -469,12 +462,10 @@ def _tab_dashboard(cfg: dict) -> None:
         return
 
     summary_path = _summary_path_for_run(run)
-    report_path = _report_path_for_run(run)
     pytest_json_path = _pytest_json_path_for_run(run)
     rawlog_path = _rawlog_path_for_run(run)
     summary = _read_json_file(summary_path)
     pytest_log = _read_json_file(pytest_json_path)
-    report_text = _read_text_file(report_path)
     rawlog_text = _read_text_file(rawlog_path)
     totals = summary.get("totals") or pytest_log.get("summary") or {}
     failures = _extract_failures(summary, pytest_log)
@@ -545,7 +536,6 @@ def _tab_dashboard(cfg: dict) -> None:
 
     artifacts = {
         "summary":     str(summary_path)     if summary_path     else "missing",
-        "report":      str(report_path)      if report_path      else "missing",
         "pytest_json": str(pytest_json_path) if pytest_json_path else "missing",
         "raw_log":     str(rawlog_path)      if rawlog_path      else "missing",
     }
@@ -576,9 +566,6 @@ def _tab_dashboard(cfg: dict) -> None:
 
     with st.expander("Run artifacts"):
         st.json(artifacts)
-    if report_text:
-        with st.expander("Report"):
-            st.code(report_text, language="text")
     if pytest_log:
         with st.expander("pytest-json-report"):
             st.json({

@@ -15,10 +15,9 @@
 
 | 트랙 | 흐름 |
 |---|---|
-| Old | `.pickle` (run_daily2/scripts pipeline) + `.report` (text) -> ingest -> DuckDB |
 | New | `.summary.json` (`daily/run.py` -> `report/builder.py`) -> ingest -> DuckDB |
 
-- 두 트랙 모두 `RunRecord` dataclass로 수렴한 뒤 `writer.upsert_run`으로 저장됩니다.
+- ingest는 `RunRecord` dataclass를 만든 뒤 `writer.upsert_run`으로 저장합니다.
 - Viewer는 `queries.py`를 통해 DuckDB를 read-only로 읽고, Streamlit 앱은 `app.py`에 있습니다.
 
 ---
@@ -36,7 +35,7 @@ Notes:
 - `perf_with_buckets`는 `threshold=100` 기준으로 `in_bucket` / `out_bucket` (`'short'` / `'long'` / `'0'`)을 파생합니다.
 - `perf_stats`는 30일 back-window에 대해 correlated subquery로 rolling median + MAD를 계산합니다. legacy point-vs-band helper용으로 유지합니다. Regression 탭은 개인 PR 결과가 chart를 오염시키지 않도록 purpose-filtered `perf_flat` rows에서 selected-series rolling band를 다시 계산합니다.
 - `runs.rawlog_path`는 로그 본문이 아니라 FILE PATH를 저장합니다. old schema는 전체 로그를 TEXT column에 저장해서 DB가 커졌기 때문에 제거했습니다.
-- `runs.source_format`은 `'old' | 'new'`입니다. 데이터 출처 디버깅을 위해 유지합니다.
+- `runs.source_format`은 `'old' | 'new'`입니다. legacy loader 제거 이전에 ingest된 row의 출처 디버깅을 위해 유지합니다.
 
 ### `daily/viewer/profiles/default.yaml`
 `FIXED_ROW_ORDER`를 대체합니다. Excel-paste 탭의 row order를 제어합니다.
@@ -69,24 +68,6 @@ Exports: `parse_stamp_from_name`, `workweek_of`, `split_ov_version`, `file_hash`
 - **Test-type handlers:** `llm_benchmark`, `benchmark_app`, `sd_genai`, `sd_dgfx`.
 - **Meta handling:** `summary.meta`는 optional입니다. 없으면 filename stamp + parent-dir machine + `generated_at` ts로 fallback합니다. meta가 추가되기 전의 초기 summary 파일도 동작합니다.
 
-### `daily/viewer/ingest/loader_old.py`
-legacy `.pickle` + `.report` -> `RunRecord`.
-
-- **Pickle trick:** `_TolerantUnpickler.find_class`는 누락된 class (`test_cases.TestBenchmark` 등)를 `_UnknownClass` stub으로 대체합니다. Key tuple은 `(model, precision, TestClass)`이고, `TestClass.__name__`을 읽어 올바른 extractor로 dispatch합니다.
-- **Class handlers:**
-
-| Class | Handler |
-|---|---|
-| `TestBenchmark` | `_benchmark_perf` |
-| `TestBenchmarkapp` | `_benchmark_app_perf` |
-| `TestStableDiffusion` | `_sd_perf_ms` (legacy C++ binary — pickle에는 ms, ingest 때 1000으로 나눔) |
-| `TestStableDiffusionGenai` | `_sd_perf_sec` (pickle 값이 이미 seconds) |
-| `TestStableDiffusionDGfxE2eAi` | `_sd_perf_sec` (pickle 값이 이미 seconds) |
-
-- **Dropped handlers:** `TestWhisperBase`는 legacy입니다. whisper-large-v3는 GenAI pipeline에 있습니다.
-- **Version parsing:** OV version은 filename `daily.<stamp>.<ov_version>.pickle`과 `.report` text (`Purpose` + `OpenVINO` line)에서 가져옵니다. Report text가 있으면 그것을 우선합니다.
-- **SD unit normalization:** 모든 SD pipeline은 source class와 관계없이 DB에 `unit='s'`로 저장됩니다. Legacy ms pickle은 load 시점에 1000으로 나눕니다. 이로써 SD-XL pipeline이 viewer에서 8초가 아니라 8ms처럼 보이던 1000배 ambiguity를 제거했습니다.
-
 ### `daily/viewer/ingest/writer.py`
 DuckDB upsert (각 `RunRecord` 단위 transaction) + display-profile loader입니다.
 
@@ -96,7 +77,7 @@ DuckDB upsert (각 `RunRecord` 단위 transaction) + display-profile loader입�
 ### `daily/viewer/ingest/cli.py`
 단일 CLI입니다. `--root`는 scan, `--input`은 단일 file을 처리합니다.
 
-- **Auto-detect (`_classify`):** `*.summary.json` -> new; sibling `.report`가 있는 `*.pickle` -> old; `.report` 단독 입력은 sibling pickle이 있으면 old, 아니면 skip.
+- **Detection (`_classify`):** `*.summary.json` -> new. 그 외는 skip합니다.
 - **Progress:** inline progress bar. 실패는 모아서 마지막에 보고하며 fatal은 아닙니다.
 - **Profile load:** default profile은 additive입니다. ingest CLI invocation마다 profile이 없을 때만 `profiles/default.yaml`을 로드합니다. 명시적인 `--profile` 또는 `--force`는 `--skip-profile`이 없는 한 지정 profile을 refresh합니다.
 
@@ -120,7 +101,7 @@ Streamlit entry입니다. 5개 tab이 있습니다.
 
 | Tab | 목적 |
 |---|---|
-| Dashboard | 첫 번째 tab입니다. `DEFAULT_RUN_FILTER`와 purpose/description이 match되는 최신 run을 선택합니다. fallback은 `daily_CB`입니다. summary / `.report` / `.pytest.json` / `.raw` artifact를 검토해서 test가 실제로 실행되었는지, pass/fail total, grouped failure cause, per-test pytest-json/summary message, raw pytest log text를 보여줍니다. Artifact sibling은 `source_path` stem에서 파생합니다. (`.summary.json` / `.pickle` suffix 제거) `report_file`은 source identity일 뿐이며 text/JSON reader에 직접 넣지 않습니다. |
+| Dashboard | 첫 번째 tab입니다. `DEFAULT_RUN_FILTER`와 purpose/description이 match되는 최신 run을 선택합니다. fallback은 `daily_CB`입니다. summary / `.pytest.json` / `.raw` artifact를 검토해서 test가 실제로 실행되었는지, pass/fail total, grouped failure cause, per-test pytest-json/summary message, raw pytest log text를 보여줍니다. Artifact sibling은 `source_path` stem에서 파생합니다. (`.summary.json` / `.pickle` suffix 제거) `report_file`은 source identity일 뿐이며 text/JSON reader에 직접 넣지 않습니다. |
 | Excel | run 선택 -> wide matrix (profile rows x run stamps) + tab-separated paste block + "extra rows" expander |
 | Regression | MERGED tab입니다. 이전의 Trend + Regressions를 합쳤습니다. worsening % 기준으로 ranked table을 보여주고, 선택된 row에 대해 one-series-at-a-time trend plot을 표시합니다. Baseline median + recent median은 legend entry가 보이도록 Scatter trace로 렌더링합니다. rolling ±2σ band는 밝은 모니터에서도 보이도록 visible fill (rgba 0.28)로 그립니다. |
 | Geomean | `exec_mode x in_bucket x out_bucket` geomean trend + band + latest-point alert (사용자 요청) |
@@ -272,8 +253,8 @@ cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/
 # 단일 파일 ingest (new format)
 cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
 
-# 단일 파일 ingest (old format)
-cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.<ver>.pickle
+# 단일 파일 ingest
+cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.summary.json
 
 # 강제 re-ingest
 # 위 명령에 --force 추가
@@ -313,8 +294,7 @@ DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 
 ## Known gaps & future work
 
-- **Unit-test coverage 확장.** viewer helper/loader/query/mail-alert formatting에 대한 focused pytest coverage를 추가했습니다. Future work: old pickle variant edge case와 더 큰 synthetic DuckDB history fixture를 보강합니다.
+- **Unit-test coverage 확장.** viewer helper/loader/query/mail-alert formatting에 대한 focused pytest coverage를 추가했습니다. Future work: 더 큰 synthetic DuckDB history fixture를 보강합니다.
 - **`perf_stats`는 여전히 correlated subquery를 사용합니다. (개념적으로 O(n·m))** 2026-04-27 기준 322k `perf_stats` rows에서 약 0.57초로 측정되어 아직 cached table은 필요 없습니다. query time이 1초를 넘으면 ingest 시점에 Python-side precomputation으로 `perf_stats_cached` table에 쓰는 방식으로 바꾸는 것을 고려합니다.
 - **`run.py`의 email regression alert.** mail delivery 전에 best-effort report section으로 구현했습니다. Future work: 수신자가 더 풍부한 형식을 원하면 threshold tuning이나 전용 HTML table 추가를 고려합니다.
-- **Non-canonical location에서 ingest한 pickle의 machine name.** `loader_old.py`는 기본적으로 parent-dir name에서 machine을 파생합니다. `/var/www/html/daily/<MACHINE>/` 밖에 있는 fixture/archive 파일을 rescue할 때는 `viewer.ingest.cli --machine <name>`을 사용합니다.
 - **추가 display profile.** profile이 하나뿐이면 sidebar는 profile dropdown을 숨깁니다. 실제로 선택할 두 번째 display layout이 생기면 iGPU-focused profile을 추가합니다.

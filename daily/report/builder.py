@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
-"""Report builder: consumes the pytest-json-report output and emits a human
-readable text report plus a normalised JSON summary.
+﻿#!/usr/bin/env python3
+"""Report builder: consumes the pytest-json-report output and emits a
+normalised JSON summary.
 
 pytest-json-report schema we rely on::
 
@@ -29,10 +29,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from statistics import geometric_mean
-from typing import Any, Iterable
-
-from tabulate import tabulate
+from typing import Any
 
 
 SUMMARY_SCHEMA_VERSION = 1
@@ -49,7 +46,7 @@ def _extract_metrics(test_entry: dict) -> dict | None:
     depending on version:
 
     * list of ``[name, value]`` pairs
-    * list of ``{name: value}`` dicts  (≥ 1.5)
+    * list of ``{name: value}`` dicts  (â‰¥ 1.5)
 
     We accept both so the report survives plugin upgrades.
     """
@@ -75,7 +72,7 @@ def build_summary(pytest_report: dict, *, extra_meta: dict | None = None
 
     ``extra_meta`` is merged into the top-level ``meta`` block. Callers
     (run.py) pass the run-level metadata that the pytest plugin itself
-    doesn't know about — OV version, machine hostname, workweek, purpose.
+    doesn't know about â€” OV version, machine hostname, workweek, purpose.
     """
     summary_block = pytest_report.get('summary', {})
     out = {
@@ -105,180 +102,13 @@ def build_summary(pytest_report: dict, *, extra_meta: dict | None = None
 
 
 # ---------------------------------------------------------------------------
-# Rendering helpers
-# ---------------------------------------------------------------------------
-
-def _filter(tests: list[dict], test_type: str) -> list[dict]:
-    return [t for t in tests if t.get('metrics', {}).get('test_type') == test_type]
-
-
-def _gm(values: Iterable[float]) -> str:
-    values = list(values)
-    return f'{geometric_mean(values):.2f}' if values else '-'
-
-
-def _render_summary_header(summary: dict) -> str:
-    t = summary['totals']
-    return tabulate([
-        ['Passed',       t['passed']],
-        ['Failed',       t['failed']],
-        ['Error',        t['error']],
-        ['Skipped',      t['skipped']],
-        ['Total',        t['total']],
-        ['Duration (s)', f"{summary['duration_sec']:.1f}"],
-    ], tablefmt='github', headers=['Metric', 'Value']) + '\n'
-
-
-def _render_failures(tests: list[dict]) -> str:
-    failed = [t for t in tests if t['outcome'] not in ('passed', 'skipped')]
-    if not failed:
-        return ''
-    rows = [[t['nodeid'], t['outcome']] for t in failed]
-    return '[ Failures ]\n' + tabulate(
-        rows, headers=['nodeid', 'outcome'], tablefmt='github'
-    ) + '\n'
-
-
-# ---------------------------------------------------------------------------
-# Per-test-type tables
-# ---------------------------------------------------------------------------
-
-def _render_llm_benchmark(tests: list[dict]) -> str:
-    subset = _filter(tests, 'llm_benchmark')
-    if not subset:
-        return ''
-
-    rows = []
-    first_vals, second_vals = [], []
-    for t in subset:
-        m = t['metrics']
-        if t['outcome'] != 'passed':
-            rows.append([m.get('model', ''), m.get('precision', ''),
-                         '', '', '', 'FAIL', 'FAIL'])
-            continue
-        for d in m.get('data', []):
-            perf = d.get('perf', [])
-            first  = f'{perf[0]:.2f}' if len(perf) > 0 else ''
-            second = f'{perf[1]:.2f}' if len(perf) > 1 else ''
-            if len(perf) > 0:
-                first_vals.append(perf[0])
-            if len(perf) > 1:
-                second_vals.append(perf[1])
-            rows.append([m['model'], m['precision'],
-                         d.get('prompt_idx', ''), d.get('in_token', ''),
-                         d.get('out_token', ''), first, second])
-
-    rows.append(['', '', '', '', '', '-', '-'])
-    rows.append(['geomean (1st)', '', '', '', '', _gm(first_vals), ''])
-    rows.append(['geomean (2nd)', '', '', '', '', '', _gm(second_vals)])
-
-    return '[RESULT] llm_benchmark\n' + tabulate(
-        rows,
-        headers=['model', 'precision', 'prompt', 'in token', 'out token',
-                 '1st inf (ms)', '2nd inf (ms)'],
-        tablefmt='github', stralign='right',
-    ) + '\n'
-
-
-def _render_benchmark_app(tests: list[dict]) -> str:
-    subset = _filter(tests, 'benchmark_app')
-    if not subset:
-        return ''
-
-    rows = []
-    for t in subset:
-        m = t['metrics']
-        if t['outcome'] != 'passed':
-            rows.append([m.get('model', ''), m.get('precision', ''),
-                         m.get('batch', ''), 'FAIL'])
-            continue
-        for d in m.get('data', []):
-            perf = d.get('perf', [])
-            fps = f'{perf[0]:.2f}' if perf else ''
-            rows.append([m['model'], m['precision'], m.get('batch', ''), fps])
-
-    return '[RESULT] benchmark_app\n' + tabulate(
-        rows,
-        headers=['model', 'precision', 'batch', 'throughput (FPS)'],
-        tablefmt='github', stralign='right',
-    ) + '\n'
-
-
-def _render_sd_genai(tests: list[dict]) -> str:
-    subset = _filter(tests, 'image_generation')
-    if not subset:
-        return ''
-
-    rows = []
-    for t in subset:
-        m = t['metrics']
-        if t['outcome'] != 'passed':
-            rows.append([m.get('model', ''), m.get('precision', ''),
-                         'FAIL', '', '', '', '', '', ''])
-            continue
-        for d in m.get('data', []):
-            size = ''
-            if d.get('width') and d.get('height'):
-                size = f"{d['width']}x{d['height']}"
-            rows.append([
-                m['model'], m['precision'],
-                f"{d.get('generation_time_sec', 0):.2f}" if d.get('generation_time_sec') is not None else '',
-                d.get('batch_size', ''), d.get('steps', ''), size,
-                d.get('input_token_size', ''), d.get('output_token_size', ''),
-                d.get('infer_count', ''),
-            ])
-
-    return '[RESULT] stable_diffusion_genai\n' + tabulate(
-        rows,
-        headers=['model', 'precision', 'pipeline (s)', 'batch', 'steps',
-                 'size', 'in tokens', 'out tokens', 'infer count'],
-        tablefmt='github', stralign='right',
-    ) + '\n'
-
-
-def _render_chat_sample(tests: list[dict]) -> str:
-    subset = _filter(tests, 'chat_sample')
-    if not subset:
-        return ''
-
-    parts = ['[RESULT] chat_sample']
-    for t in subset:
-        m = t['metrics']
-        parts.append(f"--- {m.get('model','')} / {m.get('precision','')}"
-                     f" (rc={m.get('returncode', '?')}) ---")
-        parts.append(m.get('output', '').rstrip())
-    return '\n'.join(parts) + '\n'
-
-
-# ---------------------------------------------------------------------------
 # Public entry
 # ---------------------------------------------------------------------------
 
-# Ordered so the report reads the same as the old one: summary, failures,
-# then a block per test type.
-_SECTION_RENDERERS = [
-    _render_llm_benchmark,
-    _render_benchmark_app,
-    _render_sd_genai,
-    _render_chat_sample,
-]
 
-
-def render_text_report(summary: dict) -> str:
-    sections: list[str] = ['[ Summary ]', _render_summary_header(summary)]
-    failures = _render_failures(summary['tests'])
-    if failures:
-        sections.append(failures)
-    for render in _SECTION_RENDERERS:
-        block = render(summary['tests'])
-        if block:
-            sections.append(block)
-    return '\n'.join(s for s in sections if s).strip() + '\n'
-
-
-def build_reports(pytest_json_path: Path, *, text_out: Path, summary_out: Path,
+def build_reports(pytest_json_path: Path, *, summary_out: Path,
                   extra_meta: dict | None = None) -> dict:
-    """Read pytest-json-report output, write text + normalised JSON reports.
+    """Read pytest-json-report output and write the normalised JSON summary.
 
     Returns the summary dict so callers can use it for mail titles etc.
     """
@@ -286,5 +116,4 @@ def build_reports(pytest_json_path: Path, *, text_out: Path, summary_out: Path,
     summary = build_summary(pytest_report, extra_meta=extra_meta)
 
     summary_out.write_text(json.dumps(summary, indent=2), encoding='utf-8')
-    text_out.write_text(render_text_report(summary), encoding='utf-8')
     return summary

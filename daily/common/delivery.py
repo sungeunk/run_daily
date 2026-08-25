@@ -197,12 +197,11 @@ def artefact_links(files: Iterable[Path], *, base_url: str | None = None
     """Return ``(label, url)`` pairs for artefacts published on the relay.
 
     Labels are derived from the filename suffix so the report header reads
-    ``report`` / ``html`` / ``raw`` rather than the full stamped filename.
+    ``html`` / ``raw log`` rather than the full stamped filename.
     Ordered most-useful-first; unknown suffixes keep their extension as the
     label and sort last.
     """
     label_order = {
-        'report': (0, 'report'),
         'html': (1, 'html'),
         'raw': (2, 'raw log'),
         'summary.json': (3, 'summary json'),
@@ -269,12 +268,6 @@ def _ensure_remote_directory(sftp: Any, remote_dir: str) -> None:
         sftp.stat(remote_dir)
     except OSError:
         sftp.mkdir(remote_dir)
-
-
-def prepend_links(report_path: Path, links_block: str) -> None:
-    """Insert ``links_block`` at the top of the plain-text report."""
-    current = report_path.read_text(encoding='utf-8')
-    report_path.write_text(links_block + '\n' + current, encoding='utf-8')
 
 
 def prepend_links_html(html_path: Path, links_block: str) -> None:
@@ -378,8 +371,7 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
     """Send ``report_path`` as an HTML email to ``recipients``.
 
     ``recipients`` is the same comma-separated string the old ``--mail``
-    flag accepted. ``report_path`` may be a generated ``.html`` report or a
-    legacy plain-text ``.report`` file. Returns True on success.
+    flag accepted. Returns True on success.
     """
     if not recipients:
         return False

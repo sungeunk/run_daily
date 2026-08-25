@@ -108,11 +108,31 @@ def render_analysis_summary(result: AnalysisResult) -> str:
     return "\n".join(lines)
 
 
-def prepend_to_report(report_path: Path, result: AnalysisResult) -> None:
-    """Prepend the analysis summary block to an existing text report file."""
-    block = render_analysis_summary(result)
-    current = report_path.read_text(encoding="utf-8")
-    report_path.write_text(block + "\n\n" + current, encoding="utf-8")
+def _gpu_memory_text(summary: dict | None) -> tuple[str, str]:
+    """Return ``(dedicated, shared)`` display strings from the run metadata."""
+    meta = (summary or {}).get("meta") or {}
+
+    def _mb(value) -> str:
+        if value in (None, ""):
+            return "—"
+        return f"{float(value) / 1024:.2f} GB ({float(value):,.0f} MB)"
+
+    shared = _mb(meta.get("gpu_shared_memory_mb"))
+    override = meta.get("gpu_shared_memory_override")
+    if shared != "—" and override is not None:
+        shared += " — driver default" if int(override) == 0 else f" — overridden (IncreaseFixedSegment={int(override)})"
+    return _mb(meta.get("gpu_dedicated_memory_mb")), shared
+
+
+def _skipped_series(summary: dict | None) -> int:
+    """Series lost to skipped tests, as reported by each test's ``expected_series``."""
+    if not summary:
+        return 0
+    return sum(
+        int((test.get("metrics") or {}).get("expected_series") or 0)
+        for test in summary.get("tests", [])
+        if test.get("outcome") == "skipped"
+    )
 
 
 def _render_image_gallery(summary: dict | None) -> str:
@@ -182,6 +202,12 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
     # Keep original engine order so this table matches the main report table order.
     all_rows = list(result.rows)
     fluctuation_same = sum(1 for r in result.rows if r.within_fluctuation)
+    # Top table counts one perf series as one unit; skipped tests report the
+    # series they would have produced via ``expected_series``.
+    series_run = result.performance.compared
+    series_skipped = _skipped_series(summary)
+    series_total = series_run + series_skipped
+    gpu_dedicated_text, gpu_shared_text = _gpu_memory_text(summary)
 
     badge = {
         "green":  ("GREEN",  "#18794e"),
@@ -331,10 +357,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
         body {{ margin: 0; background: radial-gradient(circle at top right, #e7eef9 0%, var(--bg) 38%); color: var(--text); font-family: "Segoe UI", "Noto Sans", sans-serif; }}
         .wrap {{ max-width: 1380px; margin: 0 auto; padding: 24px; }}
         .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; box-shadow: 0 8px 28px rgba(21, 34, 56, 0.06); }}
-        .layout-row {{ width: 100%; border-collapse: separate; border-spacing: 14px 0; table-layout: fixed; }}
-        .layout-row td {{ vertical-align: top; }}
-        .layout-row.stats td {{ width: 33.333%; }}
-        .layout-row.summary td {{ width: 50%; }}
         h1 {{ margin: 0 0 4px; font-size: 26px; letter-spacing: 0.2px; }}
         h2 {{ margin: 0 0 10px; font-size: 16px; color: var(--accent); }}
         h3 {{ margin: 0 0 8px; font-size: 14px; font-weight: 700; }}
@@ -346,6 +368,9 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
         .stat-block {{ text-align: center; padding: 10px 6px; }}
         .stat-block .val {{ font-size: 28px; font-weight: 700; }}
         .stat-block .lbl {{ font-size: 11px; color: var(--muted); margin-top: 2px; }}
+        .stat-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; text-align: center; }}
+        .stat-table th {{ text-align: center; font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--muted); }}
+        .stat-table td {{ text-align: center; font-size: 26px; font-weight: 700; border-bottom: 0; padding: 8px; }}
         table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
         th {{ background: #f3f7fe; font-weight: 700; padding: 9px 8px; text-align: left; }}
         td {{ border-bottom: 1px solid var(--line); padding: 7px 8px; }}
@@ -354,20 +379,9 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
         .legend-table {{ font-size: 13px; width: 100%; border-collapse: collapse; }}
         .legend-table tr:nth-child(even) td {{ background: #f8fafc; }}
         @media (max-width: 980px) {{
-            .layout-row, .layout-row tbody, .layout-row tr, .layout-row td {{ display: block; width: 100% !important; }}
-            .layout-row td {{ padding-bottom: 14px; }}
             .wrap {{ padding: 14px; }}
         }}
     </style>
-    <!--[if mso]>
-    <style>
-        .layout-row td {{
-            display: block !important;
-            width: 100% !important;
-            padding-bottom: 14px !important;
-        }}
-    </style>
-    <![endif]-->
 </head>
 <body>
 <div class="wrap">
@@ -382,79 +396,41 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
     </div>
 
     <!-- Top stat row -->
-    <table role="presentation" class="layout-row stats" style="margin-bottom:14px">
-        <tr>
-            <td>
-                <div class="card stat-block">
-                    <div class="val" style="color:{'#b42318' if result.performance.regressed else '#18794e'}">{result.performance.regressed}</div>
-                    <div class="lbl">Regressions</div>
-                </div>
-            </td>
-            <td>
-                <div class="card stat-block">
-                    <div class="val" style="color:{'#18794e' if result.performance.improved else '#6b7280'}">{result.performance.improved}</div>
-                    <div class="lbl">Improvements</div>
-                </div>
-            </td>
-            <td>
-                <div class="card stat-block">
-                    <div class="val">{result.performance.compared}</div>
-                    <div class="lbl">Series Compared</div>
-                </div>
-            </td>
-        </tr>
-    </table>
+    <div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">
+        <table role="presentation" class="stat-table">
+            <tr>
+                <th>Total</th>
+                <th>Skip</th>
+                <th>Run</th>
+                <th>Improvements</th>
+                <th>Regressions</th>
+            </tr>
+            <tr>
+                <td>{series_total}</td>
+                <td style="color:{'#a05a00' if series_skipped else '#6b7280'}">{series_skipped}</td>
+                <td>{series_run}</td>
+                <td style="color:{'#18794e' if result.performance.improved else '#6b7280'}">{result.performance.improved}</td>
+                <td style="color:{'#b42318' if result.performance.regressed else '#18794e'}">{result.performance.regressed}</td>
+            </tr>
+        </table>
+    </div>
 
-    <!-- Summary + Methodology -->
-    <table role="presentation" class="layout-row summary" style="margin-bottom:14px">
-        <tr>
-            <td>
-                <div class="card">
-                    <h2>Run Summary</h2>
-                    <table role="presentation" class="kvs-table">
-                        <tr><td class="k">Current OV</td><td>{_safe_text(current.ov_version if current else None)}</td></tr>
-                        <tr><td class="k">Current purpose</td><td>{_safe_text(current.purpose if current else None)}</td></tr>
-                        <tr><td class="k">Machine</td><td>{_safe_text(current.machine_name if current else None)}</td></tr>
-                        <tr><td class="k">GPU driver</td><td>{_safe_text(current.gpu_driver_version if current else None)}</td></tr>
-                        <tr><td class="k">GPU info</td><td>{_safe_text(current.gpu_info if current else None)}</td></tr>
-                        <tr><td class="k">Host info</td><td>{_safe_text(current.host_info if current else None)}</td></tr>
-                        <tr><td class="k">Memory size</td><td>{_safe_text(current.memory_size if current else None)}</td></tr>
-                        <tr><td class="k">Memory speed</td><td>{_safe_text(current.memory_speed if current else None)}</td></tr>
-                        <tr><td class="k">Baseline</td><td>{html.escape(baseline_text)}</td></tr>
-                        <tr><td class="k">Selection reason</td><td>{html.escape(result.baseline.selection_reason or "—")}</td></tr>
-                        <tr><td class="k">Functional</td><td>failed={result.functional.failed}&nbsp;&nbsp;error={result.functional.error}&nbsp;&nbsp;skipped={result.functional.skipped}</td></tr>
-                        <tr><td class="k">Perf same</td><td>{result.performance.same} ({fluctuation_same} by fluctuation guard)</td></tr>
-                    </table>
-                </div>
-            </td>
-            <td>
-                <div class="card">
-                    <h2>Analysis Methodology</h2>
-                    <div style="font-size:13px;line-height:1.65;color:#374151">
-                        <b>Reference</b> = mean of the best <b>top-5</b> runs from a <b>10-run history window</b> (same machine · model · precision · mode).<br>
-                        <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
-                        <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
-                    </div>
-                </div>
-            </td>
-        </tr>
-    </table>
-
-    <!-- Column legend -->
+    <!-- Summary -->
     <div class="card" style="margin-bottom:14px">
-        <h2>Column Reference Guide</h2>
-        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
-            Outlook compatibility mode: this section is always expanded.
-        </div>
-        <div style="margin-top:10px;overflow-x:auto">
-            <table class="legend-table">
-                <thead><tr>
-                    <th style="width:110px;background:#f3f7fe">Column</th>
-                    <th style="background:#f3f7fe">Description</th>
-                </tr></thead>
-                <tbody>{col_legend_rows}</tbody>
-            </table>
-        </div>
+        <h2>Run Summary</h2>
+        <table role="presentation" class="kvs-table">
+            <tr><td class="k">Current OV</td><td>{_safe_text(current.ov_version if current else None)}</td></tr>
+            <tr><td class="k">Current purpose</td><td>{_safe_text(current.purpose if current else None)}</td></tr>
+            <tr><td class="k">Machine</td><td>{_safe_text(current.machine_name if current else None)}</td></tr>
+            <tr><td class="k">GPU driver</td><td>{_safe_text(current.gpu_driver_version if current else None)}</td></tr>
+            <tr><td class="k">GPU info</td><td>{_safe_text(current.gpu_info if current else None)}</td></tr>
+            <tr><td class="k">GPU dedicated memory</td><td>{html.escape(gpu_dedicated_text)}</td></tr>
+            <tr><td class="k">GPU shared memory</td><td>{html.escape(gpu_shared_text)}</td></tr>
+            <tr><td class="k">Host info</td><td>{_safe_text(current.host_info if current else None)}</td></tr>
+            <tr><td class="k">Memory size</td><td>{_safe_text(current.memory_size if current else None)}</td></tr>
+            <tr><td class="k">Memory speed</td><td>{_safe_text(current.memory_speed if current else None)}</td></tr>
+            <tr><td class="k">Baseline</td><td>{html.escape(baseline_text)}</td></tr>
+        </table>
     </div>
 
     <!-- Functional issues -->
@@ -512,15 +488,40 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
 
     {image_gallery}
 
+    <!-- Reference material: kept last, it is only needed while learning the report -->
+    <div class="card" style="margin-bottom:14px">
+        <h2>Analysis Methodology</h2>
+        <div style="font-size:13px;line-height:1.65;color:#374151">
+            <b>Reference</b> = mean of the best <b>top-5</b> runs from a <b>10-run history window</b> (same machine · model · precision · mode).<br>
+            <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
+            <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Column Reference Guide</h2>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
+            Outlook compatibility mode: this section is always expanded.
+        </div>
+        <div style="margin-top:10px;overflow-x:auto">
+            <table class="legend-table">
+                <thead><tr>
+                    <th style="width:110px;background:#f3f7fe">Column</th>
+                    <th style="background:#f3f7fe">Description</th>
+                </tr></thead>
+                <tbody>{col_legend_rows}</tbody>
+            </table>
+        </div>
+    </div>
+
 </div>
 </body>
 </html>
 """
 
 
-def write_analysis_html(report_path: Path, result: AnalysisResult,
+def write_analysis_html(html_path: Path, result: AnalysisResult,
                         summary: dict | None = None) -> Path:
-        """Write an analysis-focused HTML report next to the text report."""
-        html_path = report_path.with_suffix(".html")
+        """Write the analysis-focused HTML report."""
         html_path.write_text(render_analysis_html(result, summary), encoding="utf-8")
         return html_path

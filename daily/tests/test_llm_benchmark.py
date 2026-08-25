@@ -79,13 +79,25 @@ def _is_ptl_machine() -> bool:
     return 'PTL' in platform.node().upper()
 
 
+def _prompt_path(cfg: DailyConfig, case: BenchmarkCase) -> str:
+    return convert_path(f'{cfg.prompts_dir}/{case.prompt_type}/{case.model}.jsonl')
+
+
+def _expected_series(prompt_path: str) -> int:
+    """Series this case would produce: one per prompt for 1st- and 2nd-token latency."""
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as fp:
+            prompts = sum(1 for line in fp if line.strip())
+    except OSError:
+        return 0
+    return prompts * 2
+
+
 def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) -> str:
     model_path = convert_path(
         f'{cfg.model_dir}/{cfg.model_date}/{case.model}/pytorch/ov/{case.precision}'
     )
-    prompt_path = convert_path(
-        f'{cfg.prompts_dir}/{case.prompt_type}/{case.model}.jsonl'
-    )
+    prompt_path = _prompt_path(cfg, case)
 
     parts = [
         f'python {cfg.llm_bench_script}',
@@ -114,6 +126,16 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) ->
 @pytest.mark.parametrize('case', CASES, ids=lambda c: c.test_id)
 def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
                        run_subprocess, record_metrics):
+    # Recorded before any skip so the report can still tell what was skipped
+    # and how many series it would have contributed.
+    record_metrics({
+        'test_type': 'llm_benchmark',
+        'model': case.model,
+        'precision': case.precision,
+        'expected_series': _expected_series(_prompt_path(daily_config, case)),
+        'data': [],
+    })
+
     if case.ptl_only and not _is_ptl_machine():
         pytest.skip(f'{case.model} runs only on PTL machines')
 
