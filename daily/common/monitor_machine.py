@@ -3,11 +3,11 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #   "psutil>=6.0.0",
-#   "wmi>=1.5.1 ; sys_platform == 'win32'",
+#   "wmi>=1.5.1",
 # ]
 # ///
 
-"""Sample first-token latency related system factors on Windows and Linux.
+"""Sample first-token latency related system factors on Windows.
 
 The script records a time series for:
 - CPU clock, temperature, and usage
@@ -17,11 +17,8 @@ The script records a time series for:
 - Windows timer resolution
 
 Notes:
-- Intel GPU name comes from Win32_VideoController (Windows) or lspci (Linux).
-- Intel GPU telemetry uses Level Zero Sysman (ze_loader.dll / libze_loader.so.1)
-  and needs no external tooling.
-- Windows-only fields (timer resolution, EcoQoS throttling, foreground window)
-  are reported as null on Linux so the record schema stays identical.
+- Intel GPU name comes from Win32_VideoController via CIM.
+- Intel GPU telemetry uses Level Zero Sysman (ze_loader.dll) and needs no external tooling.
 """
 
 from __future__ import annotations
@@ -29,13 +26,14 @@ from __future__ import annotations
 import argparse
 import ctypes
 import csv
+import http.client
 import json
 import logging
 import os
-import platform
 import re
 import subprocess
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
@@ -43,8 +41,6 @@ from typing import Final
 
 
 LOGGER: Final[logging.Logger] = logging.getLogger("first_token_monitor")
-IS_WINDOWS: Final[bool] = platform.system() == "Windows"
-IS_LINUX: Final[bool] = platform.system() == "Linux"
 PSUTIL: object | None = None
 WMI_LIB: object | None = None
 
@@ -61,7 +57,7 @@ _LAST_ENGINE: tuple[int, int] | None = None
 _LAST_PAGE_FAULTS: tuple[int, float] | None = None
 _LAST_PROCESS_CPU: dict[int, tuple[str, float]] = {}
 _LAST_PROCESS_CPU_TIME: float | None = None
-_LAST_TEMP_C: float | None = None
+_LAST_TEMPS: "CpuTemperatures | None" = None
 _LAST_TEMP_AT: float | None = None
 _LAST_CPU_SNAPSHOT: tuple[float, float, float] | None = None
 _LAST_CPU_USAGE: float | None = None
@@ -69,6 +65,7 @@ _LAST_CPU_USAGE_AT: float | None = None
 
 # Below roughly one scheduler tick the busy/idle delta is dominated by quantization.
 CPU_USAGE_MIN_WINDOW_SEC: Final[float] = 0.2
+LHM_WEB_URL: Final[str] = "http://127.0.0.1:8085/data.json"
 
 PROCESS_POWER_THROTTLING_CURRENT_VERSION: Final[int] = 1
 PROCESS_POWER_THROTTLING_EXECUTION_SPEED: Final[int] = 0x1
@@ -98,6 +95,15 @@ class ProcessPriority:
     pid: int
     class_value: int
     class_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class CpuTemperatures:
+    overall_c: float | None
+    core_max_c: float | None
+    core_avg_c: float | None
+    core_temps_c: list[float]
+    source: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,35 +151,23 @@ def run_command(command: list[str], timeout_sec: float = 3.0) -> str | None:
 
 
 def run_powershell(command: str, timeout_sec: float = 4.0) -> str | None:
-    if not IS_WINDOWS:
-        return None
     return run_command(["powershell", "-NoProfile", "-Command", command], timeout_sec)
 
 
-def read_text_file(path: str) -> str | None:
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            return handle.read()
-    except OSError:
-        return None
-
-
-def ensure_required_modules() -> tuple[object, object | None]:
-    required = ["psutil", "wmi"] if IS_WINDOWS else ["psutil"]
-    missing = [name for name in required if find_spec(name) is None]
+def ensure_required_modules() -> tuple[object, object]:
+    missing: list[str] = []
+    for module_name in ("psutil", "wmi"):
+        if find_spec(module_name) is None:
+            missing.append(module_name)
 
     if missing:
         missing_csv = ", ".join(missing)
         raise ModuleNotFoundError(
             "Required Python modules are missing: "
-            f"{missing_csv}. Install with: pip install {' '.join(missing)}"
+            f"{missing_csv}. Install with: uv pip install psutil wmi"
         )
 
     import psutil  # type: ignore
-
-    if not IS_WINDOWS:
-        return psutil, None
-
     import wmi  # type: ignore
 
     return psutil, wmi
@@ -242,34 +236,7 @@ def get_cpu_clock_mhz() -> float | None:
         return None
 
 
-def _linux_cpu_temp_c() -> float | None:
-    if PSUTIL is None:
-        return None
-    try:
-        sensors = PSUTIL.sensors_temperatures()
-    except Exception:
-        return None
-    if not sensors:
-        return None
-
-    # Package/core sensors first; acpitz is chassis-level and lags the die.
-    for name in ("coretemp", "k10temp", "zenpower", "cpu_thermal", "acpitz"):
-        entries = sensors.get(name) or []
-        values = [
-            float(entry.current)
-            for entry in entries
-            if getattr(entry, "current", None) is not None
-        ]
-        values = [v for v in values if -30.0 <= v <= 130.0]
-        if values:
-            return max(values)
-    return None
-
-
 def get_cpu_temp_c() -> float | None:
-    if IS_LINUX:
-        return _linux_cpu_temp_c()
-
     # ACPI thermal zone is motherboard-level and may be unavailable on many systems.
     conn = get_wmi_connection("root\\wmi")
     if conn is None:
@@ -297,20 +264,144 @@ def get_cpu_temp_c() -> float | None:
     return max(temperatures)
 
 
-def get_cpu_temp_cached(now: float, interval_sec: float, force: bool) -> tuple[float | None, float | None]:
-    """Return (temp_c, age_ms). The WMI probe costs ~5 ms, so it is not read every sample."""
-    global _LAST_TEMP_C, _LAST_TEMP_AT
+def parse_sensor_float(text: str | None) -> float | None:
+    if not text:
+        return None
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+    if match is None:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def iter_lhm_nodes(node: dict[str, object], in_temperatures: bool = False) -> Iterator[tuple[dict[str, object], bool]]:
+    text = str(node.get("Text", ""))
+    next_in_temperatures = in_temperatures or text == "Temperatures"
+    yield node, next_in_temperatures
+    children = node.get("Children")
+    if not isinstance(children, list):
+        return
+    for child in children:
+        if isinstance(child, dict):
+            yield from iter_lhm_nodes(child, next_in_temperatures)
+
+
+def get_lhm_web_payload(timeout_sec: float = 1.0) -> dict[str, object] | None:
+    prefix = "http://127.0.0.1:8085"
+    if not LHM_WEB_URL.startswith(prefix):
+        return None
+    path = LHM_WEB_URL[len(prefix) :]
+    if not path:
+        path = "/"
+
+    conn = http.client.HTTPConnection("127.0.0.1", 8085, timeout=timeout_sec)
+    try:
+        conn.request("GET", path)
+        response = conn.getresponse()
+        if response.status != 200:
+            return None
+        payload = response.read().decode("utf-8", errors="replace")
+    except (OSError, http.client.HTTPException, TimeoutError):
+        return None
+    finally:
+        conn.close()
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def get_cpu_temps_lhm_web() -> CpuTemperatures | None:
+    payload = get_lhm_web_payload()
+    if payload is None:
+        return None
+
+    package_c: float | None = None
+    core_max_c: float | None = None
+    core_avg_c: float | None = None
+    core_map: dict[str, float] = {}
+    for node, in_temperatures in iter_lhm_nodes(payload):
+        text = str(node.get("Text", ""))
+        if not in_temperatures:
+            continue
+        value = parse_sensor_float(str(node.get("Value", "")))
+        if value is None or not (-30.0 <= value <= 130.0):
+            continue
+
+        if text == "CPU Package":
+            package_c = value
+        elif text == "Core Max":
+            core_max_c = value
+        elif text == "Core Average":
+            core_avg_c = value
+        elif re.fullmatch(r"(?:P|E)-Core #\d+", text) or re.fullmatch(r"CPU Core #\d+", text):
+            core_map[text] = value
+
+    if package_c is None and core_max_c is None and core_avg_c is None and not core_map:
+        return None
+
+    if not core_map:
+        core_temps: list[float] = []
+    else:
+        ordered = sorted(core_map.items(), key=lambda kv: kv[0])
+        core_temps = [value for _, value in ordered]
+
+    if core_max_c is None and core_temps:
+        core_max_c = max(core_temps)
+    if core_avg_c is None and core_temps:
+        core_avg_c = sum(core_temps) / len(core_temps)
+
+    overall_c = package_c if package_c is not None else core_max_c
+    return CpuTemperatures(
+        overall_c=overall_c,
+        core_max_c=core_max_c,
+        core_avg_c=core_avg_c,
+        core_temps_c=core_temps,
+        source="lhm-web",
+    )
+
+
+def get_cpu_temps() -> CpuTemperatures | None:
+    """CPU temperature via LHM web API first, then ACPI thermal zone fallback."""
+    lhm_web = get_cpu_temps_lhm_web()
+    if lhm_web is not None:
+        return lhm_web
+
+    overall_c = get_cpu_temp_c()
+    if overall_c is None:
+        return None
+    return CpuTemperatures(
+        overall_c=overall_c,
+        core_max_c=None,
+        core_avg_c=None,
+        core_temps_c=[],
+        source="acpi-thermal-zone",
+    )
+
+
+def get_cpu_temp_cached(
+    now: float, interval_sec: float, force: bool
+) -> tuple["CpuTemperatures | None", float | None, float | None]:
+    """Return (temps, age_ms, query_duration_ms). query_duration_ms is set only on a fresh probe."""
+    global _LAST_TEMPS, _LAST_TEMP_AT
 
     if force or _LAST_TEMP_AT is None or (now - _LAST_TEMP_AT) >= interval_sec:
-        temp = get_cpu_temp_c()
-        if temp is not None:
-            _LAST_TEMP_C = temp
+        t_probe_start = time.perf_counter()
+        temps = get_cpu_temps()
+        query_duration_ms = (time.perf_counter() - t_probe_start) * 1000.0
+        if temps is not None:
+            _LAST_TEMPS = temps
             _LAST_TEMP_AT = now
-            return temp, 0.0
+            return temps, 0.0, query_duration_ms
+        if _LAST_TEMP_AT is None:
+            return None, None, query_duration_ms
 
-    if _LAST_TEMP_AT is None:
-        return None, None
-    return _LAST_TEMP_C, (now - _LAST_TEMP_AT) * 1000.0
+    return _LAST_TEMPS, (now - _LAST_TEMP_AT) * 1000.0, None
 
 
 def get_cpu_usage_windowed(now: float) -> tuple[float | None, float | None]:
@@ -346,41 +437,7 @@ def get_cpu_usage_windowed(now: float) -> tuple[float | None, float | None]:
     return _LAST_CPU_USAGE, 0.0
 
 
-def _read_proc_meminfo_kb() -> dict[str, int]:
-    text = read_text_file("/proc/meminfo")
-    if text is None:
-        return {}
-    values: dict[str, int] = {}
-    for line in text.splitlines():
-        key, _, rest = line.partition(":")
-        token = rest.strip().split(" ", 1)[0]
-        try:
-            values[key.strip()] = int(token)
-        except ValueError:
-            continue
-    return values
-
-
-def _linux_host_memory_info() -> HostMemoryInfo:
-    total_gb: float | None = None
-    if PSUTIL is not None:
-        try:
-            total_gb = round(PSUTIL.virtual_memory().total / (1024**3), 1)
-        except Exception:
-            total_gb = None
-    if total_gb is None:
-        mem_total_kb = _read_proc_meminfo_kb().get("MemTotal")
-        if mem_total_kb:
-            total_gb = round(mem_total_kb / (1024**2), 1)
-
-    # DMI exposes module speed but /sys/.../dmi/id/ does not; dmidecode needs root.
-    return HostMemoryInfo(speed_mts=None, total_gb=total_gb)
-
-
 def get_host_memory_info() -> HostMemoryInfo:
-    if IS_LINUX:
-        return _linux_host_memory_info()
-
     conn = get_wmi_connection()
     speeds: list[float] = []
     total_bytes: int = 0
@@ -444,9 +501,6 @@ def get_memory_usage() -> tuple[float | None, int | None]:
 
 
 def query_timer_resolution() -> TimerResolution | None:
-    if not IS_WINDOWS:
-        return None
-
     ntdll = ctypes.WinDLL("ntdll")
     min_units = ctypes.c_ulong()
     max_units = ctypes.c_ulong()
@@ -476,21 +530,16 @@ def get_process_priority(pid: int) -> ProcessPriority | None:
     try:
         proc = PSUTIL.Process(pid)
         cls = int(proc.nice())
+        return ProcessPriority(
+            pid=pid,
+            class_value=cls,
+            class_name=PRIORITY_CLASSES.get(cls, f"UNKNOWN_{cls}"),
+        )
     except Exception:
         return None
 
-    # On Linux psutil.nice() is the POSIX nice value, not a Windows priority class.
-    name = PRIORITY_CLASSES.get(cls, f"UNKNOWN_{cls}") if IS_WINDOWS else f"NICE_{cls}"
-    return ProcessPriority(pid=pid, class_value=cls, class_name=name)
-
 
 def get_process_session_id(pid: int) -> int | None:
-    if not IS_WINDOWS:
-        try:
-            return int(os.getsid(pid))
-        except OSError:
-            return None
-
     kernel32 = ctypes.WinDLL("kernel32")
     session_id = ctypes.c_ulong()
     if kernel32.ProcessIdToSessionId(ctypes.c_ulong(pid), ctypes.byref(session_id)) == 0:
@@ -552,9 +601,6 @@ def is_process_alive(pid: int) -> bool:
 
 
 def get_foreground_pid() -> int | None:
-    if not IS_WINDOWS:
-        return None
-
     user32 = ctypes.WinDLL("user32")
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
@@ -574,9 +620,6 @@ class _ProcessPowerThrottlingState(ctypes.Structure):
 
 def get_process_power_throttling(pid: int) -> str | None:
     """Return EcoQoS execution-speed state: throttled, unthrottled, or system-managed."""
-    if not IS_WINDOWS:
-        return None
-
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
@@ -621,15 +664,6 @@ class _MemoryStatusEx(ctypes.Structure):
 
 def get_commit_charge_mb() -> tuple[int | None, int | None]:
     """Return (commit_used_mb, commit_limit_mb) from the system commit charge."""
-    if not IS_WINDOWS:
-        meminfo = _read_proc_meminfo_kb()
-        used_kb = meminfo.get("Committed_AS")
-        limit_kb = meminfo.get("CommitLimit")
-        return (
-            used_kb // 1024 if used_kb is not None else None,
-            limit_kb // 1024 if limit_kb is not None else None,
-        )
-
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     status = _MemoryStatusEx()
     status.dwLength = ctypes.sizeof(status)
@@ -640,37 +674,14 @@ def get_commit_charge_mb() -> tuple[int | None, int | None]:
     return used_mb, limit_mb
 
 
-def _linux_page_faults(pid: int) -> int | None:
-    text = read_text_file(f"/proc/{pid}/stat")
-    if text is None:
-        return None
-    # comm may contain spaces and parentheses, so split after the final ')'.
-    _, _, tail = text.rpartition(")")
-    fields = tail.split()
-    # Relative to the field after comm: minflt is index 7, majflt index 9.
-    if len(fields) < 10:
-        return None
-    try:
-        return int(fields[7]) + int(fields[9])
-    except ValueError:
-        return None
-
-
 def get_page_fault_rate(pid: int, now: float) -> float | None:
     """Return page faults per second for the target process since the previous sample."""
     global _LAST_PAGE_FAULTS
-
-    faults: int | None
-    if IS_WINDOWS:
-        if PSUTIL is None:
-            return None
-        try:
-            faults = int(PSUTIL.Process(pid).memory_info().num_page_faults)
-        except Exception:
-            return None
-    else:
-        faults = _linux_page_faults(pid)
-    if faults is None:
+    if PSUTIL is None:
+        return None
+    try:
+        faults = int(PSUTIL.Process(pid).memory_info().num_page_faults)
+    except Exception:
         return None
 
     previous = _LAST_PAGE_FAULTS
@@ -734,34 +745,12 @@ def get_top_cpu_processes(now: float, top_n: int) -> list[dict[str, object]] | N
     ]
 
 
-def _linux_intel_gpu_name() -> str | None:
-    output = run_command(["lspci", "-mm"])
-    if not output:
-        return None
-    for line in output.splitlines():
-        fields = re.findall(r'"([^"]*)"', line)
-        if len(fields) < 3:
-            continue
-        device_class, vendor, device = fields[0], fields[1], fields[2]
-        if not any(tag in device_class for tag in ("VGA", "Display", "3D")):
-            continue
-        if "intel" not in vendor.lower():
-            continue
-        return f"{vendor} {device}".strip()
-    return None
-
-
 def detect_intel_gpu_name() -> str | None:
     global _INTEL_GPU_NAME, _INTEL_GPU_DETECTED
     if _INTEL_GPU_DETECTED:
         return _INTEL_GPU_NAME
 
     _INTEL_GPU_DETECTED = True
-
-    if IS_LINUX:
-        _INTEL_GPU_NAME = _linux_intel_gpu_name()
-        return _INTEL_GPU_NAME
-
     conn = get_wmi_connection()
     if conn is None:
         return None
@@ -863,10 +852,7 @@ class SysmanHandles:
 
 
 def _enumerate_sysman(lib: object, func_name: str, device: int) -> list[int]:
-    try:
-        func = getattr(lib, func_name)
-    except AttributeError:
-        return []
+    func = getattr(lib, func_name)
     count = ctypes.c_uint32(0)
     if func(ctypes.c_void_p(device), ctypes.byref(count), None) != 0 or count.value == 0:
         return []
@@ -876,57 +862,31 @@ def _enumerate_sysman(lib: object, func_name: str, device: int) -> list[int]:
     return [handles[i] for i in range(count.value)]
 
 
-def _resolve_sysman_entrypoints(lib: object) -> tuple[str, str, str] | None:
-    """Pick the standalone zes* bootstrap, else fall back to the core ze* handles."""
-    if all(hasattr(lib, name) for name in ("zesInit", "zesDriverGet", "zesDeviceGet")):
-        return "zesInit", "zesDriverGet", "zesDeviceGet"
-    if all(hasattr(lib, name) for name in ("zeInit", "zeDriverGet", "zeDeviceGet")):
-        # Level Zero < 1.5 has no zesInit; sysman rides on the core handles and
-        # the driver only exposes it when this is set before init.
-        os.environ["ZES_ENABLE_SYSMAN"] = "1"
-        return "zeInit", "zeDriverGet", "zeDeviceGet"
-    return None
-
-
 def init_sysman(device_index: int = 0) -> SysmanHandles | None:
     """Intel GPU telemetry via Level Zero Sysman; needs no external tooling or elevation."""
-    lib = None
-    for lib_name in (("ze_loader.dll",) if IS_WINDOWS else ("libze_loader.so.1", "libze_loader.so")):
-        try:
-            lib = ctypes.CDLL(lib_name)
-            break
-        except OSError:
-            continue
-    if lib is None:
+    try:
+        lib = ctypes.CDLL("ze_loader.dll")
+    except OSError:
         return None
-
-    entrypoints = _resolve_sysman_entrypoints(lib)
-    if entrypoints is None:
-        return None
-    init_name, driver_get_name, device_get_name = entrypoints
-    init_fn = getattr(lib, init_name)
-    driver_get = getattr(lib, driver_get_name)
-    device_get = getattr(lib, device_get_name)
-
-    if init_fn(0) != 0:
+    if lib.zesInit(0) != 0:
         return None
 
     driver_count = ctypes.c_uint32(0)
-    if driver_get(ctypes.byref(driver_count), None) != 0 or driver_count.value == 0:
+    if lib.zesDriverGet(ctypes.byref(driver_count), None) != 0 or driver_count.value == 0:
         return None
     drivers = (ctypes.c_void_p * driver_count.value)()
-    if driver_get(ctypes.byref(driver_count), drivers) != 0:
+    if lib.zesDriverGet(ctypes.byref(driver_count), drivers) != 0:
         return None
 
     devices: list[int] = []
     for i in range(driver_count.value):
         count = ctypes.c_uint32(0)
-        if device_get(ctypes.c_void_p(drivers[i]), ctypes.byref(count), None) != 0:
+        if lib.zesDeviceGet(ctypes.c_void_p(drivers[i]), ctypes.byref(count), None) != 0:
             continue
         if count.value == 0:
             continue
         handles = (ctypes.c_void_p * count.value)()
-        if device_get(ctypes.c_void_p(drivers[i]), ctypes.byref(count), handles) != 0:
+        if lib.zesDeviceGet(ctypes.c_void_p(drivers[i]), ctypes.byref(count), handles) != 0:
             continue
         devices.extend(handles[j] for j in range(count.value))
 
@@ -976,11 +936,7 @@ def get_sysman(device_index: int = 0) -> SysmanHandles | None:
     global _SYSMAN, _SYSMAN_RESOLVED
     if not _SYSMAN_RESOLVED:
         _SYSMAN_RESOLVED = True
-        try:
-            _SYSMAN = init_sysman(device_index)
-        except Exception as exc:
-            LOGGER.warning("Level Zero Sysman init failed: %s", exc)
-            _SYSMAN = None
+        _SYSMAN = init_sysman(device_index)
         if _SYSMAN is None:
             LOGGER.warning("Level Zero Sysman unavailable; GPU telemetry will be skipped.")
     return _SYSMAN
@@ -1104,10 +1060,13 @@ def sample_once(
 
     timer = query_timer_resolution()
     cpu_clock = get_cpu_clock_mhz()
-    cpu_temp, cpu_temp_age_ms = get_cpu_temp_cached(t_monotonic, temp_interval_sec, force_temp)
+    cpu_temps, cpu_temp_age_ms, cpu_temp_query_duration_ms = get_cpu_temp_cached(
+        t_monotonic, temp_interval_sec, force_temp
+    )
     cpu_usage, cpu_usage_age_ms = get_cpu_usage_windowed(t_monotonic)
-    # Keep driver polling out of benchmark monitoring unless explicitly requested.
-    gpu = get_gpu_metrics(gpu_full) if gpu_full else {}
+    t_gpu_start = time.perf_counter()
+    gpu = get_gpu_metrics(gpu_full)
+    gpu_query_duration_ms = (time.perf_counter() - t_gpu_start) * 1000.0
     mem_usage, mem_available_mb = get_memory_usage()
 
     proc = get_process_priority(target_pid) if target_pid is not None else None
@@ -1124,11 +1083,17 @@ def sample_once(
         "timestamp_utc": timestamp_utc,
         "t_monotonic": t_monotonic,
         "cpu_clock_mhz": cpu_clock,
-        "cpu_temp_c": cpu_temp,
+        "cpu_temp_c": cpu_temps.overall_c if cpu_temps else None,
         "cpu_temp_age_ms": cpu_temp_age_ms,
+        "cpu_temp_core_max_c": cpu_temps.core_max_c if cpu_temps else None,
+        "cpu_temp_core_avg_c": cpu_temps.core_avg_c if cpu_temps else None,
+        "cpu_temp_core_values_c": cpu_temps.core_temps_c if cpu_temps else None,
+        "cpu_temp_source": cpu_temps.source if cpu_temps else None,
+        "cpu_temp_query_duration_ms": cpu_temp_query_duration_ms,
         "cpu_usage_percent": cpu_usage,
         "cpu_usage_age_ms": cpu_usage_age_ms,
         **gpu,
+        "gpu_query_duration_ms": gpu_query_duration_ms,
         "host_memory_speed_mts": host_mem_info.speed_mts,
         "host_memory_total_gb": host_mem_info.total_gb,
         "host_memory_usage_percent": mem_usage,
@@ -1208,7 +1173,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--interval-sec",
         type=float,
-        default=0.5,
+        default=1.0,
         help="Sampling interval in seconds.",
     )
     parser.add_argument(
@@ -1232,15 +1197,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--temp-interval-sec",
         type=float,
-        default=5.0,
+        default=1.0,
         help="CPU temperature sampling period. The first and last sample are always read.",
     )
     parser.add_argument(
         "--gpu-telemetry-full",
         action="store_true",
         help=(
-            "Poll GPU clock, throttle, utilization, memory and power. Disabled by default "
-            "because driver queries can affect benchmark monitoring."
+            "Also poll GPU utilization, memory and power. Clock and throttle are always read "
+            "because they cost under 1 ms; these extra queries can stall for hundreds of ms."
         ),
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs.")
@@ -1275,7 +1240,7 @@ def main() -> int:
     LOGGER.info("Host memory total (GB): %s", host_mem_info.total_gb)
     LOGGER.info(
         "GPU telemetry: %s",
-        "full" if args.gpu_telemetry_full else "disabled (--gpu-telemetry-full to enable)",
+        "full" if args.gpu_telemetry_full else "clock + throttle (--gpu-telemetry-full for more)",
     )
 
     try:
