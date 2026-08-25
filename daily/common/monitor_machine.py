@@ -1106,7 +1106,8 @@ def sample_once(
     cpu_clock = get_cpu_clock_mhz()
     cpu_temp, cpu_temp_age_ms = get_cpu_temp_cached(t_monotonic, temp_interval_sec, force_temp)
     cpu_usage, cpu_usage_age_ms = get_cpu_usage_windowed(t_monotonic)
-    gpu = get_gpu_metrics(gpu_full)
+    # Keep driver polling out of benchmark monitoring unless explicitly requested.
+    gpu = get_gpu_metrics(gpu_full) if gpu_full else {}
     mem_usage, mem_available_mb = get_memory_usage()
 
     proc = get_process_priority(target_pid) if target_pid is not None else None
@@ -1238,8 +1239,8 @@ def parse_args() -> argparse.Namespace:
         "--gpu-telemetry-full",
         action="store_true",
         help=(
-            "Also poll GPU utilization, memory and power. Clock and throttle are always read "
-            "because they cost under 1 ms; these extra queries can stall for hundreds of ms."
+            "Poll GPU clock, throttle, utilization, memory and power. Disabled by default "
+            "because driver queries can affect benchmark monitoring."
         ),
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs.")
@@ -1274,7 +1275,7 @@ def main() -> int:
     LOGGER.info("Host memory total (GB): %s", host_mem_info.total_gb)
     LOGGER.info(
         "GPU telemetry: %s",
-        "full" if args.gpu_telemetry_full else "clock + throttle (--gpu-telemetry-full for more)",
+        "full" if args.gpu_telemetry_full else "disabled (--gpu-telemetry-full to enable)",
     )
 
     try:

@@ -168,6 +168,7 @@ class MachineMonitor:
             '--interval-sec', str(self._interval_sec),
             '--duration-sec', str(self._max_duration_sec),
             '--out', str(self.out_path),
+            '--top-processes', '5',
         ]
         if self._gpu_full:
             cmd.append('--gpu-telemetry-full')
