@@ -47,10 +47,11 @@ WMI_LIB: object | None = None
 # Connections and adapter identity are hoisted out of the sampling loop:
 # re-creating them per sample adds enough CPU load to perturb the measurement.
 _WMI_CONNECTIONS: dict[str, object | None] = {}
-_INTEL_GPU_NAME: str | None = None
+_INTEL_GPU_NAMES: dict[int, str | None] = {}
 _INTEL_GPU_DETECTED: bool = False
 
 _SYSMAN: "SysmanHandles | None" = None
+_SYSMAN_DEVICE_INDEX: int | None = None
 _SYSMAN_RESOLVED: bool = False
 _LAST_ENERGY: tuple[int, int] | None = None
 _LAST_ENGINE: tuple[int, int] | None = None
@@ -110,6 +111,18 @@ class CpuTemperatures:
 class HostMemoryInfo:
     speed_mts: float | None
     total_gb: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class LhmGpuMetrics:
+    clock_mhz: float | None
+    memory_clock_mhz: float | None
+    utilization_percent: float | None
+    memory_used_mb: float | None
+    memory_total_mb: float | None
+    power_watts: float | None
+    temperature_c: float | None
+    fan_rpm: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +289,12 @@ def parse_sensor_float(text: str | None) -> float | None:
         return None
 
 
+def valid_range(value: float | None, minimum: float, maximum: float) -> float | None:
+    if value is None or not (minimum <= value <= maximum):
+        return None
+    return value
+
+
 def iter_lhm_nodes(node: dict[str, object], in_temperatures: bool = False) -> Iterator[tuple[dict[str, object], bool]]:
     text = str(node.get("Text", ""))
     next_in_temperatures = in_temperatures or text == "Temperatures"
@@ -364,6 +383,68 @@ def get_cpu_temps_lhm_web() -> CpuTemperatures | None:
         core_temps_c=core_temps,
         source="lhm-web",
     )
+
+
+def lhm_hardware_matches(hardware_name: str, gpu_name: str) -> bool:
+    left = re.sub(r"[^a-z0-9]+", " ", hardware_name.lower()).strip()
+    right = re.sub(r"[^a-z0-9]+", " ", gpu_name.lower()).strip()
+    return bool(left and right and (left in right or right in left))
+
+
+def find_lhm_sensor_value(
+    payload: dict[str, object],
+    gpu_name: str,
+    category: str,
+    sensor: str,
+) -> float | None:
+    stack: list[tuple[dict[str, object], tuple[str, ...]]] = [(payload, ())]
+    while stack:
+        node, parts = stack.pop()
+        text = str(node.get("Text", ""))
+        current = (*parts, text)
+        value = parse_sensor_float(str(node.get("Value", "")))
+        if (
+            len(current) >= 5
+            and value is not None
+            and lhm_hardware_matches(current[2], gpu_name)
+            and current[3] == category
+            and current[4] == sensor
+        ):
+            return value
+
+        children = node.get("Children")
+        if isinstance(children, list):
+            for child in reversed(children):
+                if isinstance(child, dict):
+                    stack.append((child, current))
+    return None
+
+
+def get_lhm_gpu_metrics(gpu_name: str | None) -> tuple[LhmGpuMetrics | None, float | None]:
+    if not gpu_name:
+        return None, None
+
+    start = time.perf_counter()
+    payload = get_lhm_web_payload()
+    query_duration_ms = (time.perf_counter() - start) * 1000.0
+    if payload is None:
+        return None, query_duration_ms
+
+    render_compute = valid_range(
+        find_lhm_sensor_value(payload, gpu_name, "Load", "GPU Render/Compute"), 0.0, 100.0
+    )
+    core_load = valid_range(find_lhm_sensor_value(payload, gpu_name, "Load", "GPU Core"), 0.0, 100.0)
+
+    return LhmGpuMetrics(
+        clock_mhz=valid_range(find_lhm_sensor_value(payload, gpu_name, "Clocks", "GPU Core"), 1.0, 10000.0),
+        memory_clock_mhz=valid_range(find_lhm_sensor_value(payload, gpu_name, "Clocks", "GPU Memory"), 1.0, 10000.0),
+        utilization_percent=render_compute if render_compute is not None else core_load,
+        memory_used_mb=valid_range(find_lhm_sensor_value(payload, gpu_name, "Data", "GPU Memory Used"), 0.0, 1000000.0),
+        memory_total_mb=valid_range(find_lhm_sensor_value(payload, gpu_name, "Data", "GPU Memory Total"), 1.0, 1000000.0),
+        power_watts=valid_range(find_lhm_sensor_value(payload, gpu_name, "Powers", "GPU Package"), 0.0, 10000.0),
+        temperature_c=valid_range(find_lhm_sensor_value(payload, gpu_name, "Temperatures", "GPU Core"), 1.0, 130.0),
+        fan_rpm=valid_range(find_lhm_sensor_value(payload, gpu_name, "Fans", "GPU Fan"), 0.0, 10000.0),
+    ), query_duration_ms
 
 
 def get_cpu_temps() -> CpuTemperatures | None:
@@ -745,10 +826,10 @@ def get_top_cpu_processes(now: float, top_n: int) -> list[dict[str, object]] | N
     ]
 
 
-def detect_intel_gpu_name() -> str | None:
-    global _INTEL_GPU_NAME, _INTEL_GPU_DETECTED
+def detect_intel_gpu_name(device_index: int = 0) -> str | None:
+    global _INTEL_GPU_DETECTED
     if _INTEL_GPU_DETECTED:
-        return _INTEL_GPU_NAME
+        return _INTEL_GPU_NAMES.get(device_index)
 
     _INTEL_GPU_DETECTED = True
     conn = get_wmi_connection()
@@ -760,15 +841,18 @@ def detect_intel_gpu_name() -> str | None:
     except Exception:
         devices = []
 
+    intel_names: list[str] = []
     for device in devices:
         name = str(getattr(device, "Name", ""))
         compat = str(getattr(device, "AdapterCompatibility", ""))
         pnp = str(getattr(device, "PNPDeviceID", ""))
         text = f"{name} {compat} {pnp}".lower()
         if "intel" in text or "ven_8086" in text:
-            _INTEL_GPU_NAME = name or compat or "Intel GPU"
-            break
-    return _INTEL_GPU_NAME
+            intel_names.append(name or compat or "Intel GPU")
+
+    for index, name in enumerate(intel_names):
+        _INTEL_GPU_NAMES[index] = name
+    return _INTEL_GPU_NAMES.get(device_index)
 
 
 ZE_BOOL = ctypes.c_uint8
@@ -933,20 +1017,30 @@ def init_sysman(device_index: int = 0) -> SysmanHandles | None:
 
 
 def get_sysman(device_index: int = 0) -> SysmanHandles | None:
-    global _SYSMAN, _SYSMAN_RESOLVED
+    global _LAST_ENERGY, _LAST_ENGINE, _SYSMAN, _SYSMAN_DEVICE_INDEX, _SYSMAN_RESOLVED
+    if _SYSMAN_DEVICE_INDEX != device_index:
+        _SYSMAN = None
+        _SYSMAN_RESOLVED = False
+        _SYSMAN_DEVICE_INDEX = device_index
+        _LAST_ENERGY = None
+        _LAST_ENGINE = None
     if not _SYSMAN_RESOLVED:
         _SYSMAN_RESOLVED = True
         _SYSMAN = init_sysman(device_index)
         if _SYSMAN is None:
-            LOGGER.warning("Level Zero Sysman unavailable; GPU telemetry will be skipped.")
+            LOGGER.warning(
+                "Level Zero Sysman unavailable for device index %d; GPU telemetry will be skipped.",
+                device_index,
+            )
     return _SYSMAN
 
 
-def get_gpu_metrics(full: bool = False) -> dict[str, object]:
+def get_gpu_metrics(full: bool = False, device_index: int = 0) -> dict[str, object]:
     """Return Intel GPU telemetry. Clock and throttle stay under 1 ms; the rest can stall."""
     global _LAST_ENERGY, _LAST_ENGINE
 
     metrics: dict[str, object] = {
+        "gpu_device_index": device_index,
         "gpu_name": None,
         "gpu_source": None,
         "gpu_clock_mhz": None,
@@ -958,58 +1052,73 @@ def get_gpu_metrics(full: bool = False) -> dict[str, object]:
         "gpu_utilization_source": None,
         "gpu_memory_used_mb": None,
         "gpu_memory_total_mb": None,
+        "lhm_gpu_power_watts": None,
+        "lhm_gpu_temp_c": None,
+        "lhm_gpu_memory_clock_mhz": None,
+        "lhm_gpu_fan_rpm": None,
+        "lhm_gpu_sample_valid": None,
+        "lhm_gpu_query_duration_ms": None,
     }
 
-    sysman = get_sysman()
+    metrics["gpu_name"] = detect_intel_gpu_name(device_index)
+    sysman = get_sysman(device_index)
     if sysman is None:
         metrics["gpu_source"] = "level-zero-unavailable"
-        return metrics
+    else:
+        metrics["gpu_source"] = "level-zero-sysman-full" if full else "level-zero-sysman-clock"
 
-    metrics["gpu_name"] = detect_intel_gpu_name()
-    metrics["gpu_source"] = "level-zero-sysman-full" if full else "level-zero-sysman-clock"
+        lib = sysman.lib
+        metrics["gpu_clock_max_mhz"] = sysman.max_clock_mhz
 
-    lib = sysman.lib
-    metrics["gpu_clock_max_mhz"] = sysman.max_clock_mhz
+        if sysman.freq is not None:
+            state = _ZesFreqState()
+            if lib.zesFrequencyGetState(ctypes.c_void_p(sysman.freq), ctypes.byref(state)) == 0:
+                metrics["gpu_clock_mhz"] = state.actual if state.actual >= 0 else None
+                metrics["gpu_clock_request_mhz"] = state.request if state.request >= 0 else None
+                metrics["gpu_throttle_reasons"] = f"0x{state.throttleReasons:x}"
 
-    if sysman.freq is not None:
-        state = _ZesFreqState()
-        if lib.zesFrequencyGetState(ctypes.c_void_p(sysman.freq), ctypes.byref(state)) == 0:
-            metrics["gpu_clock_mhz"] = state.actual if state.actual >= 0 else None
-            metrics["gpu_clock_request_mhz"] = state.request if state.request >= 0 else None
-            metrics["gpu_throttle_reasons"] = f"0x{state.throttleReasons:x}"
+        if not full:
+            return metrics
 
-    if not full:
-        return metrics
+        if sysman.power is not None:
+            counter = _ZesPowerEnergyCounter()
+            if lib.zesPowerGetEnergyCounter(ctypes.c_void_p(sysman.power), ctypes.byref(counter)) == 0:
+                previous = _LAST_ENERGY
+                _LAST_ENERGY = (counter.energy, counter.timestamp)
+                if previous is not None:
+                    # energy is microjoules and timestamp microseconds, so the ratio is watts.
+                    delta_energy = counter.energy - previous[0]
+                    delta_time = counter.timestamp - previous[1]
+                    if delta_time > 0 and delta_energy >= 0:
+                        metrics["gpu_power_watts"] = delta_energy / delta_time
 
-    if sysman.power is not None:
-        counter = _ZesPowerEnergyCounter()
-        if lib.zesPowerGetEnergyCounter(ctypes.c_void_p(sysman.power), ctypes.byref(counter)) == 0:
-            previous = _LAST_ENERGY
-            _LAST_ENERGY = (counter.energy, counter.timestamp)
-            if previous is not None:
-                # energy is microjoules and timestamp microseconds, so the ratio is watts.
-                delta_energy = counter.energy - previous[0]
-                delta_time = counter.timestamp - previous[1]
-                if delta_time > 0 and delta_energy >= 0:
-                    metrics["gpu_power_watts"] = delta_energy / delta_time
+        if sysman.engine is not None:
+            metrics["gpu_utilization_source"] = sysman.engine_group
+            stats = _ZesEngineStats()
+            if lib.zesEngineGetActivity(ctypes.c_void_p(sysman.engine), ctypes.byref(stats)) == 0:
+                previous = _LAST_ENGINE
+                _LAST_ENGINE = (stats.activeTime, stats.timestamp)
+                if previous is not None:
+                    delta_active = stats.activeTime - previous[0]
+                    delta_time = stats.timestamp - previous[1]
+                    if delta_time > 0 and delta_active >= 0:
+                        metrics["gpu_utilization_percent"] = min(100.0, 100.0 * delta_active / delta_time)
 
-    if sysman.engine is not None:
-        metrics["gpu_utilization_source"] = sysman.engine_group
-        stats = _ZesEngineStats()
-        if lib.zesEngineGetActivity(ctypes.c_void_p(sysman.engine), ctypes.byref(stats)) == 0:
-            previous = _LAST_ENGINE
-            _LAST_ENGINE = (stats.activeTime, stats.timestamp)
-            if previous is not None:
-                delta_active = stats.activeTime - previous[0]
-                delta_time = stats.timestamp - previous[1]
-                if delta_time > 0 and delta_active >= 0:
-                    metrics["gpu_utilization_percent"] = min(100.0, 100.0 * delta_active / delta_time)
+        if sysman.memory is not None:
+            mem = _ZesMemState()
+            if lib.zesMemoryGetState(ctypes.c_void_p(sysman.memory), ctypes.byref(mem)) == 0 and mem.size > 0:
+                metrics["gpu_memory_total_mb"] = mem.size // (1024 ** 2)
+                metrics["gpu_memory_used_mb"] = (mem.size - mem.free) // (1024 ** 2)
 
-    if sysman.memory is not None:
-        mem = _ZesMemState()
-        if lib.zesMemoryGetState(ctypes.c_void_p(sysman.memory), ctypes.byref(mem)) == 0 and mem.size > 0:
-            metrics["gpu_memory_total_mb"] = mem.size // (1024 ** 2)
-            metrics["gpu_memory_used_mb"] = (mem.size - mem.free) // (1024 ** 2)
+    if full:
+        lhm, lhm_duration_ms = get_lhm_gpu_metrics(metrics["gpu_name"] if isinstance(metrics["gpu_name"], str) else None)
+        metrics["lhm_gpu_query_duration_ms"] = lhm_duration_ms
+        metrics["lhm_gpu_sample_valid"] = lhm is not None
+        if lhm is not None:
+            metrics["lhm_gpu_power_watts"] = lhm.power_watts
+            metrics["lhm_gpu_temp_c"] = lhm.temperature_c
+            metrics["lhm_gpu_memory_clock_mhz"] = lhm.memory_clock_mhz
+            metrics["lhm_gpu_fan_rpm"] = lhm.fan_rpm
 
     return metrics
 
@@ -1045,6 +1154,20 @@ def resolve_target_pid(pid: int | None, process_name: str | None) -> int | None:
     return newest_pid
 
 
+def parse_gpu_device_index(target_device: str | None) -> int:
+    if target_device is None or not target_device.strip():
+        return 0
+
+    normalized = target_device.strip().upper()
+    if normalized == "GPU":
+        return 0
+
+    match = re.fullmatch(r"GPU\.(\d+)", normalized)
+    if match is None:
+        raise ValueError(f"Unsupported target device: {target_device}. Expected GPU, GPU.0, GPU.1, ...")
+    return int(match.group(1))
+
+
 def sample_once(
     target_pid: int | None,
     host_mem_info: HostMemoryInfo,
@@ -1053,6 +1176,7 @@ def sample_once(
     temp_interval_sec: float = 5.0,
     force_temp: bool = False,
     gpu_full: bool = False,
+    gpu_device_index: int = 0,
 ) -> dict[str, object]:
     # Stamp before probing so sample times stay aligned regardless of probe cost.
     timestamp_utc = iso_utc_now()
@@ -1065,7 +1189,7 @@ def sample_once(
     )
     cpu_usage, cpu_usage_age_ms = get_cpu_usage_windowed(t_monotonic)
     t_gpu_start = time.perf_counter()
-    gpu = get_gpu_metrics(gpu_full)
+    gpu = get_gpu_metrics(gpu_full, gpu_device_index)
     gpu_query_duration_ms = (time.perf_counter() - t_gpu_start) * 1000.0
     mem_usage, mem_available_mb = get_memory_usage()
 
@@ -1208,6 +1332,12 @@ def parse_args() -> argparse.Namespace:
             "because they cost under 1 ms; these extra queries can stall for hundreds of ms."
         ),
     )
+    parser.add_argument(
+        "--target-device",
+        type=str,
+        default=os.environ.get("TARGET_DEVICE", "GPU"),
+        help="GPU target device to monitor: GPU, GPU.0, GPU.1, ... (default: TARGET_DEVICE env or GPU).",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs.")
     return parser.parse_args()
 
@@ -1229,6 +1359,11 @@ def main() -> int:
     if args.duration_sec <= 0:
         LOGGER.error("--duration-sec must be > 0")
         return 2
+    try:
+        gpu_device_index = parse_gpu_device_index(args.target_device)
+    except ValueError as exc:
+        LOGGER.error("%s", exc)
+        return 2
 
     target_pid = resolve_target_pid(args.pid, args.process_name)
     identity = get_process_identity(target_pid) if target_pid is not None else None
@@ -1239,8 +1374,10 @@ def main() -> int:
     LOGGER.info("Host memory speed (MT/s): %s", host_mem_info.speed_mts)
     LOGGER.info("Host memory total (GB): %s", host_mem_info.total_gb)
     LOGGER.info(
-        "GPU telemetry: %s",
+        "GPU telemetry: %s (target=%s, device_index=%d)",
         "full" if args.gpu_telemetry_full else "clock + throttle (--gpu-telemetry-full for more)",
+        args.target_device,
+        gpu_device_index,
     )
 
     try:
@@ -1270,6 +1407,7 @@ def main() -> int:
                 args.temp_interval_sec,
                 force_temp=is_first or is_last,
                 gpu_full=args.gpu_telemetry_full,
+                gpu_device_index=gpu_device_index,
             )
             sample_index += 1
             if stream_mode:

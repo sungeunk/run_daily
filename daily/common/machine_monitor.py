@@ -34,6 +34,10 @@ _STAT_FIELDS: tuple[str, ...] = (
     'gpu_utilization_percent',
     'gpu_power_watts',
     'gpu_memory_used_mb',
+    'lhm_gpu_power_watts',
+    'lhm_gpu_temp_c',
+    'lhm_gpu_memory_clock_mhz',
+    'lhm_gpu_fan_rpm',
     'host_memory_usage_percent',
     'host_memory_available_mb',
     'host_commit_used_mb',
@@ -44,6 +48,7 @@ _STAT_FIELDS: tuple[str, ...] = (
 _CONTEXT_FIELDS: tuple[str, ...] = (
     'gpu_name',
     'gpu_source',
+    'lhm_gpu_sample_valid',
     'gpu_clock_max_mhz',
     'gpu_memory_total_mb',
     'host_memory_total_gb',
