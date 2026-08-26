@@ -45,3 +45,71 @@ def test_parse_json_report_uses_fastest_iteration(tmp_path: Path) -> None:
         'out_token': 20,
         'perf': [100.0, 10.0],
     }]
+
+
+def test_parse_json_report_carries_timestamps_of_selected_iteration(tmp_path: Path) -> None:
+    report_path = tmp_path / 'report.json'
+    report_path.write_text(json.dumps({
+        'perfdata': {
+            'results': [
+                {
+                    'iteration': 1,
+                    'prompt_idx': 0,
+                    'input_size': 10,
+                    'infer_count': 20,
+                    'first_infer_latency': 100.0,
+                    'second_infer_avg_latency': 10.0,
+                    'start': '2026-08-26T06:05:03.100000+00:00',
+                    'end': '2026-08-26T06:05:06.200000+00:00',
+                    'token_timestamps': {
+                        'first_token_begin': '2026-08-26T06:05:03.200000+00:00',
+                        'first_token_end': '2026-08-26T06:05:03.300000+00:00',
+                        'second_token_begin': '2026-08-26T06:05:03.300000+00:00',
+                        'second_token_end': '2026-08-26T06:05:03.310000+00:00',
+                    },
+                },
+                {
+                    'iteration': 2,
+                    'prompt_idx': 0,
+                    'input_size': 10,
+                    'infer_count': 20,
+                    'first_infer_latency': 200.0,
+                    'second_infer_avg_latency': 20.0,
+                    'start': '2026-08-26T06:05:07.000000+00:00',
+                    'end': '2026-08-26T06:05:10.000000+00:00',
+                    'token_timestamps': {
+                        'first_token_begin': '2026-08-26T06:05:07.100000+00:00',
+                        'first_token_end': '2026-08-26T06:05:07.300000+00:00',
+                    },
+                },
+            ],
+        },
+    }), encoding='utf-8')
+
+    item = parse_json_report(report_path)[0]
+    assert item['start'] == '2026-08-26T06:05:03.100000+00:00'
+    assert item['end'] == '2026-08-26T06:05:06.200000+00:00'
+    assert item['token_timestamps']['first_token_end'] == '2026-08-26T06:05:03.300000+00:00'
+
+
+def test_parse_json_report_omits_timestamps_when_absent(tmp_path: Path) -> None:
+    report_path = tmp_path / 'report.json'
+    report_path.write_text(json.dumps({
+        'perfdata': {
+            'results': [
+                {
+                    'iteration': 1,
+                    'prompt_idx': 0,
+                    'input_size': 10,
+                    'infer_count': 20,
+                    'first_infer_latency': 100.0,
+                    'second_infer_avg_latency': 10.0,
+                },
+            ],
+        },
+    }), encoding='utf-8')
+
+    item = parse_json_report(report_path)[0]
+    assert 'start' not in item
+    assert 'end' not in item
+    assert 'token_timestamps' not in item

@@ -33,6 +33,10 @@ class LlmDataItem(TypedDict, total=False):
     out_token: int
     perf: list[float]
     generated_text: str
+    # UTC ISO-8601, JSON report only; absent on llm_bench builds that predate them.
+    start: str
+    end: str
+    token_timestamps: dict[str, str]
 
 
 _RE_PROMPT_NUMS = re.compile(r'prompt nums: (\d+)')
@@ -148,11 +152,18 @@ def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
 
         best_row, best_perf = min(candidates, key=lambda item: geometric_mean(item[1]))
 
-        parsed.append({
+        item: LlmDataItem = {
             'prompt_idx': prompt_idx,
             'in_token': best_row.get('input_size', 0),
             'out_token': best_row.get('infer_count', best_row.get('output_size', 0)),
             'perf': best_perf,
-        })
+        }
+        if best_row.get('start'):
+            item['start'] = best_row['start']
+        if best_row.get('end'):
+            item['end'] = best_row['end']
+        if best_row.get('token_timestamps'):
+            item['token_timestamps'] = best_row['token_timestamps']
+        parsed.append(item)
 
     return parsed
