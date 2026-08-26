@@ -120,8 +120,25 @@ def _gpu_memory_text(summary: dict | None) -> tuple[str, str]:
     shared = _mb(meta.get("gpu_shared_memory_mb"))
     override = meta.get("gpu_shared_memory_override")
     if shared != "—" and override is not None:
-        shared += " — driver default" if int(override) == 0 else f" — overridden (IncreaseFixedSegment={int(override)})"
-    return _mb(meta.get("gpu_dedicated_memory_mb")), shared
+        if int(override) == 0:
+            present = meta.get("gpu_shared_memory_override_present")
+            shared += " — driver default" if present else " — driver default (IncreaseFixedSegment unset)"
+        else:
+            shared += f" — overridden (IncreaseFixedSegment={int(override)})"
+
+    dedicated_mb = meta.get("gpu_dedicated_memory_mb")
+    dedicated = _mb(dedicated_mb)
+    # On an iGPU the DXGI dedicated figure is only the BIOS carve-out, not usable VRAM.
+    if dedicated != "—" and _is_carve_out(dedicated_mb, meta.get("gpu_shared_memory_mb")):
+        dedicated += " — iGPU carve-out, usable memory is shared"
+    return dedicated, shared
+
+
+def _is_carve_out(dedicated_mb, shared_mb) -> bool:
+    try:
+        return float(dedicated_mb) < 1024 and float(shared_mb) > float(dedicated_mb)
+    except (TypeError, ValueError):
+        return False
 
 
 def _skipped_series(summary: dict | None) -> int:

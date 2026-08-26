@@ -167,11 +167,30 @@ def _windows_memory_speed_mhz() -> float | None:
     return max(speeds)
 
 
-def _windows_gpu_memory_mb() -> tuple[float | None, float | None]:
-    """Return ``(dedicated_mb, shared_mb)`` for the first hardware adapter via DXGI.
+def _adapter_name_matches(a: str | None, b: str | None) -> bool:
+    """Loose match between adapter names coming from CIM, DXGI and the registry."""
+    if not a or not b:
+        return False
 
-    Shared memory is the system RAM the GPU may borrow; Intel Graphics Software
-    can change it, so it is read live instead of assumed.
+    def _norm(text: str) -> str:
+        # Drop "(R)"/"(TM)"/"(16GB)" style groups so CIM, DXGI and registry names align.
+        return ''.join(ch for ch in re.sub(r'\([^)]*\)', ' ', text).lower() if ch.isalnum())
+
+    na, nb = _norm(a), _norm(b)
+    if not na or not nb:
+        return False
+    return na in nb or nb in na
+
+
+def _windows_gpu_memory_mb(
+    adapter_name: str | None = None,
+) -> tuple[float | None, float | None, float | None]:
+    """Return ``(dedicated_video_mb, dedicated_system_mb, shared_mb)`` via DXGI.
+
+    The adapter matching ``adapter_name`` is preferred so this agrees with the
+    device under test; otherwise the first hardware adapter is used. Shared
+    memory is the system RAM the GPU may borrow; Intel Graphics Software can
+    change it, so it is read live instead of assumed.
     """
     import ctypes
     from ctypes import wintypes
@@ -202,11 +221,13 @@ def _windows_gpu_memory_mb() -> tuple[float | None, float | None]:
         + bytes([0xA8, 0x29, 0x25, 0x3C, 0x83, 0xD1, 0xB3, 0x87])
     ))
 
+    mb = 1024 ** 2
+    fallback: tuple[float | None, float | None, float | None] | None = None
     try:
         dxgi = ctypes.WinDLL('dxgi')
         factory = ctypes.c_void_p()
         if dxgi.CreateDXGIFactory1(ctypes.byref(iid), ctypes.byref(factory)) != 0:
-            return None, None
+            return None, None, None
 
         vtbl = ctypes.cast(factory, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
         enum_adapters = ctypes.WINFUNCTYPE(
@@ -217,7 +238,7 @@ def _windows_gpu_memory_mb() -> tuple[float | None, float | None]:
         while True:
             adapter = ctypes.c_void_p()
             if enum_adapters(factory, index, ctypes.byref(adapter)) != 0:
-                return None, None
+                return fallback or (None, None, None)
             avtbl = ctypes.cast(
                 adapter, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))
             ).contents
@@ -228,39 +249,63 @@ def _windows_gpu_memory_mb() -> tuple[float | None, float | None]:
             if get_desc(adapter, ctypes.byref(desc)) == 0 and not (
                 desc.Flags & _DXGI_ADAPTER_FLAG_SOFTWARE
             ):
-                mb = 1024 ** 2
-                return (round(desc.DedicatedVideoMemory / mb, 1),
-                        round(desc.SharedSystemMemory / mb, 1))
+                found = (round(desc.DedicatedVideoMemory / mb, 1),
+                         round(desc.DedicatedSystemMemory / mb, 1),
+                         round(desc.SharedSystemMemory / mb, 1))
+                if _adapter_name_matches(adapter_name, desc.Description):
+                    return found
+                if fallback is None:
+                    fallback = found
             index += 1
     except Exception:
-        return None, None
+        return fallback or (None, None, None)
 
 
-def _windows_gpu_shared_memory_override() -> int | None:
-    """Intel ``IncreaseFixedSegment`` setting; 0 means the driver default is in use."""
+def _windows_gpu_shared_memory_override(
+    adapter_name: str | None = None,
+) -> tuple[int, bool] | None:
+    """Intel ``IncreaseFixedSegment`` setting for the adapter under test.
+
+    Returns ``(value, present)``; an absent value means the driver default is in
+    use, so it is reported as ``(0, False)``. ``None`` means the adapter's
+    registry key could not be read at all.
+    """
     import winreg
 
     key_path = (r'SYSTEM\CurrentControlSet\Control\Class'
                 r'\{4d36e968-e325-11ce-bfc1-08002be10318}')
+
+    def _read(adapter) -> tuple[int, bool]:
+        try:
+            value, _ = winreg.QueryValueEx(adapter, 'IncreaseFixedSegment')
+            return int(value), True
+        except OSError:
+            return 0, False
+
+    fallback: tuple[int, bool] | None = None
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as root:
-            for i in range(16):
+            i = 0
+            while True:
                 try:
                     sub = winreg.EnumKey(root, i)
                 except OSError:
                     break
+                i += 1
+                if not (len(sub) == 4 and sub.isdigit()):
+                    continue
                 try:
                     with winreg.OpenKey(root, sub) as adapter:
                         desc, _ = winreg.QueryValueEx(adapter, 'DriverDesc')
-                        if 'intel' not in str(desc).lower():
-                            continue
-                        value, _ = winreg.QueryValueEx(adapter, 'IncreaseFixedSegment')
-                        return int(value)
+                        if _adapter_name_matches(adapter_name, str(desc)):
+                            return _read(adapter)
+                        if fallback is None and 'intel' in str(desc).lower():
+                            fallback = _read(adapter)
                 except OSError:
                     continue
     except OSError:
-        return None
-    return None
+        return fallback
+    return fallback
 
 
 def _collect_runtime_meta(device: str) -> dict:
@@ -292,16 +337,22 @@ def _collect_runtime_meta(device: str) -> dict:
         pass
 
     gpu_dedicated_memory_mb = None
+    gpu_dedicated_system_memory_mb = None
     gpu_shared_memory_mb = None
     gpu_shared_memory_override = None
+    gpu_shared_memory_override_present = None
     if is_windows:
         win_gpu_info, win_driver = _windows_query_gpu(device)
         if not gpu_info:
             gpu_info = win_gpu_info
         gpu_driver_version = win_driver or gpu_driver_version
         memory_speed_mhz = _windows_memory_speed_mhz()
-        gpu_dedicated_memory_mb, gpu_shared_memory_mb = _windows_gpu_memory_mb()
-        gpu_shared_memory_override = _windows_gpu_shared_memory_override()
+        (gpu_dedicated_memory_mb,
+         gpu_dedicated_system_memory_mb,
+         gpu_shared_memory_mb) = _windows_gpu_memory_mb(win_gpu_info)
+        override = _windows_gpu_shared_memory_override(win_gpu_info)
+        if override is not None:
+            gpu_shared_memory_override, gpu_shared_memory_override_present = override
     else:
         memory_speed_mhz = None
 
@@ -315,8 +366,10 @@ def _collect_runtime_meta(device: str) -> dict:
         'gpu_info': gpu_info,
         'gpu_driver_version': gpu_driver_version,
         'gpu_dedicated_memory_mb': gpu_dedicated_memory_mb,
+        'gpu_dedicated_system_memory_mb': gpu_dedicated_system_memory_mb,
         'gpu_shared_memory_mb': gpu_shared_memory_mb,
         'gpu_shared_memory_override': gpu_shared_memory_override,
+        'gpu_shared_memory_override_present': gpu_shared_memory_override_present,
     }
 
 
