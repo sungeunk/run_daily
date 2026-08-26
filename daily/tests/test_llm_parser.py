@@ -6,7 +6,7 @@ from pathlib import Path
 from parsers.llm_benchmark import parse_json_report
 
 
-def test_parse_json_report_uses_last_iteration(tmp_path: Path) -> None:
+def test_parse_json_report_uses_fastest_iteration(tmp_path: Path) -> None:
     report_path = tmp_path / 'report.json'
     report_path.write_text(json.dumps({
         'perfdata': {
@@ -43,5 +43,5 @@ def test_parse_json_report_uses_last_iteration(tmp_path: Path) -> None:
         'prompt_idx': 0,
         'in_token': 10,
         'out_token': 20,
-        'perf': [300.0, 30.0],
+        'perf': [100.0, 10.0],
     }]

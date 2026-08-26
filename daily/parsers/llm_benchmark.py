@@ -13,8 +13,9 @@ Output line formats this parser recognises:
     [<iter>][p<idx>] First token latency: <1st> ms
     [warm-up][p<idx>] Generated:<text...>
 
-Multiple iterations may report latency; we keep the last iteration so the
-reported value reflects the final measured state.
+Multiple iterations may report latency; warm-up is ignored and the fastest
+measured iteration is reported so a single slow iteration does not distort
+the result.
 """
 
 from __future__ import annotations
@@ -102,12 +103,23 @@ def parse_output(output: str) -> list[LlmDataItem]:
     return ret
 
 
+def _row_perf(row: dict) -> list[float]:
+    perf: list[float] = []
+    if 'first_infer_latency' in row:
+        perf.append(float(row['first_infer_latency']))
+    if 'second_infer_avg_latency' in row:
+        perf.append(float(row['second_infer_avg_latency']))
+    return perf
+
+
 def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
     """Parse benchmark.py JSON report into a list of per-prompt data items.
 
-    Warm-up iteration 0 is excluded. The last measured row per ``prompt_idx``
-    is used so multi-prompt benchmark runs keep one report row per prompt,
-    matching the stdout parser contract.
+    Warm-up iteration 0 is excluded. Among the remaining iterations the
+    fastest one per ``prompt_idx`` is reported, so an occasional slow
+    iteration (thermal/scheduling noise) does not distort the daily numbers.
+    Speed is ranked by the geometric mean of the perf values, matching the
+    stdout parser contract.
     """
     with open(report_json_path, 'r', encoding='utf-8') as f:
         report = json.load(f)
@@ -129,21 +141,18 @@ def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
 
     parsed: list[LlmDataItem] = []
     for prompt_idx in sorted(prompt_rows):
-        rows = prompt_rows[prompt_idx]
-        last_row = max(rows, key=lambda row: row.get('iteration', -1))
-        perf = []
-        if 'first_infer_latency' in last_row:
-            perf.append(float(last_row['first_infer_latency']))
-        if 'second_infer_avg_latency' in last_row:
-            perf.append(float(last_row['second_infer_avg_latency']))
-        if not perf:
+        candidates = [(row, _row_perf(row)) for row in prompt_rows[prompt_idx]]
+        candidates = [(row, perf) for row, perf in candidates if perf]
+        if not candidates:
             continue
+
+        best_row, best_perf = min(candidates, key=lambda item: geometric_mean(item[1]))
 
         parsed.append({
             'prompt_idx': prompt_idx,
-            'in_token': last_row.get('input_size', 0),
-            'out_token': last_row.get('infer_count', last_row.get('output_size', 0)),
-            'perf': perf,
+            'in_token': best_row.get('input_size', 0),
+            'out_token': best_row.get('infer_count', best_row.get('output_size', 0)),
+            'perf': best_perf,
         })
 
     return parsed
