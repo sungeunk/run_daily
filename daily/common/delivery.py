@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import subprocess
 import tempfile
@@ -40,6 +41,26 @@ DEFAULT_BACKUP_USER = 'sungeunk'
 # from the legacy ``/var/www/html/daily`` path so the new pytest-based pipeline
 # can coexist with the old one without mixing files.
 REMOTE_BASE_DIR = '/var/www/html/daily2'
+
+# Artefact stamp: ``daily.<YYYYMMDD>_<HHMM>.*``
+_STAMP_RE = re.compile(r'\.(\d{4})(\d{2})\d{2}_\d{3,4}\.')
+
+
+def month_dir_for(name: str) -> str:
+    """``YYYY.MM`` bucket for an artefact, or '' when it carries no stamp.
+
+    Derived from the artefact's own name rather than the wall clock so a
+    re-upload lands in the month the run happened.
+    """
+    m = _STAMP_RE.search(name)
+    return f'{m.group(1)}.{m.group(2)}' if m else ''
+
+
+def backup_relative_dir(name: str = '') -> str:
+    """Path under the backup root that ``name`` belongs in."""
+    month = month_dir_for(name)
+    node = platform.node()
+    return f'{node}/{month}' if month else node
 
 
 def _html_report_body(report_path: Path) -> str:
@@ -184,12 +205,13 @@ def _build_html_email_message(recipients: str, subject: str, html_body: str) -> 
 def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     """Return the public URL for a backed-up artefact.
 
-    The scp target is ``<host>:/var/www/html/daily2/<node>/`` and the relay
-    exposes it at ``http://<host>/daily2/<node>/<file>``.
+    The scp target is ``<host>:/var/www/html/daily2/<node>/<YYYY.MM>/`` and the
+    relay exposes it at ``http://<host>/daily2/<node>/<YYYY.MM>/<file>``.
     """
     if base_url is None:
         base_url = f'http://{_resolve_host(None)}'
-    return f'{base_url.rstrip("/")}/daily2/{platform.node()}/{filename}'
+    return (f'{base_url.rstrip("/")}/daily2/'
+            f'{backup_relative_dir(filename)}/{filename}')
 
 
 def artefact_links(files: Iterable[Path], *, base_url: str | None = None
@@ -207,7 +229,7 @@ def artefact_links(files: Iterable[Path], *, base_url: str | None = None
         'summary.json': (3, 'summary json'),
         'pytest.json': (4, 'pytest json'),
         'requirements.txt': (5, 'requirements'),
-        'monitor.tar.gz': (6, 'monitor data'),
+        'monitor.parquet': (6, 'monitor data'),
     }
 
     def _classify(name: str) -> tuple[int, str]:
@@ -263,11 +285,18 @@ def _open_ssh_client(relay: str, username: str = DEFAULT_BACKUP_USER) -> Any:
 
 
 def _ensure_remote_directory(sftp: Any, remote_dir: str) -> None:
-    """Create the remote directory when it does not already exist."""
-    try:
-        sftp.stat(remote_dir)
-    except OSError:
-        sftp.mkdir(remote_dir)
+    """Create the remote directory when it does not already exist.
+
+    Walks the path so a machine's first run of the month creates both the
+    machine and the ``YYYY.MM`` level.
+    """
+    parts = remote_dir.strip('/').split('/')
+    for depth in range(1, len(parts) + 1):
+        path = '/' + '/'.join(parts[:depth])
+        try:
+            sftp.stat(path)
+        except OSError:
+            sftp.mkdir(path)
 
 
 def prepend_links_html(html_path: Path, links_block: str) -> None:
@@ -323,8 +352,6 @@ def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
     new hosts don't need manual setup.
     """
     relay = _resolve_host(relay_server)
-    remote_dir = f'{REMOTE_BASE_DIR}/{platform.node()}'
-    remote = f'{relay}:{remote_dir}/'
 
     try:
         import paramiko
@@ -335,23 +362,28 @@ def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
     try:
         with _open_ssh_client(relay, DEFAULT_BACKUP_USER) as client:
             with client.open_sftp() as sftp:
-                try:
-                    _ensure_remote_directory(sftp, remote_dir)
-                except (OSError, paramiko.SFTPError) as exc:
-                    log.error(
-                        'backup: remote directory %s is unavailable on %s: %s',
-                        remote_dir, relay, exc,
-                    )
-                    return []
-
                 uploaded: list[Path] = []
+                ensured: set[str] = set()
                 for f in files:
                     f = Path(f)
                     if not f.exists():
                         log.error('backup: missing %s', f)
                         continue
+
+                    remote_dir = f'{REMOTE_BASE_DIR}/{backup_relative_dir(f.name)}'
+                    if remote_dir not in ensured:
+                        try:
+                            _ensure_remote_directory(sftp, remote_dir)
+                        except (OSError, paramiko.SFTPError) as exc:
+                            log.error(
+                                'backup: remote directory %s is unavailable on %s: %s',
+                                remote_dir, relay, exc,
+                            )
+                            continue
+                        ensured.add(remote_dir)
+
                     remote_path = f'{remote_dir}/{f.name}'
-                    log.info('backup: %s -> %s', f.name, remote)
+                    log.info('backup: %s -> %s:%s/', f.name, relay, remote_dir)
                     try:
                         sftp.put(str(f), remote_path)
                     except (OSError, paramiko.SFTPError) as exc:

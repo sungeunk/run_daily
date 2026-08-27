@@ -86,6 +86,13 @@ class RunRecord:
     genai_commit: str | None = None
     tok_commit: str | None = None
     short_run: bool = False
+    total_tests: int | None = None
+    passed_tests: int | None = None
+    failed_tests: int | None = None
+    error_tests: int | None = None
+    skipped_tests: int | None = None
+    skipped_cases: int | None = None
+    duration_sec: float | None = None
     source_path: str | None = None
     rawlog_path: str | None = None
     file_hash: str | None = None

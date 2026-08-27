@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS runs (
     genai_commit   TEXT,
     tok_commit     TEXT,
     short_run      BOOLEAN DEFAULT FALSE,
+    -- pytest outcome counts and wall time for the whole run, taken from
+    -- summary.json so the fleet view does not have to re-read every file.
+    total_tests    INTEGER,
+    passed_tests   INTEGER,
+    failed_tests   INTEGER,
+    error_tests    INTEGER,
+    skipped_tests  INTEGER,
+    -- Benchmark cases (perf series) lost to skipped tests, from each test's
+    -- ``expected_series``. A pytest test can carry several cases.
+    skipped_cases  INTEGER,
+    duration_sec   DOUBLE,
     source_path    TEXT,                   -- ingested source file (pickle or summary.json)
     rawlog_path    TEXT,                   -- path to the raw log if available
     file_hash      TEXT,

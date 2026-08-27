@@ -258,12 +258,23 @@ def record_metrics(request: pytest.FixtureRequest) -> Callable[[dict], None]:
     pytest-json-report serialises user_properties into the JSON report, where
     each item is a ``[name, value]`` pair. We always use the key ``metrics``
     so the report builder can find it with a single lookup.
+
+    Each call merges into the previous payload. Tests record a minimal dict
+    up front (including ``expected_series``) and richer ones later; without
+    merging, a crash-time update would drop the earlier keys and the report
+    would no longer know how many cases the test should have produced.
     """
     def _record(data: dict[str, Any]) -> None:
+        previous: dict[str, Any] = {}
+        for name, value in reversed(request.node.user_properties):
+            if name == 'metrics' and isinstance(value, dict):
+                previous = value
+                break
+        merged = {**previous, **data}
         # Enforce JSON-serialisability up-front so failures surface here,
         # not when the report plugin tries to write the file.
-        json.dumps(data)
-        request.node.user_properties.append(('metrics', data))
+        json.dumps(merged)
+        request.node.user_properties.append(('metrics', merged))
     return _record
 
 

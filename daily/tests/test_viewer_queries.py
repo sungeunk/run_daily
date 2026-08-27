@@ -15,7 +15,7 @@ if str(DAILY_DIR) not in sys.path:
 from analysis.functional import aggregate_functional  # noqa: E402
 from viewer import queries as q  # noqa: E402
 from viewer.ingest import writer  # noqa: E402
-from viewer.ingest.loader_new import classify_run_kind  # noqa: E402
+from viewer.ingest.loader_new import _skipped_cases, classify_run_kind  # noqa: E402
 from viewer.ingest.record import MonitorRow, PerfRow, RunRecord  # noqa: E402
 
 MACHINE = "TEST-01"
@@ -213,10 +213,27 @@ class TestMachineState:
         monitor = MonitorRow(nodeid="t", model="llama", samples=10,
                              gpu_clock_mhz_mean=2000.0,
                              gpu_clock_max_mhz=2400.0,
-                             throttled_sample_ratio=0.5)
+                             throttled_sample_ratio=0.9)
         _write(db, [_record(0, value=100.0, monitor=monitor)])
         health = q.machine_health_for_runs(db, ["run-000"])
         assert q.classify_machine_state(health.iloc[0]) == "throttled"
+
+    def test_brief_throttling_is_not_flagged(self, db: Path):
+        # Short throttle stretches show up in nearly every run, so one test
+        # blipping must not label the whole run machine-limited.
+        brief = MonitorRow(nodeid="a", model="llama", samples=100,
+                           gpu_clock_mhz_mean=2350.0,
+                           gpu_clock_max_mhz=2400.0,
+                           throttled_sample_ratio=0.08)
+        clean = MonitorRow(nodeid="b", model="qwen", samples=100,
+                           gpu_clock_mhz_mean=2350.0,
+                           gpu_clock_max_mhz=2400.0,
+                           throttled_sample_ratio=0.0)
+        rec = _record(0, value=100.0, monitor=brief)
+        rec.monitor.append(clean)
+        _write(db, [rec])
+        health = q.machine_health_for_runs(db, ["run-000"])
+        assert q.classify_machine_state(health.iloc[0]) == "stable"
 
     def test_low_clock_ratio_is_throttled(self, db: Path):
         monitor = MonitorRow(nodeid="t", model="llama", samples=10,
@@ -239,6 +256,56 @@ class TestMachineState:
     def test_missing_telemetry_is_unknown(self, db: Path):
         _write(db, [_record(0, value=100.0)])
         assert q.machine_health_for_runs(db, ["run-000"]).empty
+
+
+class TestCaseCounts:
+    def test_skipped_cases_sums_expected_series(self):
+        summary = {
+            "tests": [
+                # One pytest test can stand for several benchmark cases.
+                {"outcome": "skipped", "metrics": {"expected_series": 4}},
+                {"outcome": "skipped", "metrics": {"expected_series": 2}},
+                {"outcome": "passed", "metrics": {"expected_series": 8}},
+            ],
+        }
+        assert _skipped_cases(summary) == 6
+
+    def test_missing_expected_series_counts_as_zero(self):
+        summary = {"tests": [{"outcome": "skipped", "metrics": {}}]}
+        assert _skipped_cases(summary) == 0
+
+    def test_expected_cases_uses_the_machines_best_run(self, db: Path):
+        # A run that broke early must not lower what the machine is expected
+        # to produce, otherwise its failures would vanish from the table.
+        healthy = _record(0, value=100.0)
+        healthy.perf.append(PerfRow("qwen", "INT4", 32, 128, "2nd", 50.0, "ms"))
+        healthy.perf.append(PerfRow("qwen", "INT4", 64, 128, "2nd", 55.0, "ms"))
+        broken = _record(1, value=100.0)
+        _write(db, [healthy, broken])
+
+        ov = q.machines_overview(db, [MACHINE])
+        row = ov.iloc[0]
+        assert row["success_cases"] == 1
+        assert row["expected_cases"] == 3
+
+
+class TestShortDeviceName:
+    @pytest.mark.parametrize("full,expected", [
+        ("Intel(R) Arc(TM) 140T GPU (16GB) (iGPU)", "140T"),
+        ("Intel(R) Arc(TM) B580 Graphics (dGPU)", "B580"),
+        ("Intel(R) Arc(TM) 140V GPU (16GB) (iGPU)", "140V"),
+        ("Intel(R) Arc(TM) B390 GPU (iGPU)", "B390"),
+        ("Intel(R) Arc(TM) Pro B70 Graphics (dGPU)", "B70"),
+        ("Intel(R) Arc(TM) A770 Graphics (dGPU)", "A770"),
+    ])
+    def test_model_token_is_extracted(self, full, expected):
+        assert q.short_device_name(full) == expected
+
+    def test_name_without_model_token_stays_readable(self):
+        assert q.short_device_name("Intel(R) Arc(TM) Graphics (iGPU)") == "Arc"
+
+    def test_missing_name_is_empty(self):
+        assert q.short_device_name(None) == ""
 
 
 class TestAttribution:

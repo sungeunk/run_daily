@@ -69,13 +69,27 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS within_fluctuation BOOLEAN",
         "ALTER TABLE functional_issues ADD COLUMN IF NOT EXISTS model TEXT",
         "ALTER TABLE functional_issues ADD COLUMN IF NOT EXISTS precision TEXT",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS total_tests INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS passed_tests INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS failed_tests INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS error_tests INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS skipped_tests INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS skipped_cases INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_sec DOUBLE",
     ]
     for sql in migrations:
         try:
             con.execute(sql)
         except Exception:
             # Keep schema setup best-effort for mixed-version deployments.
+            # DuckDB aborts the surrounding transaction on error, so without
+            # an explicit rollback every later statement — including
+            # schema.sql — fails with "Current transaction is aborted".
             log.debug("schema migration skipped: %s", sql)
+            try:
+                con.rollback()
+            except Exception:
+                pass
 
 
 def already_ingested(con: duckdb.DuckDBPyConnection, file_hash: str) -> bool:
@@ -116,8 +130,10 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 ov_version, ov_build, ov_sha,
                 host_info, host_memory_size_gb, host_memory_speed_mhz,
                 genai_version, genai_commit, tok_commit,
-                short_run, source_path, rawlog_path, file_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                short_run, source_path, rawlog_path, file_hash,
+                total_tests, passed_tests, failed_tests, error_tests,
+                skipped_tests, skipped_cases, duration_sec
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
@@ -140,7 +156,14 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 short_run     = excluded.short_run,
                 source_path   = excluded.source_path,
                 rawlog_path   = excluded.rawlog_path,
-                file_hash     = excluded.file_hash
+                file_hash     = excluded.file_hash,
+                total_tests   = excluded.total_tests,
+                passed_tests  = excluded.passed_tests,
+                failed_tests  = excluded.failed_tests,
+                error_tests   = excluded.error_tests,
+                skipped_tests = excluded.skipped_tests,
+                skipped_cases = excluded.skipped_cases,
+                duration_sec  = excluded.duration_sec
             """,
             [
                 rec.run_id, rec.source_format, rec.report_file, rec.machine, rec.device,
@@ -149,6 +172,9 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 rec.host_info, rec.host_memory_size_gb, rec.host_memory_speed_mhz,
                 rec.genai_version, rec.genai_commit, rec.tok_commit,
                 rec.short_run, rec.source_path, rec.rawlog_path, rec.file_hash,
+                rec.total_tests, rec.passed_tests, rec.failed_tests,
+                rec.error_tests, rec.skipped_tests, rec.skipped_cases,
+                rec.duration_sec,
             ],
         )
 

@@ -137,12 +137,15 @@ def _extract_meta_from_summary(summary: dict) -> dict:
 def _guess_machine(path: Path) -> str:
     """Best-effort machine guess when ``meta`` is absent.
 
-    When the results live under ``/var/www/html/daily/<MACHINE>/...`` the
-    immediate parent directory is authoritative.
+    Results live under ``<root>/<MACHINE>/<YYYY.MM>/...`` (older runs sit
+    directly under ``<MACHINE>/``), so the month bucket is stepped over.
     """
-    if path.parent.name in {"output", "viewer", "daily"}:
+    parent = path.parent
+    if re.fullmatch(r"\d{4}\.\d{2}", parent.name):
+        parent = parent.parent
+    if parent.name in {"output", "viewer", "daily"}:
         return platform.node()
-    return path.parent.name
+    return parent.name
 
 
 def _raw_log_candidate(path: Path) -> Path | None:
@@ -169,6 +172,20 @@ def _float_or_none(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return num if num == num else None
+
+
+def _int_or_none(value) -> int | None:
+    num = _float_or_none(value)
+    return None if num is None else int(num)
+
+
+def _skipped_cases(summary: dict) -> int:
+    """Benchmark cases a run never attempted because its test was skipped."""
+    return sum(
+        int((test.get("metrics") or {}).get("expected_series") or 0)
+        for test in summary.get("tests", []) or []
+        if test.get("outcome") == "skipped"
+    )
 
 
 def _stat(machine: dict, field: str, key: str) -> float | None:
@@ -250,6 +267,7 @@ def load_summary(path: Path) -> RunRecord:
         ov_build = ov_build or b
         ov_sha = ov_sha or s
     ww = meta.get("workweek") or workweek_of(ts)
+    totals = summary.get("totals") or {}
     host_info = meta.get("host_info")
     host_memory_size_gb = _float_or_none(meta.get("host_memory_size_gb"))
     host_memory_speed_mhz = _float_or_none(meta.get("host_memory_speed_mhz"))
@@ -280,6 +298,13 @@ def load_summary(path: Path) -> RunRecord:
         genai_commit=meta.get("genai_commit") or None,
         tok_commit=meta.get("tok_commit") or None,
         short_run=bool(meta.get("short_run", False)),
+        total_tests=_int_or_none(totals.get("total")),
+        passed_tests=_int_or_none(totals.get("passed")),
+        failed_tests=_int_or_none(totals.get("failed")),
+        error_tests=_int_or_none(totals.get("error")),
+        skipped_tests=_int_or_none(totals.get("skipped")),
+        skipped_cases=_skipped_cases(summary),
+        duration_sec=_float_or_none(summary.get("duration_sec")),
         source_path=str(path),
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(path)) else None,
         file_hash=file_hash(path),

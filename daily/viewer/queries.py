@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 import logging
+import re
 import time
 
 import duckdb
@@ -1145,6 +1146,34 @@ def machine_stats_for_run(db_path: Path, run_id: str,
         """, params).fetchdf()
 
 
+def monitor_samples_for_run(db_path: Path, run_id: str,
+                            label: str | None = None) -> pd.DataFrame:
+    """Raw per-sample telemetry for one run, read straight from Parquet.
+
+    The samples live next to the published artefacts rather than in the
+    database: they are two orders of magnitude larger than the per-test
+    summary in ``machine_monitor_stats`` and are only needed when a specific
+    run is being dissected.
+    """
+    pattern = (db_path.parent / '**' / '*.monitor.parquet').as_posix()
+    filters = ['run_id = ?']
+    params: list = [run_id]
+    if label:
+        filters.append('monitor_label = ?')
+        params.append(label)
+    with _read_only(db_path) as con:
+        try:
+            return con.execute(f"""
+                SELECT *
+                FROM read_parquet('{pattern}', union_by_name=true)
+                WHERE {' AND '.join(filters)}
+                ORDER BY monitor_label, t_monotonic
+            """, params).fetchdf()
+        except duckdb.Error:
+            # No parquet published yet (or only pre-conversion tar.gz runs).
+            return pd.DataFrame()
+
+
 def functional_issues_for_runs(db_path: Path,
                                run_ids: Sequence[str],
                                models: Sequence[str] | None = None) -> pd.DataFrame:
@@ -1282,9 +1311,10 @@ def compare_runs_with_trend(db_path: Path, machine: str,
     return merged
 
 
-# Above this share of throttled samples the run's numbers reflect the machine's
-# power/thermal state more than the code under test.
-THROTTLE_SUSPECT_RATIO = 0.05
+# Intel GPUs report a throttle reason for short stretches of almost every run,
+# so a brief blip says nothing. Only a run that spent most of its time
+# throttled is treated as machine-limited.
+THROTTLE_SUSPECT_RATIO = 0.50
 # A run whose GPU averaged below this fraction of the card's own max clock was
 # not running at the speed its earlier runs did.
 LOW_CLOCK_RATIO = 0.80
@@ -1296,7 +1326,9 @@ def classify_machine_state(health_row: pd.Series | None,
     if health_row is None or health_row.empty:
         return "unknown"
 
-    throttle = health_row.get("max_throttle_ratio")
+    # Averaged over the run's tests, not the worst single test, so a momentary
+    # thermal excursion does not label the whole run.
+    throttle = health_row.get("avg_throttle_ratio")
     if pd.notna(throttle) and float(throttle) >= THROTTLE_SUSPECT_RATIO:
         return "throttled"
 
@@ -1328,3 +1360,206 @@ def attribute_regression(verdict: str, machine_state: str) -> str:
     if machine_state == "stable":
         return "likely-code"
     return "inconclusive"
+
+
+# Marketing names carry the model in one token: "Intel(R) Arc(TM) Pro B70
+# Graphics (dGPU)" -> "B70". Anything that does not match keeps a trimmed
+# form rather than an empty cell.
+_DEVICE_MODEL_RE = re.compile(
+    r"Arc\(TM\)\s+(?:Pro\s+)?([A-Za-z]?\d{2,4}[A-Za-z]?)\b")
+
+
+def short_device_name(full_name: object) -> str:
+    """Reduce a GPU marketing name to its model token."""
+    if full_name is None or pd.isna(full_name):
+        return ""
+    text = str(full_name)
+    match = _DEVICE_MODEL_RE.search(text)
+    if match:
+        return match.group(1)
+    # No model token (e.g. "Intel(R) Arc(TM) Graphics (iGPU)"): drop the
+    # bracketed suffixes and vendor boilerplate rather than show an empty cell.
+    cleaned = re.sub(r"\([^)]*\)", " ", text)
+    cleaned = re.sub(r"\b(?:Intel|Graphics|GPU)\b", " ", cleaned,
+                     flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or text
+
+
+# ---------------------------------------------------------------------------
+# Fleet overview: one row per machine, newest run first
+# ---------------------------------------------------------------------------
+
+def machines_overview(db_path: Path,
+                      machines: Sequence[str] | None = None, *,
+                      run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                      include_short_run: bool = False,
+                      history_runs: int = 10,
+                      expected_window: int = 30) -> pd.DataFrame:
+    """Latest run per machine with its health counters and perf delta.
+
+    The perf delta is a geomean over latency-unit series only: mixing ms with
+    FPS in one geomean would make the direction meaningless. It is further
+    restricted to series measured in every scoped run of that machine, so a
+    run that skipped a model does not masquerade as a performance change.
+    """
+    def _filters(alias: str) -> tuple[str, list]:
+        parts: list[str] = []
+        args: list = []
+        if run_kinds and _has_column(db_path, "runs", "run_kind"):
+            parts.append("COALESCE({}.run_kind, 'daily') IN ({})".format(
+                alias, ",".join(["?"] * len(run_kinds))))
+            args.extend(run_kinds)
+        if not include_short_run:
+            parts.append(f"COALESCE({alias}.short_run, FALSE) = FALSE")
+        if machines:
+            parts.append("{}.machine IN ({})".format(
+                alias, ",".join(["?"] * len(machines))))
+            args.extend(machines)
+        return (" AND ".join(parts), args)
+
+    filter_sql, params = _filters("r")
+    where = ("WHERE " + filter_sql) if filter_sql else ""
+    sub_sql, sub_params = _filters("r2")
+    sub_where = (" AND " + sub_sql) if sub_sql else ""
+
+    tables = _tables_for_db(db_path)
+    if "analysis_results" in tables:
+        analysis_cols = """,
+                ar.overall_status,
+                ar.functional_fail_count AS functional_issue_count,
+                ar.regressed_count,
+                ar.compared_count"""
+        analysis_join = "LEFT JOIN analysis_results ar ON ar.run_id = l.run_id"
+    else:
+        analysis_cols = """,
+                CAST(NULL AS TEXT)    AS overall_status,
+                CAST(NULL AS INTEGER) AS functional_issue_count,
+                CAST(NULL AS INTEGER) AS regressed_count,
+                CAST(NULL AS INTEGER) AS compared_count"""
+        analysis_join = ""
+
+    if "functional_issues" in tables:
+        issue_col = """,
+                (SELECT count(*) FROM functional_issues fi
+                  WHERE fi.run_id = l.run_id) AS failing_tests"""
+    else:
+        issue_col = ", CAST(NULL AS INTEGER) AS failing_tests"
+
+    with _read_only(db_path) as con:
+        latest = con.execute(f"""
+            WITH ranked AS (
+                SELECT r.*,
+                       ROW_NUMBER() OVER (PARTITION BY r.machine
+                                          ORDER BY r.ts DESC) AS rn
+                FROM runs r
+                {where}
+            ),
+            l AS (SELECT * FROM ranked WHERE rn = 1)
+            SELECT l.machine, l.run_id, l.ts,
+                   strftime(l.ts, '%Y%m%d_%H%M') AS stamp,
+                   l.ww, l.ov_version, l.purpose, l.report_file,
+                   l.total_tests, l.passed_tests, l.failed_tests,
+                   l.error_tests, l.skipped_tests, l.skipped_cases,
+                   l.duration_sec,
+                   (SELECT count(*) FROM perf p WHERE p.run_id = l.run_id)
+                       AS success_cases,
+                   (SELECT sd.device FROM system_devices sd
+                     WHERE sd.run_id = l.run_id
+                     ORDER BY sd.device_index LIMIT 1) AS gpu_name,
+                   -- A run counts as clean only when pytest reported no
+                   -- failure and no error; skips are expected on some rigs.
+                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM runs r2
+                     WHERE r2.machine = l.machine{sub_where}
+                       AND COALESCE(r2.total_tests, 0) > 0
+                       AND COALESCE(r2.failed_tests, 0)
+                         + COALESCE(r2.error_tests, 0) = 0
+                     ORDER BY r2.ts DESC LIMIT 1) AS last_success_stamp,
+                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM runs r2
+                     WHERE r2.machine = l.machine{sub_where}
+                       AND COALESCE(r2.failed_tests, 0)
+                         + COALESCE(r2.error_tests, 0) > 0
+                     ORDER BY r2.ts DESC LIMIT 1) AS last_fail_stamp
+                   {analysis_cols}
+                   {issue_col}
+            FROM l
+            {analysis_join}
+            ORDER BY l.machine
+        """, [*params, *sub_params, *sub_params]).fetchdf()
+
+        geo = con.execute(f"""            WITH ranked AS (
+                SELECT r.machine, r.run_id,
+                       ROW_NUMBER() OVER (PARTITION BY r.machine
+                                          ORDER BY r.ts DESC) AS rn
+                FROM runs r
+                {where}
+            ),
+            scoped AS (SELECT * FROM ranked WHERE rn <= ?),
+            vals AS (
+                SELECT s.machine, s.rn, f.model, f.precision,
+                       f.in_token, f.out_token, f.exec_mode, f.value
+                FROM scoped s
+                JOIN perf_flat f ON f.run_id = s.run_id
+                WHERE f.value > 0 AND f.unit IN ('ms', 's')
+            ),
+            per_run AS (
+                SELECT machine, count(DISTINCT rn) AS runs FROM vals
+                GROUP BY machine
+            ),
+            common AS (
+                SELECT v.machine, v.model, v.precision, v.in_token,
+                       v.out_token, v.exec_mode
+                FROM vals v
+                JOIN per_run p USING (machine)
+                GROUP BY v.machine, v.model, v.precision, v.in_token,
+                         v.out_token, v.exec_mode, p.runs
+                HAVING count(DISTINCT v.rn) = any_value(p.runs)
+            ),
+            geo AS (
+                SELECT v.machine, v.rn, exp(avg(ln(v.value))) AS geomean
+                FROM vals v
+                JOIN common c USING (machine, model, precision,
+                                     in_token, out_token, exec_mode)
+                GROUP BY v.machine, v.rn
+            )
+            SELECT machine,
+                   any_value(geomean) FILTER (WHERE rn = 1)  AS latest_geomean,
+                   median(geomean)    FILTER (WHERE rn > 1)  AS history_geomean,
+                   count(*)           FILTER (WHERE rn > 1)  AS history_runs
+            FROM geo
+            GROUP BY machine
+        """, [*params, int(history_runs) + 1]).fetchdf()
+
+    if latest.empty:
+        return latest
+
+    with _read_only(db_path) as con:
+        # A run that broke early produces almost no series, so the machine's
+        # own best recent run is the only available yardstick for how many
+        # cases it should have produced.
+        expected = con.execute(f"""
+            WITH ranked AS (
+                SELECT r.machine, r.run_id,
+                       ROW_NUMBER() OVER (PARTITION BY r.machine
+                                          ORDER BY r.ts DESC) AS rn
+                FROM runs r
+                {where}
+            ),
+            scoped AS (SELECT * FROM ranked WHERE rn <= ?),
+            per_run AS (
+                SELECT s.machine, s.run_id, count(*) AS cases
+                FROM scoped s JOIN perf p ON p.run_id = s.run_id
+                GROUP BY s.machine, s.run_id
+            )
+            SELECT machine, max(cases) AS expected_cases
+            FROM per_run GROUP BY machine
+        """, [*params, int(expected_window)]).fetchdf()
+
+    out = latest.merge(geo, on="machine", how="left")
+    out = out.merge(expected, on="machine", how="left")
+    # Latency is lower-is-better, so a rise is a worsening.
+    out["perf_pct"] = ((out["latest_geomean"] - out["history_geomean"])
+                       / out["history_geomean"])
+    out["age_hours"] = ((pd.Timestamp.now() - pd.to_datetime(out["ts"]))
+                        .dt.total_seconds() / 3600.0)
+    return out.sort_values("machine").reset_index(drop=True)

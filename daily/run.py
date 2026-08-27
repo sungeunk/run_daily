@@ -27,7 +27,6 @@ import os
 import re
 import subprocess
 import sys
-import tarfile
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
@@ -483,6 +482,8 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     p.add_argument('--daily-timeout', type=int, default=1800)
     p.add_argument('--short-run', action='store_true',
                    help='Use reduced token counts / iterations')
+    p.add_argument('--monitor-keep-days', type=float, default=7.0,
+                   help='Keep monitor JSONL this long after Parquet conversion (0 = forever)')
     p.add_argument('--verbose', action='store_true',
                    help='Also stream the raw subprocess log to the terminal')
     p.add_argument('-k', dest='keyword', default=None,
@@ -537,37 +538,32 @@ def _run_analysis(html_report: Path, summary_json: Path) -> Path | None:
         return None
 
 
-def _archive_monitor_files(output_dir: Path, stamp: str) -> Path | None:
-    """Bundle this run's machine-monitor samples into one gzip archive.
+def _convert_monitor_parquet(output_dir: Path, stamp: str, meta: dict,
+                             summary_json: Path, keep_days: float) -> Path | None:
+    """Fold this run's monitor JSONL into one Parquet file for publishing.
 
-    The samples are one file per model and only useful together, so they are
-    archived instead of published individually. Originals remain available
-    locally because ``metrics.machine.file`` points to them.
+    The JSONL originals stay for ``keep_days`` so a bad conversion is
+    recoverable and ``metrics.machine.file`` keeps resolving.
     """
-    files = sorted(output_dir.glob(f'daily.{stamp}.monitor.*.jsonl'))
-    if not files:
-        return None
+    sys.path.insert(0, str(DAILY_DIR))
+    from common.monitor_parquet import convert_run, prune_jsonl
+    from viewer.ingest._common import parse_stamp_from_name, run_id_of
 
-    archive = output_dir / f'daily.{stamp}.monitor.tar.gz'
-    try:
-        with tarfile.open(archive, 'w:gz') as tar:
-            for f in files:
-                tar.add(f, arcname=f.name)
-        with tarfile.open(archive, 'r:gz') as tar:
-            archived = {m.name for m in tar.getmembers()}
-    except (OSError, tarfile.TarError) as exc:
-        print(f'[run.py] monitor archive failed: {exc}', file=sys.stderr)
-        return None
-
-    missing = {f.name for f in files} - archived
-    if missing:
-        print(f'[run.py] monitor archive incomplete, keeping originals: {sorted(missing)}',
+    machine = meta.get('machine') or 'unknown'
+    ts = parse_stamp_from_name(summary_json.name)
+    if ts is None:
+        print(f'[run.py] monitor parquet skipped: no stamp in {summary_json.name}',
               file=sys.stderr)
-        return archive
+        return None
 
-    size_mb = archive.stat().st_size / (1024 ** 2)
-    print(f'[run.py] monitor archive: {archive} ({len(files)} files, {size_mb:.1f} MB)')
-    return archive
+    parquet = convert_run(
+        output_dir, stamp,
+        run_id=run_id_of(machine, ts, summary_json.name),
+        machine=machine,
+    )
+    if parquet is not None:
+        prune_jsonl(output_dir, keep_days)
+    return parquet
 
 
 def main() -> int:
@@ -650,7 +646,8 @@ def main() -> int:
     raw_logs = sorted(output_dir.glob(f'daily.{stamp}.raw'))
     if not raw_logs:
         raw_logs = sorted(output_dir.glob(f'daily.{stamp}.*.raw'))
-    monitor_archive = _archive_monitor_files(output_dir, stamp)
+    monitor_parquet = _convert_monitor_parquet(
+        output_dir, stamp, extra_meta, summary_json, args.monitor_keep_days)
 
     if args.pip_freeze or args.backup or args.mail:
         write_pip_freeze(pip_freeze_file)
@@ -660,8 +657,8 @@ def main() -> int:
     to_upload = [summary_json, pytest_json, pip_freeze_file]
     if html_report:
         to_upload.append(html_report)
-    if monitor_archive:
-        to_upload.append(monitor_archive)
+    if monitor_parquet:
+        to_upload.append(monitor_parquet)
     to_upload.extend(raw_logs)
 
     # Prepend the published-artefact links *before* scp/mail so both the
