@@ -3,7 +3,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from parsers.llm_benchmark import parse_json_report
+
+pytestmark = pytest.mark.dev_only
 
 
 def test_parse_json_report_uses_fastest_iteration(tmp_path: Path) -> None:

@@ -12,6 +12,8 @@ DAILY_DIR = Path(__file__).resolve().parent.parent
 if str(DAILY_DIR) not in sys.path:
     sys.path.insert(0, str(DAILY_DIR))
 
+pytestmark = pytest.mark.dev_only
+
 # app.py runs Streamlit at import time only under `streamlit run`; importing the
 # module itself is safe and gives access to the pure helpers.
 from viewer.app import (DEFAULT_Y_SCALE, Y_SCALE_OPTIONS,  # noqa: E402

@@ -35,6 +35,31 @@ from common.profiling import HWResourceTracker, ResourceStats, sizeof_fmt
 
 
 # ---------------------------------------------------------------------------
+# dev_only tooling tests (viewer/report/parser regression tests): these test
+# the daily suite's own tooling, not models, and pull in deps (streamlit,
+# duckdb, pandas) that the LLM daily environment doesn't install. `-m "not
+# dev_only"` alone can't stop this because pytest imports a test module
+# during collection, before marker filtering runs — so we skip collecting
+# these files outright unless a developer opts in with --dev-only.
+# ---------------------------------------------------------------------------
+
+DEV_ONLY_TEST_FILES = frozenset({
+    'test_llm_parser.py',
+    'test_run_meta.py',
+    'test_viewer_charts.py',
+    'test_viewer_queries.py',
+})
+
+
+def pytest_ignore_collect(collection_path, config) -> bool | None:
+    if config.getoption('--dev-only', default=False):
+        return None
+    if collection_path.name in DEV_ONLY_TEST_FILES:
+        return True
+    return None
+
+
+# ---------------------------------------------------------------------------
 # CLI options
 # ---------------------------------------------------------------------------
 
@@ -72,6 +97,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='YYYYMMDD_HHMM stamp shared by all artefacts (set by run.py)')
     group.addoption('--monitor-interval-sec', default=0.5, type=float,
                     help='Machine-state sampling interval (0 disables monitoring)')
+    group.addoption('--dev-only', action='store_true',
+                    help='Also collect dev_only tooling tests (viewer/report/parser '
+                         'regression tests) that require streamlit/duckdb/pandas')
 
 
 # ---------------------------------------------------------------------------

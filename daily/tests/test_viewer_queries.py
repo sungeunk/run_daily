@@ -12,6 +12,8 @@ DAILY_DIR = Path(__file__).resolve().parent.parent
 if str(DAILY_DIR) not in sys.path:
     sys.path.insert(0, str(DAILY_DIR))
 
+pytestmark = pytest.mark.dev_only
+
 from analysis.functional import aggregate_functional  # noqa: E402
 from viewer import queries as q  # noqa: E402
 from viewer.ingest import writer  # noqa: E402

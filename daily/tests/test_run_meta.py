@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from analysis.report import _gpu_memory_text
 from run import _adapter_name_matches
+
+pytestmark = pytest.mark.dev_only
 
 
 def test_adapter_name_matches_ignores_punctuation_and_suffix() -> None:
