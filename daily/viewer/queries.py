@@ -1110,6 +1110,86 @@ def geomean_for_runs(db_path: Path, run_ids: Sequence[str], *,
     return out.sort_values("ts").reset_index(drop=True)
 
 
+# Dashboard metric panels. 'throughput' is unit-driven rather than
+# exec_mode-driven because throughput is recorded under several exec_mode
+# names ('batch:1', 'batch:64', 'tps') depending on the benchmark.
+GEOMEAN_METRICS: tuple[str, ...] = ("1st", "2nd", "pipeline", "throughput")
+
+
+def _metric_rows(perf: pd.DataFrame, metric: str) -> pd.DataFrame:
+    if metric == "throughput":
+        unit = perf["unit"].fillna("").str.upper()
+        return perf[(unit == "FPS") | (perf["exec_mode"] == "tps")]
+    return perf[perf["exec_mode"] == metric]
+
+
+def geomean_matrix(db_path: Path, machines: Sequence[str], *,
+                   limit: int = 10,
+                   run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                   include_short_run: bool = False,
+                   models: Sequence[str] | None = None) -> pd.DataFrame:
+    """Per-machine, per-metric geomean trend, each over that machine's cohort.
+
+    Every metric is reduced to the series that all of the machine's runs
+    measured before the geomean is taken, so a run that lost models to
+    failures moves the success count instead of the geomean. The intersection
+    is per machine and per metric — mixing machines would compare rigs whose
+    model sets differ.
+
+    Returns one row per (machine, run, metric) with the run's success count
+    attached for context.
+    """
+    import numpy as np
+
+    keys = ["model", "precision", "in_token", "out_token", "exec_mode"]
+    frames: list[pd.DataFrame] = []
+
+    for machine in machines:
+        cohort = recent_runs(db_path, machine, limit=limit,
+                             run_kinds=run_kinds,
+                             include_short_run=include_short_run)
+        if cohort.empty:
+            continue
+
+        run_ids = [str(r) for r in cohort["run_id"]]
+        perf = perf_for_runs(db_path, run_ids, models=models)
+        if perf.empty:
+            continue
+
+        counts = success_counts(db_path, run_ids)
+        meta = cohort[["run_id", "ts", "stamp", "ov_version"]].copy()
+        meta["machine"] = machine
+        meta["success_count"] = meta["run_id"].map(counts).fillna(0).astype(int)
+        # Runs that produced nothing drop out of the merge below, so carry the
+        # cohort size along to keep them countable.
+        meta["cohort_runs"] = len(run_ids)
+
+        for metric in GEOMEAN_METRICS:
+            sub = _metric_rows(perf, metric)
+            if sub.empty:
+                continue
+
+            per_series = sub.groupby(keys, dropna=False)["run_id"].nunique()
+            complete = per_series[per_series == sub["run_id"].nunique()]
+            if complete.empty:
+                continue
+            sub = sub.merge(complete.reset_index()[keys], on=keys)
+
+            agg = sub.groupby("run_id")["value"].agg(
+                geomean=lambda v: float(np.exp(np.log(v).mean())),
+                n_series="size",
+            ).reset_index()
+            agg["metric"] = metric
+            agg["unit"] = next(iter(sub["unit"].dropna()), "")
+            frames.append(agg.merge(meta, on="run_id"))
+
+    if not frames:
+        return pd.DataFrame()
+    return (pd.concat(frames, ignore_index=True)
+            .sort_values(["machine", "metric", "ts"])
+            .reset_index(drop=True))
+
+
 def machine_health_for_runs(db_path: Path,
                             run_ids: Sequence[str]) -> pd.DataFrame:
     """Per-run machine telemetry summary for an explicit cohort."""
@@ -1477,8 +1557,13 @@ def machines_overview(db_path: Path,
                      ORDER BY r2.ts DESC LIMIT 1) AS last_success_stamp,
                    (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM runs r2
                      WHERE r2.machine = l.machine{sub_where}
-                       AND COALESCE(r2.failed_tests, 0)
-                         + COALESCE(r2.error_tests, 0) > 0
+                       AND (COALESCE(r2.failed_tests, 0)
+                              + COALESCE(r2.error_tests, 0) > 0
+                            -- A run that started but executed nothing (pytest
+                            -- aborted during collection) reports zero of
+                            -- everything, yet it is a failure. NULL means the
+                            -- run predates these counters, so leave it alone.
+                            OR r2.total_tests = 0)
                      ORDER BY r2.ts DESC LIMIT 1) AS last_fail_stamp
                    {analysis_cols}
                    {issue_col}

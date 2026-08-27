@@ -214,6 +214,17 @@ def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
             f'{backup_relative_dir(filename)}/{filename}')
 
 
+def jenkins_console_url() -> str:
+    """This build's Jenkins console, or '' when not running under Jenkins.
+
+    The console is not copied to the relay: it is only complete after the job
+    finishes, which is after this process has already published everything.
+    Jenkins log rotation eventually removes it.
+    """
+    build_url = os.environ.get('BUILD_URL', '').strip()
+    return f'{build_url.rstrip("/")}/consoleText' if build_url else ''
+
+
 def artefact_links(files: Iterable[Path], *, base_url: str | None = None
                    ) -> list[tuple[str, str]]:
     """Return ``(label, url)`` pairs for artefacts published on the relay.
@@ -225,11 +236,12 @@ def artefact_links(files: Iterable[Path], *, base_url: str | None = None
     """
     label_order = {
         'html': (1, 'html'),
-        'raw': (2, 'raw log'),
-        'summary.json': (3, 'summary json'),
-        'pytest.json': (4, 'pytest json'),
-        'requirements.txt': (5, 'requirements'),
-        'monitor.parquet': (6, 'monitor data'),
+        'console.log': (2, 'console'),
+        'raw': (3, 'raw log'),
+        'summary.json': (4, 'summary json'),
+        'pytest.json': (5, 'pytest json'),
+        'requirements.txt': (6, 'requirements'),
+        'monitor.parquet': (7, 'monitor data'),
     }
 
     def _classify(name: str) -> tuple[int, str]:
@@ -244,6 +256,9 @@ def artefact_links(files: Iterable[Path], *, base_url: str | None = None
         name = Path(f).name
         rank, label = _classify(name)
         entries.append((rank, label, backup_server_url(base_url, name)))
+
+    if console_url := jenkins_console_url():
+        entries.append((*label_order['console.log'], console_url))
 
     return [(label, url) for _, label, url in sorted(entries, key=lambda e: (e[0], e[1]))]
 
