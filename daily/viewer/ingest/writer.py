@@ -28,8 +28,10 @@ def connect(db_path: Path, *, read_only: bool = False) -> duckdb.DuckDBPyConnect
 def ensure_schema(con: duckdb.DuckDBPyConnection,
                   schema_path: Path | None = None) -> None:
     schema_path = Path(schema_path or DEFAULT_SCHEMA_PATH)
-    con.execute(schema_path.read_text(encoding="utf-8"))
+    # Migrations run first: schema.sql recreates views that reference columns
+    # added below, which would fail on a pre-existing DB.
     _apply_schema_migrations(con)
+    con.execute(schema_path.read_text(encoding="utf-8"))
 
 
 def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
@@ -40,7 +42,33 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_info TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_size_gb DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_speed_mhz DOUBLE",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS run_kind TEXT",
+        # Backfill only rows never classified: an ADD COLUMN default would
+        # label historical PR/CI runs as 'daily' and quietly pull them into
+        # every trend comparison.
+        """
+        UPDATE runs SET run_kind = CASE
+            WHEN regexp_matches(lower(COALESCE(purpose, '') || ' ' || COALESCE(description, '')),
+                 '\\bpr[-_# ]*\\d+|\\bpull[-_ ]?request\\b|\\bpre-?commit\\b') THEN 'pr'
+            WHEN regexp_matches(lower(COALESCE(purpose, '') || ' ' || COALESCE(description, '')),
+                 '\\bdaily|\\bnightly\\b|\\bweekly\\b') THEN 'daily'
+            WHEN regexp_matches(lower(COALESCE(purpose, '') || ' ' || COALESCE(description, '')),
+                 '\\btest|\\btrial\\b|\\bdebug\\b|\\bexperiment|\\bjenkins\\b|\\bci\\b|\\bvalidation\\b') THEN 'test'
+            ELSE 'manual'
+        END
+        WHERE run_kind IS NULL
+        """,
         "ALTER TABLE perf ADD COLUMN IF NOT EXISTS prompt_idx INTEGER DEFAULT 0",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS history_count INTEGER",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS history_median DOUBLE",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS history_mad DOUBLE",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS history_sigma DOUBLE",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS history_cv DOUBLE",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS worsening_z DOUBLE",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS reference_source TEXT",
+        "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS within_fluctuation BOOLEAN",
+        "ALTER TABLE functional_issues ADD COLUMN IF NOT EXISTS model TEXT",
+        "ALTER TABLE functional_issues ADD COLUMN IF NOT EXISTS precision TEXT",
     ]
     for sql in migrations:
         try:
@@ -84,12 +112,12 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
             """
             INSERT INTO runs (
                 run_id, source_format, report_file, machine, device,
-                purpose, description, ts, ww,
+                purpose, description, run_kind, ts, ww,
                 ov_version, ov_build, ov_sha,
                 host_info, host_memory_size_gb, host_memory_speed_mhz,
                 genai_version, genai_commit, tok_commit,
                 short_run, source_path, rawlog_path, file_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
@@ -97,6 +125,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 device        = excluded.device,
                 purpose       = excluded.purpose,
                 description   = excluded.description,
+                run_kind      = excluded.run_kind,
                 ts            = excluded.ts,
                 ww            = excluded.ww,
                 ov_version    = excluded.ov_version,
@@ -115,7 +144,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
             """,
             [
                 rec.run_id, rec.source_format, rec.report_file, rec.machine, rec.device,
-                rec.purpose, rec.description, rec.ts, rec.ww,
+                rec.purpose, rec.description, rec.run_kind, rec.ts, rec.ww,
                 rec.ov_version, rec.ov_build, rec.ov_sha,
                 rec.host_info, rec.host_memory_size_gb, rec.host_memory_speed_mhz,
                 rec.genai_version, rec.genai_commit, rec.tok_commit,
@@ -158,6 +187,39 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 list(dedup.values()),
+            )
+
+        con.execute("DELETE FROM machine_monitor_stats WHERE run_id = ?", [rec.run_id])
+        if rec.monitor:
+            monitor_dedup: dict[str, tuple] = {}
+            for m in rec.monitor:
+                monitor_dedup[m.nodeid] = (
+                    rec.run_id, m.nodeid, m.model, m.precision, m.samples,
+                    m.duration_sec,
+                    m.gpu_clock_mhz_mean, m.gpu_clock_mhz_min, m.gpu_clock_mhz_max,
+                    m.gpu_clock_max_mhz, m.gpu_utilization_mean,
+                    m.gpu_power_watts_mean, m.gpu_power_watts_max,
+                    m.gpu_temp_c_mean, m.gpu_temp_c_max,
+                    m.cpu_clock_mhz_mean, m.cpu_usage_percent_mean, m.cpu_temp_c_max,
+                    m.host_memory_usage_mean, m.page_faults_per_sec_mean,
+                    m.throttled_sample_ratio, m.throttle_reasons,
+                    m.sample_duration_ms_max, m.monitor_file,
+                )
+            con.executemany(
+                """
+                INSERT INTO machine_monitor_stats (
+                    run_id, nodeid, model, precision, samples, duration_sec,
+                    gpu_clock_mhz_mean, gpu_clock_mhz_min, gpu_clock_mhz_max,
+                    gpu_clock_max_mhz, gpu_utilization_mean,
+                    gpu_power_watts_mean, gpu_power_watts_max,
+                    gpu_temp_c_mean, gpu_temp_c_max,
+                    cpu_clock_mhz_mean, cpu_usage_percent_mean, cpu_temp_c_max,
+                    host_memory_usage_mean, page_faults_per_sec_mean,
+                    throttled_sample_ratio, throttle_reasons,
+                    sample_duration_ms_max, monitor_file
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                list(monitor_dedup.values()),
             )
         con.commit()
     except Exception:

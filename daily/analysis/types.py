@@ -95,6 +95,8 @@ class FunctionalIssue:
     nodeid: str
     outcome: str          # 'failed' | 'error' | 'timeout'
     message: str          # short normalised message
+    model: str | None = None
+    precision: str | None = None
 
 
 # ---------------------------------------------------------------------------

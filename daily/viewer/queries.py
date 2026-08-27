@@ -7,6 +7,7 @@ per-call connection cost is paid once per cache bucket.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 import logging
@@ -45,6 +46,28 @@ def _cached_tables(db_path_str: str, mtime_ns: int) -> frozenset[str]:
 def _tables_for_db(db_path: Path) -> set[str]:
     stat = db_path.stat()
     return set(_cached_tables(str(db_path), stat.st_mtime_ns))
+
+
+@lru_cache(maxsize=32)
+def _cached_columns(db_path_str: str, relation: str,
+                    mtime_ns: int) -> frozenset[str]:
+    with _read_only(Path(db_path_str)) as con:
+        try:
+            return frozenset(r[0] for r in
+                             con.execute(f"DESCRIBE {relation}").fetchall())
+        except duckdb.Error:
+            return frozenset()
+
+
+def _has_column(db_path: Path, relation: str, column: str) -> bool:
+    """Whether a table/view exposes a column.
+
+    The viewer opens the DB read-only and so cannot migrate it. A deployment
+    where ingest has not yet run with the current schema must degrade to the
+    columns it does have instead of failing to render.
+    """
+    stat = db_path.stat()
+    return column in _cached_columns(str(db_path), relation, stat.st_mtime_ns)
 
 
 def _fill_missing_verdicts(df: pd.DataFrame) -> pd.DataFrame:
@@ -105,6 +128,126 @@ def list_machines(db_path: Path) -> list[str]:
     with _read_only(db_path) as con:
         return [r[0] for r in con.execute(
             "SELECT DISTINCT machine FROM runs ORDER BY machine").fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Run cohort: the shared "which runs are we looking at" primitive.
+#
+# Every analysis view resolves its scope through here so the tabs agree on
+# machine, run kind and history depth. History depth is a *run count* because
+# benchmark cadence is irregular — a day-based window silently under- or
+# over-samples depending on how often the rig happened to run.
+# ---------------------------------------------------------------------------
+
+RUN_KINDS = ("daily", "pr", "test", "manual")
+DEFAULT_RUN_KINDS = ("daily",)
+
+
+def _run_kind_clause(run_kinds: Sequence[str] | None,
+                     alias: str = "r") -> tuple[str, list]:
+    if not run_kinds:
+        return "", []
+    placeholders = ",".join(["?"] * len(run_kinds))
+    return (f" AND COALESCE({alias}.run_kind, 'daily') IN ({placeholders})",
+            list(run_kinds))
+
+
+def list_run_kinds(db_path: Path, machine: str | None = None) -> list[str]:
+    if not _has_column(db_path, "runs", "run_kind"):
+        return ["daily"]
+    where = "" if machine is None else "WHERE machine = ?"
+    params = [] if machine is None else [machine]
+    with _read_only(db_path) as con:
+        rows = con.execute(f"""
+            SELECT DISTINCT COALESCE(run_kind, 'daily') AS run_kind
+            FROM runs {where}
+        """, params).fetchall()
+    found = {r[0] for r in rows if r[0]}
+    return [k for k in RUN_KINDS if k in found] + sorted(found - set(RUN_KINDS))
+
+
+def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
+                run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                include_short_run: bool = True,
+                before_ts=None) -> pd.DataFrame:
+    """Return the newest ``limit`` runs matching the filters, oldest first."""
+    has_kind = _has_column(db_path, "runs", "run_kind")
+    clause, params = _run_kind_clause(run_kinds if has_kind else None)
+    kind_select = ("COALESCE(run_kind, 'daily')" if has_kind else "'daily'")
+    short_clause = "" if include_short_run else " AND COALESCE(r.short_run, FALSE) = FALSE"
+    ts_clause = ""
+    ts_params: list = []
+    if before_ts is not None:
+        ts_clause = " AND r.ts <= ?"
+        ts_params = [before_ts]
+
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT run_id, machine, ts,
+                   strftime(ts, '%Y%m%d_%H%M') AS stamp,
+                   ww, ov_version, ov_build, ov_sha,
+                   purpose, {kind_select} AS run_kind,
+                   description, short_run, source_format,
+                   source_path, rawlog_path
+            FROM (
+                SELECT r.*
+                FROM runs r
+                WHERE r.machine = ?{clause}{short_clause}{ts_clause}
+                ORDER BY r.ts DESC
+                LIMIT ?
+            )
+            ORDER BY ts
+        """, [machine, *params, *ts_params, int(limit)]).fetchdf()
+
+
+def list_models(db_path: Path, machine: str | None = None,
+                run_kinds: Sequence[str] | None = None) -> list[str]:
+    """Model names available for filtering, optionally scoped to a machine."""
+    filters = []
+    params: list = []
+    if machine:
+        filters.append("r.machine = ?")
+        params.append(machine)
+    if run_kinds and _has_column(db_path, "runs", "run_kind"):
+        placeholders = ",".join(["?"] * len(run_kinds))
+        filters.append(f"COALESCE(r.run_kind, 'daily') IN ({placeholders})")
+        params.extend(run_kinds)
+    where = f"WHERE {' AND '.join(filters)}" if filters else ""
+    with _read_only(db_path) as con:
+        return [r[0] for r in con.execute(f"""
+            SELECT DISTINCT p.model
+            FROM perf p JOIN runs r USING (run_id)
+            {where}
+            ORDER BY p.model
+        """, params).fetchall()]
+
+
+def perf_for_runs(db_path: Path, run_ids: Sequence[str], *,
+                  models: Sequence[str] | None = None,
+                  exec_modes: Sequence[str] | None = None) -> pd.DataFrame:
+    """Perf rows for an explicit run cohort, with run metadata attached."""
+    if not run_ids:
+        return pd.DataFrame()
+    filters = ["f.run_id IN ({})".format(",".join(["?"] * len(run_ids)))]
+    params: list = list(run_ids)
+    if models:
+        filters.append("f.model IN ({})".format(",".join(["?"] * len(models))))
+        params.extend(models)
+    if exec_modes:
+        filters.append("f.exec_mode IN ({})".format(",".join(["?"] * len(exec_modes))))
+        params.extend(exec_modes)
+    kind_select = ("f.run_kind" if _has_column(db_path, "perf_flat", "run_kind")
+                   else "'daily'")
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT f.run_id, f.ts, f.ww, f.ov_version, {kind_select} AS run_kind,
+                   f.model, f.precision, f.in_token, f.out_token,
+                   f.exec_mode, f.value, f.unit
+            FROM perf_flat f
+            WHERE {' AND '.join(filters)}
+              AND f.value > 0
+            ORDER BY f.ts, f.model, f.precision, f.in_token, f.out_token, f.exec_mode
+        """, params).fetchdf()
 
 
 def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
@@ -813,3 +956,375 @@ def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
             WHERE ar.run_id = ?
             LIMIT 1
         """, [run_id]).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# Count-based trend analysis
+# ---------------------------------------------------------------------------
+
+_LOWER_IS_BETTER_UNITS = {"ms", "s", "%"}
+
+
+def _direction_sign(unit: object) -> int:
+    """+1 when a rising value is worse, -1 when a rising value is better."""
+    return 1 if unit in _LOWER_IS_BETTER_UNITS else -1
+
+
+def series_trend(db_path: Path, machine: str, *, recent_runs_n: int = 3,
+                 history_runs_n: int = 10,
+                 run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                 models: Sequence[str] | None = None,
+                 exec_modes: Sequence[str] | None = None,
+                 include_short_run: bool = True,
+                 min_history_points: int = 3) -> pd.DataFrame:
+    """Per-series comparison of the newest runs against the runs before them.
+
+    Both windows are counted in *runs*, not days. The recent window is the
+    last ``recent_runs_n`` runs; the history window is the ``history_runs_n``
+    runs immediately preceding it. Medians and MAD make the comparison robust
+    to the single-point outliers that iGPU rigs produce routinely.
+    """
+    cohort = recent_runs(db_path, machine,
+                         limit=recent_runs_n + history_runs_n,
+                         run_kinds=run_kinds,
+                         include_short_run=include_short_run)
+    if cohort.empty:
+        return pd.DataFrame()
+
+    run_ids = cohort["run_id"].tolist()
+    recent_ids = set(run_ids[-recent_runs_n:])
+    history_ids = set(run_ids[:-recent_runs_n])
+    if not history_ids:
+        return pd.DataFrame()
+
+    perf = perf_for_runs(db_path, run_ids, models=models, exec_modes=exec_modes)
+    if perf.empty:
+        return pd.DataFrame()
+
+    perf["window"] = perf["run_id"].map(
+        lambda r: "recent" if r in recent_ids else "history"
+    )
+    keys = ["model", "precision", "in_token", "out_token", "exec_mode", "unit"]
+
+    rows = []
+    for key, group in perf.groupby(keys, dropna=False):
+        recent = group.loc[group["window"] == "recent", "value"]
+        history = group.loc[group["window"] == "history", "value"]
+        unit = key[-1]
+        row = dict(zip(keys, key))
+        row["recent_n"] = int(recent.size)
+        row["history_n"] = int(history.size)
+        row["recent_median"] = float(recent.median()) if recent.size else None
+        row["history_median"] = float(history.median()) if history.size else None
+        row["latest_value"] = (float(group.sort_values("ts")["value"].iloc[-1])
+                               if group.size else None)
+
+        if history.size >= min_history_points and recent.size and history.median():
+            mad = float((history - history.median()).abs().median())
+            sigma = 1.4826 * mad
+            median = float(history.median())
+            delta = row["recent_median"] - median
+            sign = _direction_sign(unit)
+            row["history_mad"] = mad
+            row["history_sigma"] = sigma
+            row["history_cv"] = mad / median if median else None
+            row["worsening_pct"] = sign * delta / median
+            row["worsening_z"] = (sign * delta / sigma) if sigma > 0 else None
+            row["status"] = "ok"
+        else:
+            row.update(history_mad=None, history_sigma=None, history_cv=None,
+                       worsening_pct=None, worsening_z=None,
+                       status="insufficient_data")
+        row["direction"] = ("lower_is_better" if _direction_sign(unit) == 1
+                            else "higher_is_better")
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    return df.sort_values("worsening_pct", ascending=False,
+                          na_position="last").reset_index(drop=True)
+
+
+def series_history_for_runs(db_path: Path, machine: str, *,
+                            model: str, precision: str,
+                            in_token: int, out_token: int, exec_mode: str,
+                            runs_n: int = 20,
+                            run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                            include_short_run: bool = True) -> pd.DataFrame:
+    """Value history for one series over the newest ``runs_n`` runs."""
+    cohort = recent_runs(db_path, machine, limit=runs_n, run_kinds=run_kinds,
+                         include_short_run=include_short_run)
+    if cohort.empty:
+        return pd.DataFrame()
+    run_ids = cohort["run_id"].tolist()
+    placeholders = ",".join(["?"] * len(run_ids))
+    kind_select = ("f.run_kind" if _has_column(db_path, "perf_flat", "run_kind")
+                   else "'daily'")
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT f.run_id, f.ts, f.ww, f.ov_version, {kind_select} AS run_kind,
+                   f.value, f.unit
+            FROM perf_flat f
+            WHERE f.run_id IN ({placeholders})
+              AND f.model = ? AND f.precision = ?
+              AND f.in_token = ? AND f.out_token = ?
+              AND f.exec_mode = ?
+            ORDER BY f.ts
+        """, [*run_ids, model, precision, in_token, out_token,
+              exec_mode]).fetchdf()
+
+
+def geomean_for_runs(db_path: Path, run_ids: Sequence[str], *,
+                     models: Sequence[str] | None = None,
+                     exec_modes: Sequence[str] | None = None,
+                     common_series_only: bool = True) -> pd.DataFrame:
+    """Geomean per run.
+
+    With ``common_series_only`` the geomean is restricted to series present in
+    every run of the cohort, so a run that simply measured fewer models does
+    not look like a performance change.
+    """
+    perf = perf_for_runs(db_path, run_ids, models=models, exec_modes=exec_modes)
+    if perf.empty:
+        return pd.DataFrame()
+
+    keys = ["model", "precision", "in_token", "out_token", "exec_mode"]
+    if common_series_only:
+        counts = perf.groupby(keys, dropna=False)["run_id"].nunique()
+        complete = counts[counts == perf["run_id"].nunique()].index
+        if len(complete):
+            perf = perf.set_index(keys).loc[complete].reset_index()
+
+    if perf.empty:
+        return pd.DataFrame()
+
+    import numpy as np
+
+    grouped = perf.groupby(["run_id", "ts", "ww", "ov_version"], dropna=False)
+    out = grouped["value"].agg(
+        geomean=lambda v: float(np.exp(np.log(v).mean())),
+        n_samples="size",
+    ).reset_index()
+    return out.sort_values("ts").reset_index(drop=True)
+
+
+def machine_health_for_runs(db_path: Path,
+                            run_ids: Sequence[str]) -> pd.DataFrame:
+    """Per-run machine telemetry summary for an explicit cohort."""
+    if not run_ids or "machine_monitor_stats" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+    placeholders = ",".join(["?"] * len(run_ids))
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT h.*, r.ts, strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                   r.ov_version
+            FROM run_machine_health h
+            JOIN runs r USING (run_id)
+            WHERE h.run_id IN ({placeholders})
+            ORDER BY r.ts
+        """, list(run_ids)).fetchdf()
+
+
+def machine_stats_for_run(db_path: Path, run_id: str,
+                          models: Sequence[str] | None = None) -> pd.DataFrame:
+    """Per-test telemetry rows for one run."""
+    if "machine_monitor_stats" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+    filters = ["run_id = ?"]
+    params: list = [run_id]
+    if models:
+        filters.append("model IN ({})".format(",".join(["?"] * len(models))))
+        params.extend(models)
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT *
+            FROM machine_monitor_stats
+            WHERE {' AND '.join(filters)}
+            ORDER BY model, nodeid
+        """, params).fetchdf()
+
+
+def functional_issues_for_runs(db_path: Path,
+                               run_ids: Sequence[str],
+                               models: Sequence[str] | None = None) -> pd.DataFrame:
+    """Functional issues for an explicit run cohort."""
+    if not run_ids or "functional_issues" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+    filters = ["fi.run_id IN ({})".format(",".join(["?"] * len(run_ids)))]
+    params: list = list(run_ids)
+    has_model = _has_column(db_path, "functional_issues", "model")
+    if models and has_model:
+        # Issues recorded before the model column existed have NULL there;
+        # keep them visible rather than silently dropping old failures.
+        filters.append(
+            "(fi.model IN ({}) OR fi.model IS NULL)".format(
+                ",".join(["?"] * len(models)))
+        )
+        params.extend(models)
+    model_select = ("fi.model, fi.precision" if has_model
+                    else "CAST(NULL AS TEXT) AS model, CAST(NULL AS TEXT) AS precision")
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT fi.run_id, r.machine,
+                   strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                   r.ts, r.ov_version,
+                   fi.nodeid, fi.outcome, fi.message,
+                   {model_select}
+            FROM functional_issues fi
+            JOIN runs r USING (run_id)
+            WHERE {' AND '.join(filters)}
+            ORDER BY r.ts DESC, fi.nodeid
+        """, params).fetchdf()
+
+
+def functional_summary_for_runs(db_path: Path,
+                                run_ids: Sequence[str]) -> pd.DataFrame:
+    """Per-run functional health for an explicit cohort."""
+    if not run_ids or "analysis_results" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+    placeholders = ",".join(["?"] * len(run_ids))
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT r.run_id, r.machine,
+                   strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                   r.ts, r.ov_version,
+                   ar.overall_status,
+                   ar.functional_fail_count AS functional_issue_count,
+                   ar.regressed_count, ar.compared_count
+            FROM analysis_results ar
+            JOIN runs r USING (run_id)
+            WHERE r.run_id IN ({placeholders})
+            ORDER BY r.ts
+        """, list(run_ids)).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# Trend-aware run comparison
+# ---------------------------------------------------------------------------
+
+def compare_runs_with_trend(db_path: Path, machine: str,
+                            run_id_a: str, run_id_b: str, *,
+                            history_runs_n: int = 10,
+                            run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                            models: Sequence[str] | None = None,
+                            include_short_run: bool = True,
+                            min_history_points: int = 3) -> pd.DataFrame:
+    """Compare two runs with each run's own preceding history as context.
+
+    A raw A-vs-B delta cannot tell a real change from ordinary run-to-run
+    scatter. For each series we also compute the median of the runs preceding
+    each side, so the UI can say whether A moved outside its own normal range
+    or merely landed on a different point of the same distribution.
+    """
+    base = fetch_run_comparison(db_path, run_id_a, run_id_b)
+    if base.empty:
+        return base
+    if models:
+        base = base[base["model"].isin(models)]
+        if base.empty:
+            return base
+
+    def _history(run_id: str) -> pd.DataFrame:
+        with _read_only(db_path) as con:
+            row = con.execute("SELECT ts FROM runs WHERE run_id = ?",
+                              [run_id]).fetchone()
+        if not row:
+            return pd.DataFrame()
+        # +1 then drop: `recent_runs` is inclusive of the anchor run itself.
+        cohort = recent_runs(db_path, machine, limit=history_runs_n + 1,
+                             run_kinds=run_kinds,
+                             include_short_run=include_short_run,
+                             before_ts=row[0])
+        if cohort.empty:
+            return pd.DataFrame()
+        prior_ids = [r for r in cohort["run_id"].tolist() if r != run_id]
+        if not prior_ids:
+            return pd.DataFrame()
+        return perf_for_runs(db_path, prior_ids, models=models)
+
+    keys = ["model", "precision", "in_token", "out_token", "exec_mode"]
+
+    def _stats(history: pd.DataFrame, suffix: str) -> pd.DataFrame:
+        if history.empty:
+            return pd.DataFrame(columns=[*keys, f"median_{suffix}",
+                                         f"sigma_{suffix}", f"n_{suffix}"])
+        grouped = history.groupby(keys, dropna=False)["value"]
+        out = grouped.agg(**{
+            f"median_{suffix}": "median",
+            f"n_{suffix}": "size",
+        }).reset_index()
+        mad = grouped.agg(lambda v: float((v - v.median()).abs().median()))
+        out[f"sigma_{suffix}"] = (1.4826 * mad).to_numpy()
+        return out
+
+    merged = base.merge(_stats(_history(run_id_a), "a"), on=keys, how="left")
+    merged = merged.merge(_stats(_history(run_id_b), "b"), on=keys, how="left")
+
+    sign = merged["unit"].apply(_direction_sign)
+    delta_a = merged["value_a"] - merged["median_a"]
+    merged["a_vs_history_pct"] = -sign * delta_a / merged["median_a"]
+    merged["a_vs_history_z"] = (sign * delta_a / merged["sigma_a"]).where(
+        merged["sigma_a"] > 0
+    )
+    merged["history_cv_a"] = (merged["sigma_a"] / 1.4826) / merged["median_a"]
+
+    enough = merged["n_a"].fillna(0) >= min_history_points
+    # A perfectly flat history has sigma 0, which makes the z-score undefined.
+    # Any real deviation from such a history is meaningful, so fall back to a
+    # relative check instead of silently reporting "within history".
+    degenerate = merged["sigma_a"].isna() | (merged["sigma_a"] <= 0)
+    outside = (merged["a_vs_history_z"].abs() >= 2.0).fillna(False)
+    outside |= degenerate & (merged["a_vs_history_pct"].abs() > 1e-9).fillna(False)
+    merged["trend_context"] = "unknown"
+    merged.loc[enough & ~outside, "trend_context"] = "within_history"
+    merged.loc[enough & outside, "trend_context"] = "outside_history"
+    return merged
+
+
+# Above this share of throttled samples the run's numbers reflect the machine's
+# power/thermal state more than the code under test.
+THROTTLE_SUSPECT_RATIO = 0.05
+# A run whose GPU averaged below this fraction of the card's own max clock was
+# not running at the speed its earlier runs did.
+LOW_CLOCK_RATIO = 0.80
+
+
+def classify_machine_state(health_row: pd.Series | None,
+                           clock_baseline: float | None = None) -> str:
+    """Label one run's machine state: stable / fluctuating / throttled / unknown."""
+    if health_row is None or health_row.empty:
+        return "unknown"
+
+    throttle = health_row.get("max_throttle_ratio")
+    if pd.notna(throttle) and float(throttle) >= THROTTLE_SUSPECT_RATIO:
+        return "throttled"
+
+    ratio = health_row.get("gpu_clock_ratio")
+    if pd.notna(ratio) and float(ratio) < LOW_CLOCK_RATIO:
+        return "throttled"
+
+    clock = health_row.get("avg_gpu_clock_mhz")
+    if (clock_baseline and pd.notna(clock)
+            and clock_baseline > 0
+            and float(clock) < clock_baseline * 0.95):
+        return "fluctuating"
+
+    if pd.isna(health_row.get("avg_gpu_clock_mhz")):
+        return "unknown"
+    return "stable"
+
+
+def attribute_regression(verdict: str, machine_state: str) -> str:
+    """Combine the perf verdict with machine state into a cause hint.
+
+    Deliberately conservative: a disturbed machine never *erases* a
+    regression, it only downgrades confidence that the code caused it.
+    """
+    if verdict != "regressed":
+        return "n/a"
+    if machine_state in {"throttled", "fluctuating"}:
+        return "likely-machine"
+    if machine_state == "stable":
+        return "likely-code"
+    return "inconclusive"

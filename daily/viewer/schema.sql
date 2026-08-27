@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS runs (
     machine        TEXT NOT NULL,
     device         TEXT,                   -- 'GPU', 'GPU.1', ...
     purpose        TEXT,
+    -- Normalised at ingest so the viewer can exclude CI/PR runs without
+    -- pattern-matching free-form purpose text at query time.
+    run_kind       TEXT DEFAULT 'daily',   -- 'daily' | 'pr' | 'test' | 'manual'
     description    TEXT,
     ts             TIMESTAMP NOT NULL,
     ww             TEXT,
@@ -109,14 +112,58 @@ CREATE TABLE IF NOT EXISTS analysis_comparisons (
     improvement_pct DOUBLE,
     verdict         TEXT NOT NULL,
     threshold_pct   DOUBLE,
+    -- History context computed by daily/analysis/engine.py. Persisted so the
+    -- viewer can show "is this outside normal fluctuation" without recomputing.
+    history_count      INTEGER,
+    history_median     DOUBLE,
+    history_mad        DOUBLE,
+    history_sigma      DOUBLE,
+    history_cv         DOUBLE,
+    worsening_z        DOUBLE,
+    reference_source   TEXT,
+    within_fluctuation BOOLEAN,
     PRIMARY KEY (run_id, model, precision, in_token, out_token, exec_mode)
 );
 
+-- Per-test machine telemetry, reduced to min/max/mean by
+-- daily/common/machine_monitor.py. Raw JSONL samples stay on disk; only the
+-- summary is ingested so regression review can tell a slow run apart from a
+-- throttled or otherwise disturbed machine.
+CREATE TABLE IF NOT EXISTS machine_monitor_stats (
+    run_id                    TEXT NOT NULL,
+    nodeid                    TEXT NOT NULL,
+    model                     TEXT,
+    precision                 TEXT,
+    samples                   INTEGER,
+    duration_sec              DOUBLE,
+    gpu_clock_mhz_mean        DOUBLE,
+    gpu_clock_mhz_min         DOUBLE,
+    gpu_clock_mhz_max         DOUBLE,
+    gpu_clock_max_mhz         DOUBLE,
+    gpu_utilization_mean      DOUBLE,
+    gpu_power_watts_mean      DOUBLE,
+    gpu_power_watts_max       DOUBLE,
+    gpu_temp_c_mean           DOUBLE,
+    gpu_temp_c_max            DOUBLE,
+    cpu_clock_mhz_mean        DOUBLE,
+    cpu_usage_percent_mean    DOUBLE,
+    cpu_temp_c_max            DOUBLE,
+    host_memory_usage_mean    DOUBLE,
+    page_faults_per_sec_mean  DOUBLE,
+    throttled_sample_ratio    DOUBLE,
+    throttle_reasons          TEXT,
+    sample_duration_ms_max    DOUBLE,
+    monitor_file              TEXT,
+    PRIMARY KEY (run_id, nodeid)
+);
+
 CREATE TABLE IF NOT EXISTS functional_issues (
-    run_id   TEXT NOT NULL,
-    nodeid   TEXT NOT NULL,
-    outcome  TEXT NOT NULL,
-    message  TEXT,
+    run_id    TEXT NOT NULL,
+    nodeid    TEXT NOT NULL,
+    outcome   TEXT NOT NULL,
+    message   TEXT,
+    model     TEXT,
+    precision TEXT,
     PRIMARY KEY (run_id, nodeid, outcome)
 );
 
@@ -145,6 +192,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_machine_ts   ON runs(machine, ts);
 CREATE INDEX IF NOT EXISTS idx_perf_series       ON perf(model, precision, in_token, out_token, exec_mode);
 CREATE INDEX IF NOT EXISTS idx_sys_run           ON system_devices(run_id);
 CREATE INDEX IF NOT EXISTS idx_analysis_status   ON analysis_results(overall_status, run_id);
+CREATE INDEX IF NOT EXISTS idx_monitor_run       ON machine_monitor_stats(run_id);
 
 -- ---------------------------------------------------------------------------
 -- Views
@@ -198,6 +246,7 @@ SELECT
     r.ov_build,
     r.ov_sha,
     r.purpose,
+    r.run_kind,
     r.short_run,
     r.source_format,
     p.run_id,
@@ -298,3 +347,28 @@ CREATE OR REPLACE VIEW latest_run_per_machine AS
 SELECT machine, arg_max(run_id, ts) AS run_id, max(ts) AS ts
 FROM runs
 GROUP BY machine;
+
+-- One machine-health row per run. `gpu_clock_ratio` is the headline signal:
+-- a run that spent its time well below the card's own max clock is a
+-- fluctuation suspect rather than a code regression.
+CREATE OR REPLACE VIEW run_machine_health AS
+SELECT
+    run_id,
+    count(*)                          AS monitored_tests,
+    sum(samples)                      AS total_samples,
+    max(throttled_sample_ratio)       AS max_throttle_ratio,
+    avg(throttled_sample_ratio)       AS avg_throttle_ratio,
+    max(gpu_temp_c_max)               AS max_gpu_temp_c,
+    avg(gpu_clock_mhz_mean)           AS avg_gpu_clock_mhz,
+    avg(gpu_utilization_mean)         AS avg_gpu_utilization,
+    avg(gpu_power_watts_mean)         AS avg_gpu_power_watts,
+    avg(cpu_usage_percent_mean)       AS avg_cpu_usage,
+    max(cpu_temp_c_max)               AS max_cpu_temp_c,
+    avg(host_memory_usage_mean)       AS avg_host_memory_usage,
+    max(sample_duration_ms_max)       AS max_sample_duration_ms,
+    CASE
+        WHEN max(gpu_clock_max_mhz) IS NULL OR max(gpu_clock_max_mhz) = 0 THEN NULL
+        ELSE avg(gpu_clock_mhz_mean) / max(gpu_clock_max_mhz)
+    END                               AS gpu_clock_ratio
+FROM machine_monitor_stats
+GROUP BY run_id;

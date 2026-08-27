@@ -151,27 +151,82 @@ def cached_profiles(_v: float) -> list[str]:
     return q.list_profiles(DB)
 
 
-@st.cache_data(show_spinner=False)
-def cached_series(machine: str, model: str, precision: str,
-                  in_token: int, out_token: int, exec_mode: str,
-                  days: int, purpose_filter: str, _v: float) -> pd.DataFrame:
-    return q.series_history(DB, machine, model, precision,
-                            in_token, out_token, exec_mode, days=days,
-                            purpose_filter=purpose_filter)
 
+# --- count-based cohort helpers -------------------------------------------
+# Every analysis tab resolves its scope through these so the run set, run kind
+# and model selection stay consistent across the app.
 
 @st.cache_data(show_spinner=False)
-def cached_noise(machine: str, days: int, _v: float) -> pd.DataFrame:
-    return q.noise_summary(DB, machine=machine, days=days)
+def cached_run_kinds(machine: str, _v: float) -> list[str]:
+    return q.list_run_kinds(DB, machine)
 
 
 @st.cache_data(show_spinner=False)
-def cached_geomean(machine: str, exec_mode: str, in_bucket: str | None,
-                   out_bucket: str | None, days: int,
-                   purpose_filter: str, _v: float) -> pd.DataFrame:
-    return q.geomean_trend(DB, machine, exec_mode=exec_mode,
-                           in_bucket=in_bucket, out_bucket=out_bucket,
-                           days=days, purpose_filter=purpose_filter)
+def cached_models(machine: str, run_kinds: tuple[str, ...],
+                  _v: float) -> list[str]:
+    return q.list_models(DB, machine, run_kinds=run_kinds)
+
+
+@st.cache_data(show_spinner=False)
+def cached_cohort(machine: str, limit: int, run_kinds: tuple[str, ...],
+                  include_short_run: bool, _v: float) -> pd.DataFrame:
+    return q.recent_runs(DB, machine, limit=limit, run_kinds=run_kinds,
+                         include_short_run=include_short_run)
+
+
+@st.cache_data(show_spinner=False)
+def cached_series_trend(machine: str, recent_n: int, history_n: int,
+                        run_kinds: tuple[str, ...], models: tuple[str, ...],
+                        include_short_run: bool, _v: float) -> pd.DataFrame:
+    return q.series_trend(DB, machine, recent_runs_n=recent_n,
+                          history_runs_n=history_n, run_kinds=run_kinds,
+                          models=models or None,
+                          include_short_run=include_short_run)
+
+
+@st.cache_data(show_spinner=False)
+def cached_series_runs(machine: str, model: str, precision: str,
+                       in_token: int, out_token: int, exec_mode: str,
+                       runs_n: int, run_kinds: tuple[str, ...],
+                       include_short_run: bool, _v: float) -> pd.DataFrame:
+    return q.series_history_for_runs(DB, machine, model=model,
+                                     precision=precision, in_token=in_token,
+                                     out_token=out_token, exec_mode=exec_mode,
+                                     runs_n=runs_n, run_kinds=run_kinds,
+                                     include_short_run=include_short_run)
+
+
+@st.cache_data(show_spinner=False)
+def cached_geomean_runs(run_ids: tuple[str, ...], models: tuple[str, ...],
+                        exec_modes: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.geomean_for_runs(DB, run_ids, models=models or None,
+                              exec_modes=exec_modes or None)
+
+
+@st.cache_data(show_spinner=False)
+def cached_machine_health(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.machine_health_for_runs(DB, run_ids)
+
+
+@st.cache_data(show_spinner=False)
+def cached_functional_issues(run_ids: tuple[str, ...], models: tuple[str, ...],
+                             _v: float) -> pd.DataFrame:
+    return q.functional_issues_for_runs(DB, run_ids, models=models or None)
+
+
+@st.cache_data(show_spinner=False)
+def cached_functional_summary(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.functional_summary_for_runs(DB, run_ids)
+
+
+@st.cache_data(show_spinner=False)
+def cached_trend_compare(machine: str, run_a: str, run_b: str,
+                         history_n: int, run_kinds: tuple[str, ...],
+                         models: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.compare_runs_with_trend(DB, machine, run_a, run_b,
+                                     history_runs_n=history_n,
+                                     run_kinds=run_kinds,
+                                     models=models or None)
 
 
 # ---------------------------------------------------------------------------
@@ -182,22 +237,82 @@ PERF_COL_NON_VALUE = {"model", "precision", "in_spec", "out_spec",
                       "exec_mode", "unit", "label"}
 
 
-def _stable_y_range(values: pd.Series, min_relative_span: float = 0.10) -> list[float] | None:
+# Plotly fits the y-axis to the data range, which turns a stable 1000 ms series
+# that happens to wander between 998 and 1003 into a full-height sawtooth. The
+# axis is therefore given a minimum span expressed as a percentage of the
+# series level, so normal scatter renders as a flat line and only real moves
+# fill the plot.
+Y_SCALE_OPTIONS: dict[str, float | str] = {
+    "±1%": 0.01,
+    "±2%": 0.02,
+    "±5%": 0.05,
+    "±10%": 0.10,
+    "±25%": 0.25,
+    "Zero-based": "zero",
+    "Auto (fit data)": "auto",
+}
+DEFAULT_Y_SCALE = "±10%"
+
+
+def _stable_y_range(values: pd.Series,
+                    scale: float | str = 0.10) -> list[float] | None:
+    """Y-axis range honouring a minimum span so flat series look flat.
+
+    ``scale`` is either a fraction interpreted as ± around the midpoint, or
+    ``"auto"`` / ``"zero"``. The range always grows to fit the data.
+    """
     clean = pd.to_numeric(values, errors="coerce").dropna()
     if clean.empty:
         return None
 
     low = float(clean.min())
     high = float(clean.max())
+
+    if scale == "auto":
+        return None
+    if scale == "zero":
+        return [0.0, high * 1.1 if high > 0 else 1.0]
+
     midpoint = (low + high) / 2.0
-    actual_span = high - low
-    min_span = max(abs(midpoint) * min_relative_span, 1e-9)
-    span = max(actual_span * 1.10, min_span)
+    min_span = max(abs(midpoint) * float(scale) * 2.0, 1e-9)
+    span = max((high - low) * 1.10, min_span)
     lower = midpoint - span / 2.0
     upper = midpoint + span / 2.0
     if low >= 0 and lower < 0:
         lower = 0.0
     return [lower, upper]
+
+
+def _apply_y_scale(fig: go.Figure, cfg: dict, *series: pd.Series | list) -> None:
+    """Apply the sidebar y-axis scale to ``fig`` using every plotted series."""
+    parts = [pd.Series(s, dtype="float64") if not isinstance(s, pd.Series)
+             else s for s in series if s is not None]
+    if not parts:
+        return
+    y_range = _stable_y_range(pd.concat(parts, ignore_index=True),
+                              cfg.get("y_scale", 0.10))
+    if y_range is not None:
+        fig.update_yaxes(range=y_range)
+
+
+# Time flows right-to-left in the charts and top-to-bottom in the tables, so
+# the newest run is always the first thing read. Queries still return oldest
+# first because the trend maths needs chronological order.
+
+def _newest_left(fig: go.Figure) -> None:
+    """Put the newest run on the left of a time-ordered chart."""
+    fig.update_xaxes(autorange="reversed")
+
+
+def _newest_first(frame: pd.DataFrame) -> pd.DataFrame:
+    """Reverse a chronologically ordered frame for display."""
+    if frame.empty:
+        return frame
+    if "ts" in frame.columns:
+        return frame.sort_values("ts", ascending=False)
+    if "stamp" in frame.columns:
+        return frame.sort_values("stamp", ascending=False)
+    return frame.iloc[::-1]
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +376,36 @@ def _sidebar() -> dict:
         profile = st.sidebar.selectbox("Display profile", profile_options)
 
     st.sidebar.divider()
+    st.sidebar.subheader("Analysis scope")
+    # History depth is counted in runs, not days: benchmark cadence is
+    # irregular, so a day window silently under-samples a rig that skipped a
+    # night and over-samples one that ran twice.
+    history_runs = st.sidebar.slider(
+        "History (runs)", 3, 60, 10, 1,
+        help="How many past runs each trend/regression view compares against.")
+    recent_runs_n = st.sidebar.slider(
+        "Recent window (runs)", 1, 10, 3, 1,
+        help="Newest N runs treated as 'now'.")
+
+    available_kinds = cached_run_kinds(machine, v) or list(q.RUN_KINDS)
+    default_kinds = [k for k in available_kinds if k == "daily"] or available_kinds
+    run_kinds = st.sidebar.multiselect(
+        "Run kinds", available_kinds, default=default_kinds,
+        help="Jenkins PR/test runs are excluded by default — they are not "
+             "comparable to scheduled daily runs.")
+    if not run_kinds:
+        st.sidebar.caption("_No run kind selected — showing all._")
+        run_kinds = available_kinds
+
+    include_short_run = st.sidebar.checkbox(
+        "Include short runs", value=False,
+        help="Short runs measure fewer prompts and skew comparisons.")
+
+    all_models = cached_models(machine, tuple(run_kinds), v)
+    models = st.sidebar.multiselect("Models", all_models, default=[],
+                                    help="Empty means all models.")
+
+    st.sidebar.divider()
     st.sidebar.subheader("Regression thresholds")
     z = st.sidebar.slider("z-score |threshold|", 1.0, 6.0, 3.0, 0.5,
                           help="Robust z based on MAD.")
@@ -269,10 +414,19 @@ def _sidebar() -> dict:
                            help="CV = MAD/median. Above this, series is "
                                 "treated as inherently noisy.")
 
-    days = st.sidebar.slider("Trend history (days)", 7, 60, 30)
-    return dict(v=v, machine=machine, profile=profile,
-                z=z, pct=pct, cv=cv, days=days)
+    st.sidebar.divider()
+    y_scale_label = st.sidebar.selectbox(
+        "Chart y-axis range", list(Y_SCALE_OPTIONS),
+        index=list(Y_SCALE_OPTIONS).index(DEFAULT_Y_SCALE),
+        help="Minimum span the y-axis covers. Auto-fit makes a 998-1003 ms "
+             "series fill the chart; a ±10% floor keeps it visibly flat.")
 
+    return dict(v=v, machine=machine, profile=profile,
+                z=z, pct=pct, cv=cv,
+                y_scale=Y_SCALE_OPTIONS[y_scale_label],
+                history_runs=history_runs, recent_runs=recent_runs_n,
+                run_kinds=tuple(run_kinds), models=tuple(models),
+                include_short_run=include_short_run)
 
 # ---------------------------------------------------------------------------
 # Run artifact review helpers
@@ -453,8 +607,167 @@ def _latest_daily_run(runs: pd.DataFrame) -> pd.Series | None:
 # Tabs
 # ---------------------------------------------------------------------------
 
+def _cohort(cfg: dict) -> pd.DataFrame:
+    """Runs in scope for the current sidebar filters, oldest first."""
+    return cached_cohort(cfg["machine"], cfg["history_runs"] + cfg["recent_runs"],
+                         cfg["run_kinds"], cfg["include_short_run"], cfg["v"])
+
+
+def _machine_state_by_run(cfg: dict, run_ids: tuple[str, ...]) -> tuple[dict, pd.DataFrame]:
+    """Map run_id -> machine state label, plus the raw health frame."""
+    health = cached_machine_health(run_ids, cfg["v"])
+    if health.empty:
+        return {}, health
+    clock_baseline = health["avg_gpu_clock_mhz"].median()
+    states = {
+        str(row["run_id"]): q.classify_machine_state(row, clock_baseline)
+        for _, row in health.iterrows()
+    }
+    return states, health
+
+
+_STATE_ICON = {"stable": "🟢", "fluctuating": "🟡",
+               "throttled": "🔴", "unknown": "⚪"}
+
+
 def _tab_dashboard(cfg: dict) -> None:
-    st.subheader("Dashboard — latest daily_CB review")
+    st.subheader("Dashboard — recent trend overview")
+
+    cohort = _cohort(cfg)
+    if cohort.empty:
+        st.info(f"No runs match the current filters for {cfg['machine']}.")
+        return
+
+    run_ids = tuple(cohort["run_id"].tolist())
+    st.caption(f"{len(run_ids)} runs in scope · kinds: "
+               f"{', '.join(cfg['run_kinds'])} · "
+               f"models: {'all' if not cfg['models'] else len(cfg['models'])}")
+
+    # --- functional first: a broken run makes its perf numbers meaningless ---
+    func_summary = cached_functional_summary(run_ids, cfg["v"])
+    issues = cached_functional_issues(run_ids, cfg["models"], cfg["v"])
+    latest_run_id = str(cohort.iloc[-1]["run_id"])
+    latest_stamp = str(cohort.iloc[-1]["stamp"])
+
+    latest_issues = (issues[issues["run_id"] == latest_run_id]
+                     if not issues.empty else pd.DataFrame())
+    prior_nodeids = (set(issues[issues["run_id"] != latest_run_id]["nodeid"])
+                     if not issues.empty else set())
+    latest_nodeids = set(latest_issues["nodeid"]) if not latest_issues.empty else set()
+    new_issues = latest_nodeids - prior_nodeids
+    resolved = prior_nodeids - latest_nodeids
+
+    if latest_nodeids:
+        st.error(f"🔴 Functional issues in the latest run ({latest_stamp}): "
+                 f"{len(latest_nodeids)} failing test(s), "
+                 f"{len(new_issues)} new.")
+    else:
+        st.success(f"🟢 No functional issues in the latest run ({latest_stamp}).")
+
+    fcols = st.columns(4)
+    fcols[0].metric("Failing now", len(latest_nodeids))
+    fcols[1].metric("New", len(new_issues))
+    fcols[2].metric("Persisting", len(latest_nodeids & prior_nodeids))
+    fcols[3].metric("Resolved", len(resolved))
+
+    if not latest_issues.empty:
+        with st.expander("Failing tests in the latest run", expanded=bool(new_issues)):
+            view = latest_issues.copy()
+            view["is_new"] = view["nodeid"].isin(new_issues)
+            st.dataframe(view[["model", "nodeid", "outcome", "is_new", "message"]],
+                         width="stretch", hide_index=True)
+
+    # --- machine state: context for everything below ---
+    states, health = _machine_state_by_run(cfg, run_ids)
+    if states:
+        disturbed = [rid for rid, s in states.items()
+                     if s in {"throttled", "fluctuating"}]
+        if disturbed:
+            st.warning(f"⚠ {len(disturbed)} of {len(states)} runs in scope ran on "
+                       "a throttled or fluctuating machine; treat their numbers "
+                       "with care.")
+        latest_state = states.get(latest_run_id, "unknown")
+        st.caption(f"Latest run machine state: "
+                   f"{_STATE_ICON.get(latest_state, '⚪')} {latest_state}")
+
+    # --- overall performance trend across the cohort ---
+    st.markdown("### Overall performance trend")
+    geo = cached_geomean_runs(run_ids, cfg["models"], (), cfg["v"])
+    if geo.empty:
+        st.info("Not enough perf data for a geomean trend.")
+    else:
+        geo = geo.merge(cohort[["run_id", "stamp"]], on="run_id", how="left")
+        geo["machine_state"] = geo["run_id"].map(lambda r: states.get(r, "unknown"))
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=geo["stamp"], y=geo["geomean"], mode="lines+markers",
+            name="geomean",
+            marker=dict(
+                color=[{"throttled": "#EF5350", "fluctuating": "#FFA726"}
+                       .get(s, "#42A5F5") for s in geo["machine_state"]],
+                size=9,
+            ),
+            text=[f"ov={v}<br>n={n}<br>machine={s}" for v, n, s in
+                  zip(geo["ov_version"].fillna(""), geo["n_samples"],
+                      geo["machine_state"])],
+            hovertemplate="%{x}<br>geomean=%{y:.2f}<br>%{text}<extra></extra>",
+        ))
+        median = geo["geomean"].median()
+        fig.add_hline(y=median, line=dict(dash="dash"),
+                      annotation_text="cohort median")
+        fig.update_layout(height=380, xaxis_title="run",
+                          yaxis_title="geomean (common series)")
+        _apply_y_scale(fig, cfg, geo["geomean"], [median])
+        _newest_left(fig)
+        st.plotly_chart(fig, width="stretch")
+        st.caption("Restricted to series present in every run in scope, so a "
+                   "run that measured fewer models does not shift the curve. "
+                   "Red/orange markers flag throttled or fluctuating machines.")
+
+    # --- worst movers ---
+    st.markdown("### Biggest movers (recent runs vs history)")
+    trend = cached_series_trend(cfg["machine"], cfg["recent_runs"],
+                                cfg["history_runs"], cfg["run_kinds"],
+                                cfg["models"], cfg["include_short_run"],
+                                cfg["v"])
+    ok = trend[trend["status"] == "ok"] if not trend.empty else pd.DataFrame()
+    if ok.empty:
+        st.info("Not enough history for a trend comparison.")
+    else:
+        worse = ok[ok["worsening_pct"] >= cfg["pct"]]
+        better = ok[ok["worsening_pct"] <= -cfg["pct"]]
+        mcols = st.columns(3)
+        mcols[0].metric("Series tracked", len(ok))
+        mcols[1].metric("Worsening", len(worse))
+        mcols[2].metric("Improving", len(better))
+        st.dataframe(_movers_table(ok.head(10)), width="stretch", hide_index=True)
+
+    if not func_summary.empty:
+        with st.expander("Run health history"):
+            st.dataframe(_newest_first(func_summary)[
+                             ["stamp", "ov_version", "overall_status",
+                              "functional_issue_count",
+                              "regressed_count", "compared_count"]],
+                         width="stretch", hide_index=True)
+
+    st.divider()
+    _latest_run_detail(cfg)
+
+
+def _movers_table(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["series"] = out.apply(_series_label, axis=1)
+    out["worsening_%"] = (out["worsening_pct"] * 100).round(2)
+    out["z"] = out["worsening_z"].round(2)
+    out["recent"] = out["recent_median"].round(3)
+    out["history"] = out["history_median"].round(3)
+    out["cv_%"] = (out["history_cv"] * 100).round(2)
+    return out[["series", "worsening_%", "z", "recent", "history",
+                "recent_n", "history_n", "cv_%"]]
+
+
+def _latest_run_detail(cfg: dict) -> None:
+    st.subheader("Latest daily_CB run review")
     runs = cached_runs(cfg["machine"], cfg["v"])
     run = _latest_daily_run(runs)
     if run is None:
@@ -712,16 +1025,6 @@ def _tab_excel(cfg: dict) -> None:
             st.dataframe(extras, width="stretch", hide_index=True)
 
 
-@st.cache_data(show_spinner=False)
-def cached_trend_regressions(machine: str, recent_days: int,
-                             baseline_days: int, purpose_filter: str,
-                             _v: float) -> pd.DataFrame:
-    return q.trend_regressions(DB, machine,
-                               recent_days=recent_days,
-                               baseline_days=baseline_days,
-                               purpose_filter=purpose_filter)
-
-
 def _series_label(row: pd.Series) -> str:
     return (f"{row['model']} | {row['precision']} | "
             f"in={row['in_token']} out={row['out_token']} | "
@@ -729,52 +1032,70 @@ def _series_label(row: pd.Series) -> str:
 
 
 def _tab_regression(cfg: dict) -> None:
-    """Trend + regression in a single view.
+    """Trend + regression over a run-counted window.
 
-    The question this tab answers: 'is this series trending slower lately,
-    compared to its own recent past?' — not 'did today's single point miss
-    the band'. We compare the median of a recent window to the median of
-    an older baseline window, so ingest noise and one-off outliers get
-    averaged out.
+    The question this tab answers is 'has this series drifted vs its own
+    recent past', not 'did today's single point miss the band'. Windows are
+    counted in runs so an irregular benchmark schedule cannot silently empty
+    them, and each candidate regression is annotated with the machine state
+    during the run so throttling is not mistaken for a code change.
     """
-    st.subheader("Regression — trend comparison")
+    st.subheader("Regression — recent runs vs history")
 
-    c1, c2 = st.columns(2)
-    recent_days = c1.slider("Recent window (days)", 3, 21, 7, 1,
-                            help="Last N days worth of points; their "
-                                 "median represents 'now'.")
-    baseline_days = c2.slider("Baseline window (days)", 7, 60, 21, 1,
-                              help="The N days before the recent window; "
-                                   "their median is the comparison point.")
+    cohort = _cohort(cfg)
+    if cohort.empty:
+        st.info("No runs match the current filters.")
+        return
 
-    df = cached_trend_regressions(cfg["machine"], recent_days,
-                                  baseline_days, DEFAULT_RUN_FILTER, cfg["v"])
+    run_ids = tuple(cohort["run_id"].tolist())
+    recent_ids = run_ids[-cfg["recent_runs"]:]
+    st.caption(f"Recent {len(recent_ids)} run(s) vs the "
+               f"{len(run_ids) - len(recent_ids)} run(s) before them.")
+
+    df = cached_series_trend(cfg["machine"], cfg["recent_runs"],
+                             cfg["history_runs"], cfg["run_kinds"],
+                             cfg["models"], cfg["include_short_run"], cfg["v"])
     if df.empty:
         st.info("No data for this machine / window.")
         return
 
     valid = df[df["status"] == "ok"].copy()
+    if valid.empty:
+        st.info("Not enough history for any series in this window.")
+        return
+
     valid["severity"] = pd.concat([
         valid["worsening_pct"].fillna(0) / cfg["pct"],
         valid["worsening_z"].fillna(0) / cfg["z"],
     ], axis=1).max(axis=1)
     valid = valid.sort_values("severity", ascending=False).reset_index(drop=True)
-    noisy_count = int((valid["recent_cv"].fillna(0) >= cfg["cv"]).sum())
+
+    states, _health = _machine_state_by_run(cfg, run_ids)
+    recent_states = [states.get(r, "unknown") for r in recent_ids]
+    disturbed_recent = [s for s in recent_states
+                        if s in {"throttled", "fluctuating"}]
+    machine_state = ("throttled" if "throttled" in recent_states else
+                     "fluctuating" if "fluctuating" in recent_states else
+                     "unknown" if all(s == "unknown" for s in recent_states)
+                     else "stable")
+
+    if disturbed_recent:
+        st.warning(f"⚠ {len(disturbed_recent)} of {len(recent_states)} recent "
+                   f"run(s) ran on a disturbed machine ({machine_state}). "
+                   "Regressions below are attributed accordingly.")
+
+    noisy_count = int((valid["history_cv"].fillna(0) >= cfg["cv"]).sum())
+    bad = valid[(valid["worsening_pct"].fillna(0) >= cfg["pct"]) |
+                (valid["worsening_z"].fillna(0) >= cfg["z"])]
+    better = valid[(valid["worsening_pct"].fillna(0) <= -cfg["pct"]) |
+                   (valid["worsening_z"].fillna(0) <= -cfg["z"])]
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Series tracked", len(valid))
-    # Worsening above either threshold, regardless of noise — surfaces the
-    # strongest signals. The user should cross-check with the graph for
-    # series that are flagged noisy.
-    bad = valid[(valid["worsening_pct"].fillna(0) >= cfg["pct"]) |
-                (valid["worsening_z"].fillna(0) >= cfg["z"])]
     m2.metric("Worsening ≥ threshold", len(bad))
-    better = valid[(valid["worsening_pct"].fillna(0) <= -cfg["pct"]) |
-                   (valid["worsening_z"].fillna(0) <= -cfg["z"])]
     m3.metric("Improving ≥ threshold", len(better))
-    m4.metric("Noisy (recent CV high)", noisy_count)
+    m4.metric("Noisy history", noisy_count)
 
-    # Build a compact, sortable table.
     def _fmt(frame: pd.DataFrame) -> pd.DataFrame:
         out = frame.copy()
         if "severity" not in out.columns:
@@ -786,62 +1107,83 @@ def _tab_regression(cfg: dict) -> None:
         out["worsening_%"] = (out["worsening_pct"] * 100).round(2)
         out["worsening_z"] = out["worsening_z"].round(2)
         out["severity"] = out["severity"].round(2)
-        out["recent_cv_%"] = (out["recent_cv"] * 100).round(2)
-        # Display-only columns that carry the unit suffix so SD pipelines
-        # (seconds) aren't mistaken for LLM latencies (ms) at a glance. The
-        # raw numeric recent_median / baseline_median columns remain intact
-        # below because the trend plot and caption need them as floats.
+        out["history_cv_%"] = (out["history_cv"] * 100).round(2)
+
         def _with_unit(val: float | None, unit: str | None) -> str:
             if val is None or pd.isna(val):
                 return ""
             return f"{val:.3f} {unit or ''}".rstrip()
+
         out["recent"] = [_with_unit(v, u) for v, u in
                          zip(out["recent_median"], out["unit"].fillna(""))]
-        out["baseline"] = [_with_unit(v, u) for v, u in
-                           zip(out["baseline_median"], out["unit"].fillna(""))]
-        return out[["series", "severity", "worsening_%", "worsening_z", "recent", "baseline",
-                    "recent_n", "baseline_n", "recent_cv_%",
-                    "direction", "status",
-                    # keep these for downstream selection, hidden via
-                    # column_config below
+        out["history"] = [_with_unit(v, u) for v, u in
+                          zip(out["history_median"], out["unit"].fillna(""))]
+
+        verdicts = []
+        attributions = []
+        for _, r in out.iterrows():
+            pct = r["worsening_pct"] if pd.notna(r["worsening_pct"]) else 0.0
+            cv = r["history_cv"] if pd.notna(r["history_cv"]) else 0.0
+            if pct >= cfg["pct"] and cv >= cfg["cv"]:
+                verdict = "noisy"
+            elif pct >= cfg["pct"]:
+                verdict = "regressed"
+            elif pct <= -cfg["pct"]:
+                verdict = "improved"
+            else:
+                verdict = "same"
+            verdicts.append(verdict)
+            attributions.append(q.attribute_regression(verdict, machine_state))
+        out["verdict"] = verdicts
+        out["attribution"] = attributions
+
+        return out[["series", "verdict", "attribution", "severity",
+                    "worsening_%", "worsening_z", "recent", "history",
+                    "recent_n", "history_n", "history_cv_%", "direction",
                     "model", "precision", "in_token", "out_token",
                     "exec_mode", "unit",
-                    # raw numerics for the plot/caption code paths
-                    "recent_median", "baseline_median"]]
+                    "recent_median", "history_median", "history_sigma"]]
 
     table = _fmt(valid)
     insufficient = df[df["status"] == "insufficient_data"]
 
+    show_only_regressed = st.checkbox(
+        "Show only regressed / noisy series", value=False,
+        key="regression_only_bad")
+    view = (table[table["verdict"].isin(["regressed", "noisy"])]
+            if show_only_regressed else table)
+    if view.empty:
+        st.success("No regressed series in this window.")
+        view = table
+
     st.markdown("### Series ranked by worsening %")
-    st.caption("Positive values mean the recent window is slower / worse "
-               "than the baseline. Click a row to plot it below.")
+    st.caption("Positive values mean the recent runs are slower / worse than "
+               "the preceding history. Click a row to plot it below.")
     event = st.dataframe(
-        table,
+        view,
         width="stretch",
         hide_index=True,
         selection_mode="single-row",
         on_select="rerun",
         key="regression_table",
         column_config={
-            # Hide columns we carry for row-selection / plotting only.
-            "model":           st.column_config.Column(width="small", disabled=True),
-            "precision":       None,
-            "in_token":        None,
-            "out_token":       None,
-            "exec_mode":       None,
-            "unit":            None,
-            "recent_median":   None,
-            "baseline_median": None,
+            "model":          st.column_config.Column(width="small", disabled=True),
+            "precision":      None,
+            "in_token":       None,
+            "out_token":      None,
+            "exec_mode":      None,
+            "unit":           None,
+            "recent_median":  None,
+            "history_median": None,
+            "history_sigma":  None,
         },
     )
 
-    # Default to the worst series (row 0) so the user sees something useful
-    # without clicking.
     sel_rows = event.selection.rows if event and event.selection else []
     sel_idx = sel_rows[0] if sel_rows else 0
-    if sel_idx >= len(table):
+    if sel_idx >= len(view):
         return
-    row = table.iloc[sel_idx]
+    row = view.iloc[sel_idx]
 
     st.markdown(
         f"### Trend — {row['model']} / {row['precision']} / "
@@ -849,327 +1191,371 @@ def _tab_regression(cfg: dict) -> None:
         f"[{row['unit']}]"
     )
 
-    hist = cached_series(
+    hist = cached_series_runs(
         cfg["machine"], row["model"], row["precision"],
         int(row["in_token"]), int(row["out_token"]), row["exec_mode"],
-        cfg["days"], DEFAULT_RUN_FILTER, cfg["v"])
+        cfg["history_runs"] + cfg["recent_runs"], cfg["run_kinds"],
+        cfg["include_short_run"], cfg["v"])
     if hist.empty:
         st.info("No history for this series in the selected window.")
         return
 
+    hist = hist.merge(cohort[["run_id", "stamp"]], on="run_id", how="left")
+    hist["machine_state"] = hist["run_id"].map(lambda r: states.get(r, "unknown"))
+
     unit = row["unit"] or ""
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=hist["ts"], y=hist["value"], mode="lines+markers",
+        x=hist["stamp"], y=hist["value"], mode="lines+markers",
         name="value",
-        hovertemplate="%{x|%Y-%m-%d %H:%M}<br>value=%{y:.2f} "
-                      + unit + "<br>%{text}",
-        text=[f"ov={v}" for v in hist["ov_version"].fillna("")],
+        marker=dict(
+            color=[{"throttled": "#EF5350", "fluctuating": "#FFA726"}
+                   .get(s, "#42A5F5") for s in hist["machine_state"]],
+            size=9,
+        ),
+        text=[f"ov={v}<br>machine={s}" for v, s in
+              zip(hist["ov_version"].fillna(""), hist["machine_state"])],
+        hovertemplate="%{x}<br>value=%{y:.2f} " + unit + "<br>%{text}<extra></extra>",
     ))
 
-    # Horizontal reference lines drawn as Scatter traces (not add_hline)
-    # so they show up as proper legend entries. Each spans the full x range
-    # with a constant y.
-    x_span = [hist["ts"].min(), hist["ts"].max()]
-    if pd.notna(row["baseline_median"]):
+    x_span = [hist["stamp"].iloc[0], hist["stamp"].iloc[-1]]
+    extra_y: list[float] = []
+    if pd.notna(row["history_median"]):
+        median = float(row["history_median"])
+        extra_y.append(median)
         fig.add_trace(go.Scatter(
-            x=x_span,
-            y=[float(row["baseline_median"])] * 2,
-            mode="lines",
+            x=x_span, y=[median] * 2, mode="lines",
             line=dict(dash="dot", color="#1f77b4", width=2),
-            name=f"baseline median ({baseline_days}d prior)",
-            hovertemplate=f"baseline median = {row['baseline_median']:.2f} "
-                          + unit + "<extra></extra>",
+            name=f"history median ({int(row['history_n'])} pts)",
         ))
+        sigma = row["history_sigma"]
+        if pd.notna(sigma) and float(sigma) > 0:
+            hi, lo = median + 2 * float(sigma), median - 2 * float(sigma)
+            extra_y.extend([hi, lo])
+            fig.add_trace(go.Scatter(
+                x=[*x_span, *x_span[::-1]], y=[hi, hi, lo, lo],
+                fill="toself", fillcolor="rgba(99, 110, 250, 0.20)",
+                mode="none", name="history ±2σ", hoverinfo="skip",
+            ))
     if pd.notna(row["recent_median"]):
+        extra_y.append(float(row["recent_median"]))
         fig.add_trace(go.Scatter(
-            x=x_span,
-            y=[float(row["recent_median"])] * 2,
-            mode="lines",
+            x=x_span, y=[float(row["recent_median"])] * 2, mode="lines",
             line=dict(dash="dash", color="firebrick", width=2),
-            name=f"recent median (last {recent_days}d)",
-            hovertemplate=f"recent median = {row['recent_median']:.2f} "
-                          + unit + "<extra></extra>",
+            name=f"recent median (last {cfg['recent_runs']} runs)",
         ))
-
-    # Rolling ±2σ band around the series' own rolling median. Bumped the
-    # opacity and used a stronger fill colour so the envelope is actually
-    # visible on a bright monitor (the 0.12 default washed out).
-    if hist["win_median"].notna().any():
-        band_hi = hist["win_median"] + 2 * hist["win_sigma"]
-        band_lo = hist["win_median"] - 2 * hist["win_sigma"]
-        fig.add_trace(go.Scatter(
-            x=pd.concat([hist["ts"], hist["ts"][::-1]]),
-            y=pd.concat([band_hi, band_lo[::-1]]),
-            fill="toself",
-            fillcolor="rgba(99, 110, 250, 0.28)",
-            mode="none",
-            name="±2σ band (rolling)",
-            showlegend=True,
-            hoverinfo="skip",
-        ))
-
-    y_values = [hist["value"]]
-    if pd.notna(row["baseline_median"]):
-        y_values.append(pd.Series([float(row["baseline_median"])]))
-    if pd.notna(row["recent_median"]):
-        y_values.append(pd.Series([float(row["recent_median"])]))
-    if hist["win_median"].notna().any():
-        y_values.extend([band_hi, band_lo])
-    yaxis = {}
-    y_range = _stable_y_range(pd.concat(y_values, ignore_index=True))
-    if y_range is not None:
-        yaxis["range"] = y_range
 
     fig.update_layout(
         height=450, hovermode="x unified",
-        xaxis_title="timestamp",
-        yaxis_title=f"value [{unit}]" if unit else "value",
-        yaxis=yaxis,
-        xaxis=dict(autorange="reversed"),
-        legend=dict(orientation="h", y=-0.2),
+        xaxis_title="run", yaxis_title=f"value [{unit}]" if unit else "value",
+        legend=dict(orientation="h", y=-0.25),
     )
-    st.plotly_chart(fig)
+    _apply_y_scale(fig, cfg, hist["value"], extra_y)
+    _newest_left(fig)
+    st.plotly_chart(fig, width="stretch")
 
     st.caption(
-        f"Recent median = {row['recent_median']:.3f} {unit} "
-        f"(n={int(row['recent_n'])}) vs baseline median = "
-        f"{row['baseline_median']:.3f} {unit} (n={int(row['baseline_n'])}). "
-        f"Worsening = {row['worsening_%']:+.2f}%, "
-        f"z={row['worsening_z']:+.2f}. "
-        f"Direction: {row['direction']}. "
-        f"Recent CV = {row['recent_cv_%']:.2f}% "
-        + ("(noisy — interpret with care)."
-           if row["recent_cv_%"] >= cfg["cv"] * 100
-           else "(stable).")
+        f"Verdict: **{row['verdict']}** · attribution: **{row['attribution']}** · "
+        f"recent median = {row['recent']} (n={int(row['recent_n'])}) vs "
+        f"history median = {row['history']} (n={int(row['history_n'])}). "
+        f"Worsening = {row['worsening_%']:+.2f}%, z={row['worsening_z']:+.2f}. "
+        f"History CV = {row['history_cv_%']:.2f}%."
     )
 
+    monitor = q.machine_stats_for_run(DB, str(cohort.iloc[-1]["run_id"]),
+                                      models=[row["model"]])
+    if not monitor.empty:
+        with st.expander("Machine telemetry for this model in the latest run"):
+            st.dataframe(
+                monitor[["nodeid", "samples", "gpu_clock_mhz_mean",
+                         "gpu_clock_max_mhz", "gpu_utilization_mean",
+                         "gpu_power_watts_mean", "gpu_temp_c_max",
+                         "throttled_sample_ratio", "throttle_reasons"]],
+                width="stretch", hide_index=True,
+            )
+
     if not insufficient.empty:
-        with st.expander(f"{len(insufficient)} series with insufficient data"):
-            st.caption("Fewer points than min_recent/min_baseline in the "
-                       "chosen windows.")
-            st.dataframe(_fmt(insufficient), width="stretch",
-                         hide_index=True)
+        with st.expander(f"{len(insufficient)} series with insufficient history"):
+            st.dataframe(
+                insufficient[["model", "precision", "in_token", "out_token",
+                              "exec_mode", "unit", "recent_n", "history_n"]],
+                width="stretch", hide_index=True)
+
 
 
 def _tab_geomean(cfg: dict) -> None:
     st.subheader("Geomean trend — machine-wide health")
-    exec_mode = st.selectbox("Exec mode", ["1st", "2nd", "pipeline", "tps"],
-                             index=1)
-    cols = st.columns(3)
-    in_bucket = cols[0].selectbox("in bucket",
-                                  [None, "short", "long", "0"],
-                                  format_func=lambda v: v or "(any)")
-    out_bucket = cols[1].selectbox("out bucket",
-                                   [None, "short", "long", "0"],
-                                   format_func=lambda v: v or "(any)")
-    days = cols[2].number_input("days", min_value=7, max_value=60,
-                                value=cfg["days"])
+    st.caption("Geomean over the runs in scope. Restricted to series measured "
+               "in every run so a run with fewer models does not look like a "
+               "performance change.")
 
-    df = cached_geomean(cfg["machine"], exec_mode, in_bucket, out_bucket,
-                        int(days), DEFAULT_RUN_FILTER, cfg["v"])
+    cohort = _cohort(cfg)
+    if cohort.empty:
+        st.info("No runs match the current filters.")
+        return
+    run_ids = tuple(cohort["run_id"].tolist())
+
+    exec_modes = st.multiselect(
+        "Exec modes", ["1st", "2nd", "pipeline", "tps"], default=["2nd"],
+        key="geomean_exec_modes")
+
+    df = cached_geomean_runs(run_ids, cfg["models"], tuple(exec_modes), cfg["v"])
     if df.empty:
         st.info("No data for this filter.")
         return
 
-    # Baseline = median of the *geomean* series, robust band using MAD.
+    df = df.merge(cohort[["run_id", "stamp"]], on="run_id", how="left")
+    states, _health = _machine_state_by_run(cfg, run_ids)
+    df["machine_state"] = df["run_id"].map(lambda r: states.get(r, "unknown"))
+
     median = df["geomean"].median()
     mad = (df["geomean"] - median).abs().median()
     sigma = 1.4826 * mad
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["ts"], y=df["geomean"], mode="lines+markers",
-        name="geomean",
-        text=[f"ov={v}<br>n={n}" for v, n in
-              zip(df["ov_version"].fillna(""), df["n_samples"])],
-        hovertemplate="%{x|%Y-%m-%d %H:%M}<br>geomean=%{y:.2f}<br>%{text}",
+        x=df["stamp"], y=df["geomean"], mode="lines+markers", name="geomean",
+        marker=dict(
+            color=[{"throttled": "#EF5350", "fluctuating": "#FFA726"}
+                   .get(s, "#42A5F5") for s in df["machine_state"]],
+            size=9,
+        ),
+        text=[f"ov={v}<br>n={n}<br>machine={s}" for v, n, s in
+              zip(df["ov_version"].fillna(""), df["n_samples"],
+                  df["machine_state"])],
+        hovertemplate="%{x}<br>geomean=%{y:.2f}<br>%{text}<extra></extra>",
     ))
+    band_y: list[float] = [median] if not math.isnan(median) else []
     if not math.isnan(sigma) and sigma > 0:
+        band_y.extend([median - 2 * sigma, median + 2 * sigma])
         fig.add_hline(y=median, line=dict(dash="dash"), annotation_text="median")
         fig.add_hrect(y0=median - 2 * sigma, y1=median + 2 * sigma,
                       line_width=0, fillcolor="LightBlue", opacity=0.2,
                       annotation_text="±2σ")
     fig.update_layout(height=450, hovermode="x unified",
-                      xaxis_title="timestamp", yaxis_title="geomean")
-    st.plotly_chart(fig)
+                      xaxis_title="run", yaxis_title="geomean")
+    _apply_y_scale(fig, cfg, df["geomean"], band_y)
+    _newest_left(fig)
+    st.plotly_chart(fig, width="stretch")
 
-    # Alert banner when the latest point is outside the band.
     if len(df) >= 5 and sigma > 0:
-        latest = df.iloc[-1]["geomean"]
-        z = (latest - median) / sigma
-        pct = (latest - median) / median * 100 if median else 0
-        sign = -1 if exec_mode == "tps" else 1
-        worsening_z = sign * z
-        worsening_pct = sign * pct
+        latest = df.iloc[-1]
+        z = (latest["geomean"] - median) / sigma
+        pct = (latest["geomean"] - median) / median * 100 if median else 0
+        # Only 'tps' style throughput improves as the number grows; the LLM
+        # latency modes are lower-is-better.
+        sign = -1 if exec_modes == ["tps"] else 1
+        worsening_z, worsening_pct = sign * z, sign * pct
         if abs(worsening_z) >= cfg["z"] and abs(worsening_pct) >= cfg["pct"] * 100:
             direction = "worse" if worsening_z > 0 else "better"
+            note = (f" Machine state for this run: {latest['machine_state']}."
+                    if latest["machine_state"] != "stable" else "")
             st.error(f"⚠ Latest geomean is {direction} by "
-                     f"z={worsening_z:+.2f}, {worsening_pct:+.1f}%.")
+                     f"z={worsening_z:+.2f}, {worsening_pct:+.1f}%.{note}")
         else:
             st.success("Latest geomean within band "
                        f"(z={worsening_z:+.2f}, {worsening_pct:+.1f}%).")
 
-    st.dataframe(df[["ts", "ww", "ov_version", "geomean", "n_samples"]]
-                 .tail(30), width="stretch", hide_index=True)
+    st.dataframe(_newest_first(df)[["stamp", "ov_version", "geomean",
+                                    "n_samples", "machine_state"]],
+                 width="stretch", hide_index=True)
 
 
 def _tab_noise(cfg: dict) -> None:
     st.subheader("Noise diagnostics")
-    st.caption("Series with high coefficient of variation (CV = σ / median) "
-               "over the selected window. iGPU results often live here.")
-    days = st.number_input("Window (days)", min_value=7, max_value=60,
-                           value=cfg["days"], key="noise_days")
-    df = cached_noise(cfg["machine"], int(days), cfg["v"])
-    if df.empty:
+    st.caption("Series scatter over the runs in scope, next to the machine "
+               "telemetry recorded during those runs. High series CV on a "
+               "throttling rig points at the machine rather than the code.")
+
+    cohort = _cohort(cfg)
+    if cohort.empty:
+        st.info("No runs match the current filters.")
+        return
+    run_ids = tuple(cohort["run_id"].tolist())
+
+    perf = q.perf_for_runs(DB, run_ids, models=cfg["models"] or None)
+    if perf.empty:
         st.info("No data.")
         return
-    df["cv_pct"] = (df["cv"] * 100).round(2)
-    df["median_value"] = df["median_value"].round(3)
-    df["std_value"] = df["std_value"].round(3)
-    st.dataframe(
-        df[["model", "precision", "in_token", "out_token", "exec_mode",
-            "unit", "n", "median_value", "std_value", "cv_pct"]],
-        width="stretch", hide_index=True,
-    )
+
+    keys = ["model", "precision", "in_token", "out_token", "exec_mode", "unit"]
+    grouped = perf.groupby(keys, dropna=False)["value"]
+    noise = grouped.agg(n="size", median_value="median").reset_index()
+    mad = grouped.agg(lambda v: float((v - v.median()).abs().median()))
+    noise["mad"] = mad.to_numpy()
+    noise["cv_pct"] = (noise["mad"] / noise["median_value"] * 100).round(2)
+    noise["median_value"] = noise["median_value"].round(3)
+    noise["mad"] = noise["mad"].round(3)
+    noise = noise[noise["n"] >= 3].sort_values("cv_pct", ascending=False)
+
+    if noise.empty:
+        st.info("Not enough points per series in this window.")
+        return
+
+    st.metric("Series above noisy CV threshold",
+              int((noise["cv_pct"] >= cfg["cv"] * 100).sum()))
+    st.dataframe(noise, width="stretch", hide_index=True)
+
+    health = cached_machine_health(run_ids, cfg["v"])
+    if not health.empty:
+        st.markdown("#### Machine fluctuation over the same runs")
+        st.dataframe(
+            _newest_first(health)[
+                ["stamp", "ov_version", "avg_gpu_clock_mhz",
+                 "gpu_clock_ratio", "max_throttle_ratio", "max_gpu_temp_c",
+                 "avg_gpu_utilization", "avg_cpu_usage",
+                 "max_sample_duration_ms"]].round(3),
+            width="stretch", hide_index=True,
+        )
+        st.caption("`gpu_clock_ratio` is the mean GPU clock divided by the "
+                   "card's own max clock; sustained low values mean the run "
+                   "never reached the speed its peers did.")
 
 
 def _tab_functional(cfg: dict) -> None:
     st.subheader("Functional issue history")
-    st.caption("Failed / errored test cases across recent runs. "
-               "Requires the analysis pipeline to have been run at least once.")
+    st.caption("Failed / errored test cases across the runs in scope.")
 
-    days = st.number_input("Window (days)", min_value=1, max_value=90,
-                           value=cfg["days"], key="functional_days")
+    cohort = _cohort(cfg)
+    if cohort.empty:
+        st.info("No runs match the current filters.")
+        return
+    run_ids = tuple(cohort["run_id"].tolist())
 
-    db_path: Path = DB
-    machine: str | None = cfg.get("machine") or None
+    summary_df = cached_functional_summary(run_ids, cfg["v"])
+    issues_df = cached_functional_issues(run_ids, cfg["models"], cfg["v"])
 
-    summary_df = q.fetch_functional_summary(db_path, machine, int(days))
-    if summary_df.empty:
-        st.info("No analysis_results data found. "
+    if summary_df.empty and issues_df.empty:
+        st.info("No analysis_results data found for these runs. "
                 "Run the analysis pipeline to populate this view.")
         return
 
-    # Health status colour map
-    _STATUS_COLOUR = {"green": "🟢", "yellow": "🟡", "red": "🔴", "gray": "⚫"}
-    summary_df["status"] = summary_df["overall_status"].map(
-        lambda s: f"{_STATUS_COLOUR.get(s, '❓')} {s}"
-    )
+    if not summary_df.empty:
+        _STATUS_COLOUR = {"green": "🟢", "yellow": "🟡", "red": "🔴", "gray": "⚫"}
+        summary_df = summary_df.copy()
+        summary_df["status"] = summary_df["overall_status"].map(
+            lambda s: f"{_STATUS_COLOUR.get(s, '❓')} {s}"
+        )
+        st.markdown("#### Run health summary")
+        st.dataframe(
+            _newest_first(summary_df)[
+                ["stamp", "ov_version", "status",
+                 "functional_issue_count", "regressed_count",
+                 "compared_count"]].rename(columns={
+                "stamp": "Stamp", "ov_version": "OV Version",
+                "status": "Status",
+                "functional_issue_count": "Functional issues",
+                "regressed_count": "Regressions",
+                "compared_count": "Compared",
+            }),
+            width="stretch", hide_index=True,
+        )
 
-    st.markdown("#### Run health summary")
+    if issues_df.empty:
+        st.success("No functional issues recorded in the selected runs.")
+        return
+
+    latest_run_id = str(cohort.iloc[-1]["run_id"])
+    latest = set(issues_df[issues_df["run_id"] == latest_run_id]["nodeid"])
+    prior = set(issues_df[issues_df["run_id"] != latest_run_id]["nodeid"])
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("New in latest run", len(latest - prior))
+    c2.metric("Persisting", len(latest & prior))
+    c3.metric("Resolved", len(prior - latest))
+
+    st.markdown("#### Individual failures")
+    view = issues_df.copy()
+    view["state"] = view["nodeid"].map(
+        lambda n: "new" if n in latest - prior
+        else "persisting" if n in latest & prior else "past"
+    )
     st.dataframe(
-        summary_df[["stamp", "ov_version", "status",
-                     "functional_issue_count", "regressed_count",
-                     "compared_count"]].rename(columns={
-            "stamp": "Stamp",
-            "ov_version": "OV Version",
-            "status": "Status",
-            "functional_issue_count": "Functional issues",
-            "regressed_count": "Regressions",
-            "compared_count": "Compared",
+        view[["stamp", "ov_version", "model", "precision", "outcome", "state",
+              "nodeid", "message"]]
+        .rename(columns={
+            "stamp": "Stamp", "ov_version": "OV Version",
+            "model": "Model", "precision": "Prec",
+            "outcome": "Outcome", "state": "State",
+            "nodeid": "Test", "message": "Message",
         }),
         width="stretch", hide_index=True,
     )
 
-    issues_df = q.fetch_functional_history(db_path, machine, int(days))
-    if issues_df.empty:
-        st.info("No functional issues recorded in the selected window.")
-        return
-
-    st.markdown("#### Individual failures")
-    st.dataframe(
-        issues_df[["stamp", "ov_version", "outcome", "nodeid", "category", "message"]].rename(
-            columns={
-                "stamp": "Stamp",
-                "ov_version": "OV Version",
-                "outcome": "Outcome",
-                "nodeid": "Test",
-                "category": "Category",
-                "message": "Message",
-            }
-        ),
-        width="stretch", hide_index=True,
-    )
-
-    # Stacked bar: fail count per run
-    if not summary_df.empty and "functional_issue_count" in summary_df.columns:
+    if not summary_df.empty:
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=summary_df["stamp"],
-            y=summary_df["functional_issue_count"],
-            name="Functional issues",
-            marker_color="#EF5350",
-        ))
-        fig.add_trace(go.Bar(
-            x=summary_df["stamp"],
-            y=summary_df["regressed_count"],
-            name="Regressions",
-            marker_color="#FFA726",
-        ))
-        fig.update_layout(
-            barmode="stack",
-            title="Failures and regressions per run",
-            xaxis_title="Run stamp",
-            yaxis_title="Count",
-            height=300,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        fig.add_trace(go.Bar(x=summary_df["stamp"],
+                             y=summary_df["functional_issue_count"],
+                             name="Functional issues", marker_color="#EF5350"))
+        fig.add_trace(go.Bar(x=summary_df["stamp"],
+                             y=summary_df["regressed_count"],
+                             name="Regressions", marker_color="#FFA726"))
+        fig.update_layout(barmode="stack",
+                          title="Failures and regressions per run",
+                          xaxis_title="Run stamp", yaxis_title="Count",
+                          height=300)
+        _newest_left(fig)
+        st.plotly_chart(fig, width="stretch")
 
 
 def _tab_compare(cfg: dict) -> None:
     st.subheader("Run-to-run comparison")
-    st.caption("Compare any two runs at the series level. "
-               "Select Run A (current) and Run B (baseline reference).")
+    st.caption("A raw A-vs-B delta cannot separate a real change from ordinary "
+               "run-to-run scatter, so each series is also compared against the "
+               "history preceding each run.")
 
-    db_path: Path = DB
-    machine: str | None = cfg.get("machine") or None
-
-    runs_df = q.list_runs(db_path, machine)
-    if runs_df.empty:
-        st.info("No runs found.")
+    cohort = _cohort(cfg)
+    if cohort.empty:
+        st.info("No runs match the current filters.")
         return
 
-    run_options = runs_df["run_id"].tolist()
-    stamp_map = dict(zip(runs_df["run_id"], runs_df.get("stamp", runs_df["run_id"])))
-    display_options = [f"{stamp_map.get(r, r)} ({r})" for r in run_options]
+    picker = cohort.iloc[::-1].reset_index(drop=True)
+    options = list(range(len(picker)))
+    labels = [f"{picker.iloc[i]['stamp']} · {picker.iloc[i]['run_kind']} · "
+              f"{picker.iloc[i]['ov_version'] or ''}" for i in options]
 
     col_a, col_b = st.columns(2)
-    with col_a:
-        idx_a = st.selectbox("Run A (current)", options=range(len(run_options)),
-                             format_func=lambda i: display_options[i],
-                             key="compare_run_a")
-    with col_b:
-        idx_b = st.selectbox("Run B (reference)", options=range(len(run_options)),
-                             format_func=lambda i: display_options[i],
-                             index=min(1, len(run_options) - 1),
-                             key="compare_run_b")
+    idx_a = col_a.selectbox("Run A (current)", options,
+                            format_func=lambda i: labels[i], index=0,
+                            key="compare_run_a")
+    idx_b = col_b.selectbox("Run B (reference)", options,
+                            format_func=lambda i: labels[i],
+                            index=min(1, len(options) - 1),
+                            key="compare_run_b")
 
-    run_a = run_options[idx_a]
-    run_b = run_options[idx_b]
-
+    run_a = str(picker.iloc[idx_a]["run_id"])
+    run_b = str(picker.iloc[idx_b]["run_id"])
     if run_a == run_b:
         st.warning("Select two different runs to compare.")
         return
 
-    df = q.fetch_run_comparison(db_path, run_a, run_b)
+    df = cached_trend_compare(cfg["machine"], run_a, run_b, cfg["history_runs"],
+                              cfg["run_kinds"], cfg["models"], cfg["v"])
     if df.empty:
         st.info("No overlapping series found between the two runs.")
         return
 
-    df["pct"] = df["improvement_pct"].apply(
-        lambda x: f"{x * 100:+.1f}%" if not pd.isna(x) else "—"
-    )
+    states, _health = _machine_state_by_run(cfg, tuple(cohort["run_id"].tolist()))
+    state_a = states.get(run_a, "unknown")
+    state_b = states.get(run_b, "unknown")
+    st.caption(f"Machine state — A: {_STATE_ICON.get(state_a, '⚪')} {state_a} · "
+               f"B: {_STATE_ICON.get(state_b, '⚪')} {state_b}")
+    if state_a in {"throttled", "fluctuating"}:
+        st.warning(f"⚠ Run A ran on a {state_a} machine; differences below may "
+                   "reflect machine state rather than code.")
 
-    verdict_filter = st.multiselect(
-        "Filter by verdict",
-        options=["improved", "same", "regressed", "noisy", "insufficient", "unavailable"],
-        default=["improved", "same", "regressed", "unavailable"],
-        key="compare_verdict_filter",
-    )
-    df_show = df[df["verdict"].isin(verdict_filter)] if verdict_filter else df
+    df = df.copy()
+    df["attribution"] = [
+        q.attribute_regression(
+            "regressed" if v == "regressed" else "same", state_a)
+        for v in df["verdict"]
+    ]
+    df["change"] = df["improvement_pct"].apply(
+        lambda x: f"{x * 100:+.1f}%" if pd.notna(x) else "—")
+    df["vs_history"] = df["a_vs_history_pct"].apply(
+        lambda x: f"{x * 100:+.1f}%" if pd.notna(x) else "—")
+    df["history_z"] = df["a_vs_history_z"].round(2)
 
-    # Summary counts
     vc = df["verdict"].value_counts().to_dict()
     cols = st.columns(6)
     for col, label, colour in zip(
@@ -1179,21 +1565,96 @@ def _tab_compare(cfg: dict) -> None:
     ):
         col.metric(f"{colour} {label.capitalize()}", vc.get(label, 0))
 
+    tc = df["trend_context"].value_counts().to_dict()
+    st.caption(
+        f"Trend context — outside history: {tc.get('outside_history', 0)} · "
+        f"within history: {tc.get('within_history', 0)} · "
+        f"unknown: {tc.get('unknown', 0)}. "
+        "'within_history' means run A's value sits inside its own recent "
+        "spread, so the A/B delta is most likely scatter."
+    )
+
+    verdict_filter = st.multiselect(
+        "Filter by verdict",
+        options=["improved", "same", "regressed", "noisy", "insufficient",
+                 "unavailable"],
+        default=["improved", "same", "regressed", "unavailable"],
+        key="compare_verdict_filter",
+    )
+    context_filter = st.multiselect(
+        "Filter by trend context",
+        options=["outside_history", "within_history", "unknown"],
+        default=["outside_history", "within_history", "unknown"],
+        key="compare_context_filter",
+    )
+    view = df
+    if verdict_filter:
+        view = view[view["verdict"].isin(verdict_filter)]
+    if context_filter:
+        view = view[view["trend_context"].isin(context_filter)]
+
     st.dataframe(
-        df_show[["model", "precision", "in_token", "out_token", "exec_mode",
-                 "unit", "value_a", "value_b", "pct", "verdict"]].rename(columns={
+        view[["model", "precision", "in_token", "out_token", "exec_mode",
+              "unit", "value_a", "value_b", "change", "median_a",
+              "vs_history", "history_z", "trend_context", "verdict",
+              "attribution"]].rename(columns={
             "model": "Model", "precision": "Prec",
             "in_token": "In", "out_token": "Out", "exec_mode": "Mode",
             "unit": "Unit", "value_a": "A", "value_b": "B",
-            "pct": "Change", "verdict": "Verdict",
+            "change": "A vs B", "median_a": "A history median",
+            "vs_history": "A vs history", "history_z": "History z",
+            "trend_context": "Context", "verdict": "Verdict",
+            "attribution": "Attribution",
         }),
         width="stretch", hide_index=True,
     )
 
+    st.markdown("### Series trend")
+    if view.empty:
+        return
+    labels_map = {
+        i: (f"{r['model']} | {r['precision']} | in={r['in_token']} "
+            f"out={r['out_token']} | {r['exec_mode']}")
+        for i, (_, r) in enumerate(view.iterrows())
+    }
+    sel = st.selectbox("Series", list(labels_map),
+                       format_func=lambda i: labels_map[i], key="compare_series")
+    row = view.iloc[sel]
 
-# ---------------------------------------------------------------------------
-# Entry
-# ---------------------------------------------------------------------------
+    hist = cached_series_runs(
+        cfg["machine"], row["model"], row["precision"],
+        int(row["in_token"]), int(row["out_token"]), row["exec_mode"],
+        cfg["history_runs"] + cfg["recent_runs"], cfg["run_kinds"],
+        cfg["include_short_run"], cfg["v"])
+    if hist.empty:
+        st.info("No history for this series.")
+        return
+
+    hist = hist.merge(cohort[["run_id", "stamp"]], on="run_id", how="left")
+    unit = row["unit"] or ""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=hist["stamp"], y=hist["value"],
+                             mode="lines+markers", name="history"))
+    for run_id, name, colour in ((run_a, "Run A", "firebrick"),
+                                 (run_b, "Run B", "#2E7D32")):
+        point = hist[hist["run_id"] == run_id]
+        if not point.empty:
+            fig.add_trace(go.Scatter(
+                x=point["stamp"], y=point["value"], mode="markers",
+                marker=dict(size=15, color=colour, symbol="diamond"),
+                name=name))
+    extra_y: list[float] = []
+    if pd.notna(row.get("median_a")):
+        extra_y.append(float(row["median_a"]))
+        fig.add_hline(y=float(row["median_a"]), line=dict(dash="dot"),
+                      annotation_text="A history median")
+    fig.update_layout(height=420, xaxis_title="run",
+                      yaxis_title=f"value [{unit}]" if unit else "value",
+                      legend=dict(orientation="h", y=-0.25))
+    _apply_y_scale(fig, cfg, hist["value"], extra_y)
+    _newest_left(fig)
+    st.plotly_chart(fig, width="stretch")
+
 
 def main() -> None:
     st.set_page_config(layout="wide", page_title="Daily LLM Viewer")

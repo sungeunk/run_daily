@@ -132,8 +132,10 @@ def _try_upsert_analysis_comparisons(
             run_id, baseline_run_id,
             model, precision, in_token, out_token, exec_mode,
             unit, current_value, baseline_value,
-            improvement_pct, verdict, threshold_pct
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            improvement_pct, verdict, threshold_pct,
+            history_count, history_median, history_mad, history_sigma,
+            history_cv, worsening_z, reference_source, within_fluctuation
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             _row_tuple(run_id, result.baseline.run_id, row, threshold_pct)
@@ -152,11 +154,12 @@ def _try_upsert_functional_issues(
         return
     con.executemany(
         """
-        INSERT INTO functional_issues (run_id, nodeid, outcome, message)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO functional_issues (run_id, nodeid, outcome, message,
+                                       model, precision)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         [
-            (run_id, i.nodeid, i.outcome, i.message)
+            (run_id, i.nodeid, i.outcome, i.message, i.model, i.precision)
             for i in result.functional.issues
         ],
     )
@@ -178,6 +181,9 @@ def _row_tuple(
         k.model, k.precision, k.in_token, k.out_token, k.exec_mode,
         row.unit, row.current_value, row.baseline_value,
         row.improvement_pct, row.verdict, threshold_pct,
+        row.history_count, row.history_median, row.history_mad,
+        row.history_sigma, row.history_cv, row.worsening_z,
+        row.reference_source, row.within_fluctuation,
     )
 
 

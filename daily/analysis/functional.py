@@ -44,6 +44,9 @@ def aggregate_functional(summary: dict) -> FunctionalResult:
         if outcome not in _ISSUE_OUTCOMES:
             continue
         nodeid = test.get("nodeid", "")
+        # Tests record their metrics before running the benchmark, so a failed
+        # or crashed case still identifies which model it was exercising.
+        metrics = test.get("metrics") or {}
         # Prefer explicit longrepr, then pytest-json-report's failure field,
         # then call.longrepr as the last fallback.
         message = (
@@ -55,6 +58,8 @@ def aggregate_functional(summary: dict) -> FunctionalResult:
             nodeid=nodeid,
             outcome=outcome,
             message=_shorten(str(message)),
+            model=metrics.get("model") or None,
+            precision=metrics.get("precision") or None,
         ))
 
     return FunctionalResult(

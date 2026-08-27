@@ -34,6 +34,35 @@ class PerfRow:
 
 
 @dataclass
+class MonitorRow:
+    """Per-test machine telemetry summary from common/machine_monitor.py."""
+
+    nodeid: str
+    model: str | None = None
+    precision: str | None = None
+    samples: int = 0
+    duration_sec: float | None = None
+    gpu_clock_mhz_mean: float | None = None
+    gpu_clock_mhz_min: float | None = None
+    gpu_clock_mhz_max: float | None = None
+    gpu_clock_max_mhz: float | None = None
+    gpu_utilization_mean: float | None = None
+    gpu_power_watts_mean: float | None = None
+    gpu_power_watts_max: float | None = None
+    gpu_temp_c_mean: float | None = None
+    gpu_temp_c_max: float | None = None
+    cpu_clock_mhz_mean: float | None = None
+    cpu_usage_percent_mean: float | None = None
+    cpu_temp_c_max: float | None = None
+    host_memory_usage_mean: float | None = None
+    page_faults_per_sec_mean: float | None = None
+    throttled_sample_ratio: float | None = None
+    throttle_reasons: str | None = None
+    sample_duration_ms_max: float | None = None
+    monitor_file: str | None = None
+
+
+@dataclass
 class RunRecord:
     run_id: str
     source_format: str                  # 'old' | 'new'
@@ -42,6 +71,7 @@ class RunRecord:
     ts: datetime
     device: str | None = None
     purpose: str | None = None
+    run_kind: str = "daily"             # 'daily' | 'pr' | 'test' | 'manual'
     description: str | None = None
     ww: str | None = None
     ov_version: str | None = None
@@ -61,3 +91,4 @@ class RunRecord:
     file_hash: str | None = None
     devices: list[DeviceRecord] = field(default_factory=list)
     perf: list[PerfRow] = field(default_factory=list)
+    monitor: list[MonitorRow] = field(default_factory=list)

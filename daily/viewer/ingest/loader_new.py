@@ -23,15 +23,39 @@ from __future__ import annotations
 import json
 import logging
 import platform
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
-from .record import PerfRow, RunRecord
+from .record import MonitorRow, PerfRow, RunRecord
 
 log = logging.getLogger(__name__)
+
+# Free-form purpose text is the only hint about who launched a run, so map it
+# to a fixed vocabulary the viewer can filter on. Order matters: an explicit
+# PR marker wins over everything, and a run that calls itself daily stays
+# daily even if its description also mentions validation.
+# Word boundaries keep short tokens like 'ci' and 'pr' from matching inside
+# words such as 'precision'.
+_RUN_KIND_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("pr", r"\bpr[-_# ]*\d+|\bpull[-_ ]?request\b|\bpre-?commit\b"),
+    ("daily", r"\bdaily|\bnightly\b|\bweekly\b"),
+    ("test", r"\btest|\btrial\b|\bdebug\b|\bexperiment|\bjenkins\b|\bci\b|\bvalidation\b"),
+)
+
+
+def classify_run_kind(purpose: str | None, description: str | None = None) -> str:
+    """Map purpose/description text onto 'daily' | 'pr' | 'test' | 'manual'."""
+    text = f"{purpose or ''} {description or ''}".strip().lower()
+    if not text:
+        return "manual"
+    for kind, pattern in _RUN_KIND_PATTERNS:
+        if re.search(pattern, text):
+            return kind
+    return "manual"
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +171,52 @@ def _float_or_none(value) -> float | None:
     return num if num == num else None
 
 
+def _stat(machine: dict, field: str, key: str) -> float | None:
+    """Read one min/max/mean entry; absent probes serialise as the string 'N/A'."""
+    block = machine.get(field)
+    if not isinstance(block, dict):
+        return None
+    return _float_or_none(block.get(key))
+
+
+def _monitor_row(test: dict, metrics: dict) -> MonitorRow | None:
+    machine = metrics.get("machine")
+    if not isinstance(machine, dict) or not machine.get("samples"):
+        return None
+
+    reasons = machine.get("gpu_throttle_reasons_seen")
+    if isinstance(reasons, list):
+        reasons = ",".join(str(r) for r in reasons) or None
+    elif reasons is not None and not isinstance(reasons, str):
+        reasons = str(reasons)
+
+    return MonitorRow(
+        nodeid=test.get("nodeid", ""),
+        model=metrics.get("model"),
+        precision=metrics.get("precision"),
+        samples=int(machine.get("samples") or 0),
+        duration_sec=_float_or_none(machine.get("duration_sec")),
+        gpu_clock_mhz_mean=_stat(machine, "gpu_clock_mhz", "mean"),
+        gpu_clock_mhz_min=_stat(machine, "gpu_clock_mhz", "min"),
+        gpu_clock_mhz_max=_stat(machine, "gpu_clock_mhz", "max"),
+        gpu_clock_max_mhz=_float_or_none(machine.get("gpu_clock_max_mhz")),
+        gpu_utilization_mean=_stat(machine, "gpu_utilization_percent", "mean"),
+        gpu_power_watts_mean=_stat(machine, "gpu_power_watts", "mean"),
+        gpu_power_watts_max=_stat(machine, "gpu_power_watts", "max"),
+        gpu_temp_c_mean=_stat(machine, "lhm_gpu_temp_c", "mean"),
+        gpu_temp_c_max=_stat(machine, "lhm_gpu_temp_c", "max"),
+        cpu_clock_mhz_mean=_stat(machine, "cpu_clock_mhz", "mean"),
+        cpu_usage_percent_mean=_stat(machine, "cpu_usage_percent", "mean"),
+        cpu_temp_c_max=_stat(machine, "cpu_temp_c", "max"),
+        host_memory_usage_mean=_stat(machine, "host_memory_usage_percent", "mean"),
+        page_faults_per_sec_mean=_stat(machine, "process_page_faults_per_sec", "mean"),
+        throttled_sample_ratio=_float_or_none(machine.get("gpu_throttled_sample_ratio")),
+        throttle_reasons=reasons,
+        sample_duration_ms_max=_stat(machine, "sample_duration_ms", "max"),
+        monitor_file=machine.get("file"),
+    )
+
+
 def load_summary(path: Path) -> RunRecord:
     """Parse a summary.json into a RunRecord (raw tokens preserved)."""
     path = Path(path)
@@ -195,6 +265,7 @@ def load_summary(path: Path) -> RunRecord:
         ts=ts,
         device=meta.get("device"),
         purpose=purpose,
+        run_kind=classify_run_kind(purpose, meta.get("description")),
         description=purpose,
         ww=ww,
         ov_version=ov_version,
@@ -216,9 +287,13 @@ def load_summary(path: Path) -> RunRecord:
     )
 
     for t in summary.get("tests", []):
+        metrics = t.get("metrics") or {}
+        # Telemetry is kept even for failed tests: a crash on a throttled or
+        # overloaded machine is exactly the case worth seeing.
+        if (monitor_row := _monitor_row(t, metrics)) is not None:
+            rec.monitor.append(monitor_row)
         if t.get("outcome") != "passed":
             continue
-        metrics = t.get("metrics") or {}
         handler = _TYPE_HANDLERS.get(metrics.get("test_type"))
         if handler is None:
             continue
