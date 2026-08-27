@@ -151,13 +151,11 @@ class MachineMonitor:
         *,
         interval_sec: float = 0.5,
         max_duration_sec: float = 3600.0,
-        gpu_full: bool = False,
         log_sink: Callable[[str], None] | None = None,
     ):
         self.out_path = Path(out_path)
         self._interval_sec = interval_sec
         self._max_duration_sec = max_duration_sec
-        self._gpu_full = gpu_full
         self._log = log_sink or (lambda _text: None)
         self._proc: subprocess.Popen | None = None
         self.summary: dict | None = None
@@ -175,8 +173,6 @@ class MachineMonitor:
             '--out', str(self.out_path),
             '--top-processes', '5',
         ]
-        if self._gpu_full:
-            cmd.append('--gpu-telemetry-full')
 
         try:
             self._proc = subprocess.Popen(

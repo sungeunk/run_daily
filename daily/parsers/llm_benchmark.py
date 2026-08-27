@@ -33,6 +33,11 @@ class LlmDataItem(TypedDict, total=False):
     out_token: int
     perf: list[float]
     generated_text: str
+    # The share of `perf` counted in llm_bench's token_infer_durations. The remainder is
+    # neither host-only nor device-only; see mm_embeddings_time for its largest known part.
+    infer_perf: list[float]
+    # Part of the perf/infer_perf gap on multimodal models; absent for text-only models.
+    mm_embeddings_time: float
     # UTC ISO-8601, JSON report only; absent on llm_bench builds that predate them.
     start: str
     end: str
@@ -107,13 +112,25 @@ def parse_output(output: str) -> list[LlmDataItem]:
     return ret
 
 
+# The daily metric is end-to-end 1st/2nd token latency. `first_infer_latency` /
+# `second_infer_avg_latency` only cover what llm_bench counts in token_infer_durations
+# and understate TTFT by up to ~16x on VLMs, so they are reported separately as
+# `infer_perf` rather than as `perf`.
+PERF_FIELDS = ('first_latency', 'second_avg_latency')
+INFER_PERF_FIELDS = ('first_infer_latency', 'second_infer_avg_latency')
+
+
+def _row_values(row: dict, fields: tuple[str, ...]) -> list[float]:
+    values: list[float] = []
+    for field in fields:
+        value = row.get(field)
+        if isinstance(value, (int, float)) and value >= 0:
+            values.append(float(value))
+    return values
+
+
 def _row_perf(row: dict) -> list[float]:
-    perf: list[float] = []
-    if 'first_infer_latency' in row:
-        perf.append(float(row['first_infer_latency']))
-    if 'second_infer_avg_latency' in row:
-        perf.append(float(row['second_infer_avg_latency']))
-    return perf
+    return _row_values(row, PERF_FIELDS)
 
 
 def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
@@ -158,6 +175,12 @@ def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
             'out_token': best_row.get('infer_count', best_row.get('output_size', 0)),
             'perf': best_perf,
         }
+        infer_perf = _row_values(best_row, INFER_PERF_FIELDS)
+        if infer_perf:
+            item['infer_perf'] = infer_perf
+        mm_time = best_row.get('mm_embeddings_preparation_time')
+        if isinstance(mm_time, (int, float)) and mm_time > 0:
+            item['mm_embeddings_time'] = float(mm_time)
         if best_row.get('start'):
             item['start'] = best_row['start']
         if best_row.get('end'):

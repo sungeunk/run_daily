@@ -72,8 +72,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='YYYYMMDD_HHMM stamp shared by all artefacts (set by run.py)')
     group.addoption('--monitor-interval-sec', default=0.5, type=float,
                     help='Machine-state sampling interval (0 disables monitoring)')
-    group.addoption('--monitor-gpu-full', action='store_true',
-                    help='Also sample GPU utilization/memory/power (can stall for 100s of ms)')
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +171,6 @@ def machine_monitor(request: pytest.FixtureRequest, daily_config: DailyConfig,
         stats = monitor.stop()
     """
     interval_sec = request.config.getoption('--monitor-interval-sec')
-    gpu_full = request.config.getoption('--monitor-gpu-full')
     created: list[MachineMonitor] = []
 
     def _make(label: str | None = None) -> MachineMonitor | None:
@@ -187,7 +184,6 @@ def machine_monitor(request: pytest.FixtureRequest, daily_config: DailyConfig,
             interval_sec=interval_sec,
             # Outlive the benchmark timeout so the monitor never stops early.
             max_duration_sec=daily_config.timeout_sec + 300,
-            gpu_full=gpu_full,
             log_sink=raw_log.write,
         )
         created.append(monitor)

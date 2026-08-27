@@ -307,7 +307,28 @@ def iter_lhm_nodes(node: dict[str, object], in_temperatures: bool = False) -> It
             yield from iter_lhm_nodes(child, next_in_temperatures)
 
 
+_LHM_PAYLOAD_CACHE: dict[str, object] | None = None
+_LHM_PAYLOAD_VALID: bool = False
+
+
+def reset_lhm_payload_cache() -> None:
+    """Start a new sample so its probes share a single LibreHardwareMonitor fetch."""
+    global _LHM_PAYLOAD_CACHE, _LHM_PAYLOAD_VALID
+    _LHM_PAYLOAD_CACHE = None
+    _LHM_PAYLOAD_VALID = False
+
+
 def get_lhm_web_payload(timeout_sec: float = 1.0) -> dict[str, object] | None:
+    global _LHM_PAYLOAD_CACHE, _LHM_PAYLOAD_VALID
+    if _LHM_PAYLOAD_VALID:
+        return _LHM_PAYLOAD_CACHE
+
+    _LHM_PAYLOAD_VALID = True
+    _LHM_PAYLOAD_CACHE = _fetch_lhm_web_payload(timeout_sec)
+    return _LHM_PAYLOAD_CACHE
+
+
+def _fetch_lhm_web_payload(timeout_sec: float) -> dict[str, object] | None:
     prefix = "http://127.0.0.1:8085"
     if not LHM_WEB_URL.startswith(prefix):
         return None
@@ -1035,8 +1056,8 @@ def get_sysman(device_index: int = 0) -> SysmanHandles | None:
     return _SYSMAN
 
 
-def get_gpu_metrics(full: bool = False, device_index: int = 0) -> dict[str, object]:
-    """Return Intel GPU telemetry. Clock and throttle stay under 1 ms; the rest can stall."""
+def get_gpu_metrics(device_index: int = 0) -> dict[str, object]:
+    """Return Intel GPU telemetry: clock, throttle, utilization, memory and power."""
     global _LAST_ENERGY, _LAST_ENGINE
 
     metrics: dict[str, object] = {
@@ -1065,7 +1086,7 @@ def get_gpu_metrics(full: bool = False, device_index: int = 0) -> dict[str, obje
     if sysman is None:
         metrics["gpu_source"] = "level-zero-unavailable"
     else:
-        metrics["gpu_source"] = "level-zero-sysman-full" if full else "level-zero-sysman-clock"
+        metrics["gpu_source"] = "level-zero-sysman"
 
         lib = sysman.lib
         metrics["gpu_clock_max_mhz"] = sysman.max_clock_mhz
@@ -1076,9 +1097,6 @@ def get_gpu_metrics(full: bool = False, device_index: int = 0) -> dict[str, obje
                 metrics["gpu_clock_mhz"] = state.actual if state.actual >= 0 else None
                 metrics["gpu_clock_request_mhz"] = state.request if state.request >= 0 else None
                 metrics["gpu_throttle_reasons"] = f"0x{state.throttleReasons:x}"
-
-        if not full:
-            return metrics
 
         if sysman.power is not None:
             counter = _ZesPowerEnergyCounter()
@@ -1110,15 +1128,14 @@ def get_gpu_metrics(full: bool = False, device_index: int = 0) -> dict[str, obje
                 metrics["gpu_memory_total_mb"] = mem.size // (1024 ** 2)
                 metrics["gpu_memory_used_mb"] = (mem.size - mem.free) // (1024 ** 2)
 
-    if full:
-        lhm, lhm_duration_ms = get_lhm_gpu_metrics(metrics["gpu_name"] if isinstance(metrics["gpu_name"], str) else None)
-        metrics["lhm_gpu_query_duration_ms"] = lhm_duration_ms
-        metrics["lhm_gpu_sample_valid"] = lhm is not None
-        if lhm is not None:
-            metrics["lhm_gpu_power_watts"] = lhm.power_watts
-            metrics["lhm_gpu_temp_c"] = lhm.temperature_c
-            metrics["lhm_gpu_memory_clock_mhz"] = lhm.memory_clock_mhz
-            metrics["lhm_gpu_fan_rpm"] = lhm.fan_rpm
+    lhm, lhm_duration_ms = get_lhm_gpu_metrics(metrics["gpu_name"] if isinstance(metrics["gpu_name"], str) else None)
+    metrics["lhm_gpu_query_duration_ms"] = lhm_duration_ms
+    metrics["lhm_gpu_sample_valid"] = lhm is not None
+    if lhm is not None:
+        metrics["lhm_gpu_power_watts"] = lhm.power_watts
+        metrics["lhm_gpu_temp_c"] = lhm.temperature_c
+        metrics["lhm_gpu_memory_clock_mhz"] = lhm.memory_clock_mhz
+        metrics["lhm_gpu_fan_rpm"] = lhm.fan_rpm
 
     return metrics
 
@@ -1175,12 +1192,12 @@ def sample_once(
     top_processes: int = 0,
     temp_interval_sec: float = 5.0,
     force_temp: bool = False,
-    gpu_full: bool = False,
     gpu_device_index: int = 0,
 ) -> dict[str, object]:
     # Stamp before probing so sample times stay aligned regardless of probe cost.
     timestamp_utc = iso_utc_now()
     t_monotonic = time.perf_counter()
+    reset_lhm_payload_cache()
 
     timer = query_timer_resolution()
     cpu_clock = get_cpu_clock_mhz()
@@ -1189,7 +1206,7 @@ def sample_once(
     )
     cpu_usage, cpu_usage_age_ms = get_cpu_usage_windowed(t_monotonic)
     t_gpu_start = time.perf_counter()
-    gpu = get_gpu_metrics(gpu_full, gpu_device_index)
+    gpu = get_gpu_metrics(gpu_device_index)
     gpu_query_duration_ms = (time.perf_counter() - t_gpu_start) * 1000.0
     mem_usage, mem_available_mb = get_memory_usage()
 
@@ -1321,15 +1338,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--temp-interval-sec",
         type=float,
-        default=1.0,
-        help="CPU temperature sampling period. The first and last sample are always read.",
-    )
-    parser.add_argument(
-        "--gpu-telemetry-full",
-        action="store_true",
+        default=None,
         help=(
-            "Also poll GPU utilization, memory and power. Clock and throttle are always read "
-            "because they cost under 1 ms; these extra queries can stall for hundreds of ms."
+            "CPU temperature sampling period. Defaults to --interval-sec, which costs almost "
+            "nothing because the sample already fetches the LibreHardwareMonitor payload. "
+            "The first and last sample are always read."
         ),
     )
     parser.add_argument(
@@ -1359,6 +1372,7 @@ def main() -> int:
     if args.duration_sec <= 0:
         LOGGER.error("--duration-sec must be > 0")
         return 2
+    temp_interval_sec = args.interval_sec if args.temp_interval_sec is None else args.temp_interval_sec
     try:
         gpu_device_index = parse_gpu_device_index(args.target_device)
     except ValueError as exc:
@@ -1374,11 +1388,13 @@ def main() -> int:
     LOGGER.info("Host memory speed (MT/s): %s", host_mem_info.speed_mts)
     LOGGER.info("Host memory total (GB): %s", host_mem_info.total_gb)
     LOGGER.info(
-        "GPU telemetry: %s (target=%s, device_index=%d)",
-        "full" if args.gpu_telemetry_full else "clock + throttle (--gpu-telemetry-full for more)",
+        "GPU telemetry: clock, throttle, utilization, memory, power (target=%s, device_index=%d)",
         args.target_device,
         gpu_device_index,
     )
+    # The first Sysman/LHM query pays a one-off resolution cost; warm it up so it does not
+    # land inside the first sample.
+    get_gpu_metrics(gpu_device_index)
 
     try:
         rows: list[dict[str, object]] = []
@@ -1404,9 +1420,8 @@ def main() -> int:
                 host_mem_info,
                 identity,
                 args.top_processes,
-                args.temp_interval_sec,
+                temp_interval_sec,
                 force_temp=is_first or is_last,
-                gpu_full=args.gpu_telemetry_full,
                 gpu_device_index=gpu_device_index,
             )
             sample_index += 1
