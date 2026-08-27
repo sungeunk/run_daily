@@ -40,6 +40,7 @@ CASES: list[ImageGenCase] = [
 ]
 
 
+@pytest.mark.dev_only
 @pytest.mark.parametrize('model', [
     'flux.1-schnell',
     'stable-diffusion-v1-5',
