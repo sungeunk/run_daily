@@ -144,13 +144,65 @@ RUN_KINDS = ("daily", "pr", "test", "manual")
 DEFAULT_RUN_KINDS = ("daily",)
 
 
-def _run_kind_clause(run_kinds: Sequence[str] | None,
-                     alias: str = "r") -> tuple[str, list]:
+def _run_kind_predicate(run_kinds: Sequence[str] | None,
+                        alias: str = "r") -> tuple[str, list]:
+    """Boolean predicate (no leading ``AND``) for the sidebar's Run kinds
+    selector.
+
+    The selector accepts free-typed text alongside the canonical kinds
+    (``accept_new_options`` in the multiselect). Anything that isn't one of
+    ``RUN_KINDS`` is treated as a keyword and matched as a case-insensitive
+    substring of ``purpose``/``description`` — the same free text the
+    canonical kinds were classified from — so a user can narrow to e.g. a PR
+    number or username the fixed categories don't capture.
+    """
     if not run_kinds:
         return "", []
-    placeholders = ",".join(["?"] * len(run_kinds))
-    return (f" AND COALESCE({alias}.run_kind, 'daily') IN ({placeholders})",
-            list(run_kinds))
+    kinds = [k for k in run_kinds if k in RUN_KINDS]
+    keywords = [k.strip() for k in run_kinds if k not in RUN_KINDS and k.strip()]
+
+    parts: list[str] = []
+    params: list = []
+    if kinds:
+        placeholders = ",".join(["?"] * len(kinds))
+        parts.append(f"COALESCE({alias}.run_kind, 'daily') IN ({placeholders})")
+        params.extend(kinds)
+    for kw in keywords:
+        parts.append(
+            f"(LOWER(COALESCE({alias}.purpose, '')) LIKE ? "
+            f"OR LOWER(COALESCE({alias}.description, '')) LIKE ?)"
+        )
+        like = f"%{kw.lower()}%"
+        params.extend([like, like])
+
+    if not parts:
+        return "", []
+    predicate = parts[0] if len(parts) == 1 else f"({' OR '.join(parts)})"
+    return predicate, params
+
+
+def _exclusion_predicate(db_path: Path, alias: str = "r") -> str:
+    """``NOT EXISTS`` predicate hiding manually-excluded runs (no leading ``AND``).
+
+    Populated by the viewer's Exclusions tab (``run_exclusions`` table) for
+    e.g. a build that only measured a handful of models, which would
+    otherwise collapse the common-series intersection in
+    ``geomean_matrix``/``machines_overview`` for the whole cohort. Guarded by
+    ``_tables_for_db`` so a DB from before this table existed degrades to "no
+    exclusions" instead of failing.
+    """
+    if "run_exclusions" not in _tables_for_db(db_path):
+        return ""
+    return (f"NOT EXISTS (SELECT 1 FROM run_exclusions e "
+            f"WHERE e.run_id = {alias}.run_id)")
+
+
+def _run_kind_clause(run_kinds: Sequence[str] | None,
+                     alias: str = "r") -> tuple[str, list]:
+    predicate, params = _run_kind_predicate(run_kinds, alias)
+    if not predicate:
+        return "", []
+    return f" AND {predicate}", params
 
 
 def list_run_kinds(db_path: Path, machine: str | None = None) -> list[str]:
@@ -176,6 +228,8 @@ def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
     clause, params = _run_kind_clause(run_kinds if has_kind else None)
     kind_select = ("COALESCE(run_kind, 'daily')" if has_kind else "'daily'")
     short_clause = "" if include_short_run else " AND COALESCE(r.short_run, FALSE) = FALSE"
+    excl_predicate = _exclusion_predicate(db_path)
+    excl_clause = f" AND {excl_predicate}" if excl_predicate else ""
     ts_clause = ""
     ts_params: list = []
     if before_ts is not None:
@@ -193,7 +247,7 @@ def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
             FROM (
                 SELECT r.*
                 FROM runs r
-                WHERE r.machine = ?{clause}{short_clause}{ts_clause}
+                WHERE r.machine = ?{clause}{short_clause}{excl_clause}{ts_clause}
                 ORDER BY r.ts DESC
                 LIMIT ?
             )
@@ -209,10 +263,14 @@ def list_models(db_path: Path, machine: str | None = None,
     if machine:
         filters.append("r.machine = ?")
         params.append(machine)
-    if run_kinds and _has_column(db_path, "runs", "run_kind"):
-        placeholders = ",".join(["?"] * len(run_kinds))
-        filters.append(f"COALESCE(r.run_kind, 'daily') IN ({placeholders})")
-        params.extend(run_kinds)
+    predicate, kind_params = _run_kind_predicate(
+        run_kinds if _has_column(db_path, "runs", "run_kind") else None)
+    if predicate:
+        filters.append(predicate)
+        params.extend(kind_params)
+    excl_predicate = _exclusion_predicate(db_path)
+    if excl_predicate:
+        filters.append(excl_predicate)
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
     with _read_only(db_path) as con:
         return [r[0] for r in con.execute(f"""
@@ -276,6 +334,59 @@ def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
             {where}
             ORDER BY ts DESC
         """, params).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# Manual run exclusions (viewer's Exclusions tab)
+#
+# Unlike every other function in this module these mutate the DB, so they
+# open a short-lived read-write connection instead of ``_read_only`` — the
+# ingest writer is the only other thing that opens the file for writing, and
+# it never runs concurrently with a user clicking a button in the UI.
+# ---------------------------------------------------------------------------
+
+_RUN_EXCLUSIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS run_exclusions (
+        run_id      TEXT PRIMARY KEY,
+        machine     TEXT NOT NULL,
+        stamp       TEXT NOT NULL,
+        reason      TEXT,
+        excluded_at TIMESTAMP DEFAULT now()
+    )
+"""
+
+
+def list_exclusions(db_path: Path) -> pd.DataFrame:
+    """Currently-excluded runs across all machines, newest first."""
+    if "run_exclusions" not in _tables_for_db(db_path):
+        return pd.DataFrame(columns=["run_id", "machine", "stamp", "reason",
+                                     "excluded_at"])
+    with _read_only(db_path) as con:
+        return con.execute("""
+            SELECT run_id, machine, stamp, reason, excluded_at
+            FROM run_exclusions
+            ORDER BY excluded_at DESC
+        """).fetchdf()
+
+
+def add_exclusion(db_path: Path, run_id: str, machine: str, stamp: str,
+                  reason: str = "") -> None:
+    """Hide ``run_id`` from every cohort-based analysis until restored."""
+    with duckdb.connect(str(db_path), read_only=False) as con:
+        con.execute(_RUN_EXCLUSIONS_DDL)
+        con.execute("""
+            INSERT INTO run_exclusions (run_id, machine, stamp, reason)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (run_id) DO UPDATE SET
+                reason = excluded.reason, excluded_at = now()
+        """, [run_id, machine, stamp, reason or None])
+
+
+def remove_exclusion(db_path: Path, run_id: str) -> None:
+    """Restore a previously-excluded run to normal analysis."""
+    with duckdb.connect(str(db_path), read_only=False) as con:
+        con.execute(_RUN_EXCLUSIONS_DDL)
+        con.execute("DELETE FROM run_exclusions WHERE run_id = ?", [run_id])
 
 
 # ---------------------------------------------------------------------------
@@ -1486,10 +1597,14 @@ def machines_overview(db_path: Path,
     def _filters(alias: str) -> tuple[str, list]:
         parts: list[str] = []
         args: list = []
-        if run_kinds and _has_column(db_path, "runs", "run_kind"):
-            parts.append("COALESCE({}.run_kind, 'daily') IN ({})".format(
-                alias, ",".join(["?"] * len(run_kinds))))
-            args.extend(run_kinds)
+        predicate, kind_args = _run_kind_predicate(
+            run_kinds if _has_column(db_path, "runs", "run_kind") else None, alias)
+        if predicate:
+            parts.append(predicate)
+            args.extend(kind_args)
+        excl_predicate = _exclusion_predicate(db_path, alias)
+        if excl_predicate:
+            parts.append(excl_predicate)
         if not include_short_run:
             parts.append(f"COALESCE({alias}.short_run, FALSE) = FALSE")
         if machines:

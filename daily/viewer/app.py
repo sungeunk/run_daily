@@ -19,6 +19,11 @@ Tabs
                   diagnostics where fluctuation is inherent.
 6. Functional   — functional issue history and per-run health summary.
 7. Compare      — run-to-run direct comparison at the series level.
+8. Exclusions   — manually hide a specific machine+run from every
+                  cohort-based view (Geomean/Regression/Noise/Functional),
+                  e.g. a run that measured too few models and would
+                  otherwise shrink the common-series comparison for the rest
+                  of the cohort.
 """
 
 from __future__ import annotations
@@ -148,6 +153,11 @@ def cached_legacy_geomean_summary(run_ids: tuple[str, ...], _v: float) -> pd.Dat
 @st.cache_data(show_spinner=False)
 def cached_profiles(_v: float) -> list[str]:
     return q.list_profiles(DB)
+
+
+@st.cache_data(show_spinner=False)
+def cached_exclusions(_v: float) -> pd.DataFrame:
+    return q.list_exclusions(DB)
 
 
 
@@ -400,15 +410,19 @@ def _sidebar() -> dict:
     default_kinds = [k for k in available_kinds if k == "daily"] or available_kinds
     run_kinds = st.sidebar.multiselect(
         "Run kinds", available_kinds, default=default_kinds,
-        help="Jenkins PR/test runs are excluded by default — they are not "
-             "comparable to scheduled daily runs.")
+        accept_new_options=True,
+        help="Jenkins PR/test/manual runs are excluded by default — they are "
+             "not comparable to scheduled daily runs. Type your own text and "
+             "press Enter to also match runs whose description/purpose "
+             "contains it (case-insensitive substring), mixed in with the "
+             "preset kinds above.")
     if not run_kinds:
         st.sidebar.caption("_No run kind selected — showing all._")
         run_kinds = available_kinds
 
-    include_short_run = st.sidebar.checkbox(
-        "Include short runs", value=False,
-        help="Short runs measure fewer prompts and skew comparisons.")
+    # Short runs measure fewer prompts and skew comparisons, so they are
+    # always excluded from analysis views.
+    include_short_run = False
 
     all_models = cached_models(machine, tuple(run_kinds), v)
     models = st.sidebar.multiselect("Models", all_models, default=[],
@@ -812,6 +826,67 @@ def _tab_excel(cfg: dict) -> None:
     if not extras.empty:
         with st.expander(f"⚠ {len(extras)} perf rows not covered by display profile"):
             st.dataframe(extras, width="stretch", hide_index=True)
+
+
+def _tab_exclusions(cfg: dict) -> None:
+    """Manually hide a specific machine+run from every cohort-based view.
+
+    Geomean/Regression/Noise/Functional all resolve their scope through
+    ``recent_runs`` and restrict each metric to the series *every* run in
+    the cohort measured (see ``geomean_matrix``'s docstring) — a single run
+    that only measured a handful of models (partial/broken run) collapses
+    that intersection for the whole cohort, hiding good older builds too.
+    Excluding it here removes it from the cohort instead. The Excel tab is
+    unaffected: it lets you pick any run on purpose, excluded or not.
+    """
+    st.caption("Hide a run from Geomean/Regression/Noise/Functional/Dashboard "
+               "so a sparse or broken build stops shrinking the common-series "
+               "comparison for the rest of the cohort.")
+
+    runs = cached_runs(cfg["machine"], cfg["v"])
+    if runs.empty:
+        st.info(f"No runs for {cfg['machine']}.")
+    else:
+        st.markdown(f"**Runs on {cfg['machine']}**")
+        event = st.dataframe(
+            runs[["stamp", "ww", "ov_version", "purpose", "source_format"]],
+            width="stretch",
+            hide_index=True,
+            selection_mode="multi-row",
+            on_select="rerun",
+            key="exclusion_run_table",
+        )
+        sel = event.selection.rows if event and event.selection else []
+        reason = st.text_input("Reason (optional)", key="exclusion_reason")
+        if st.button("Exclude selected", disabled=not sel):
+            for i in sel:
+                row = runs.iloc[i]
+                q.add_exclusion(DB, row["run_id"], row["machine"],
+                                row["stamp"], reason)
+            st.cache_data.clear()
+            st.rerun()
+
+    st.divider()
+    st.markdown("**Currently excluded** (all machines)")
+    excluded = cached_exclusions(cfg["v"])
+    if excluded.empty:
+        st.caption("_None._")
+        return
+
+    event2 = st.dataframe(
+        excluded[["machine", "stamp", "reason", "excluded_at"]],
+        width="stretch",
+        hide_index=True,
+        selection_mode="multi-row",
+        on_select="rerun",
+        key="restore_run_table",
+    )
+    sel2 = event2.selection.rows if event2 and event2.selection else []
+    if st.button("Restore selected", disabled=not sel2):
+        for i in sel2:
+            q.remove_exclusion(DB, excluded.iloc[i]["run_id"])
+        st.cache_data.clear()
+        st.rerun()
 
 
 def _series_label(row: pd.Series) -> str:
@@ -1458,7 +1533,7 @@ def main() -> None:
     cfg = _sidebar()
 
     tabs = st.tabs(["Dashboard", "Excel", "Regression", "Geomean", "Noise",
-                    "Functional", "Compare"])
+                    "Functional", "Compare", "Exclusions"])
     with tabs[0]:
         _tab_dashboard(cfg)
     with tabs[1]:
@@ -1473,6 +1548,8 @@ def main() -> None:
         _tab_functional(cfg)
     with tabs[6]:
         _tab_compare(cfg)
+    with tabs[7]:
+        _tab_exclusions(cfg)
 
 
 if __name__ == "__main__":

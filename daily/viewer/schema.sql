@@ -195,6 +195,20 @@ INSERT INTO viewer_settings (key, value) VALUES
     ('noisy_cv_threshold', '0.10')
 ON CONFLICT (key) DO NOTHING;
 
+-- Runs manually excluded from every cohort-based analysis (Geomean,
+-- Regression, Noise, Functional, Dashboard latest-run) via the viewer's
+-- Exclusions tab — e.g. a build that only measured a handful of models,
+-- which would otherwise collapse the common-series intersection for the
+-- whole cohort. The Excel tab's manual run picker deliberately ignores this
+-- table since it lets the user pick any run on purpose.
+CREATE TABLE IF NOT EXISTS run_exclusions (
+    run_id      TEXT PRIMARY KEY,
+    machine     TEXT NOT NULL,
+    stamp       TEXT NOT NULL,      -- denormalized for display without a join
+    reason      TEXT,
+    excluded_at TIMESTAMP DEFAULT now()
+);
+
 -- ---------------------------------------------------------------------------
 -- Indexes
 -- ---------------------------------------------------------------------------
