@@ -1,0 +1,17 @@
+version: 1
+kind: command
+description: >
+  Run an arbitrary read-only SQL query (SELECT/WITH only) against the daily
+  benchmark DuckDB, for questions the other daily_* tools don't cover
+  directly. Call daily_results_describe_schema first to learn table/column names.
+  Key tables: runs (one row per benchmark run: machine, ts, ov_version,
+  pass/fail counts), perf (raw per-series numbers: run_id, model, precision,
+  in_token, out_token, exec_mode, value, unit), analysis_comparisons
+  (per-series verdicts vs. baseline). The connection is read-only and only a
+  single SELECT/WITH statement is accepted; a LIMIT 500 is added if missing.
+params:
+- name: sql
+  type: str
+  description: A single read-only SQL SELECT/WITH statement (DuckDB dialect) to run against the daily benchmark DB.
+run:
+  command: $GNAI_TOOLKIT_ENTRYPOINT $GNAI_TOOLKIT_DIRECTORY/src/run_sql.py

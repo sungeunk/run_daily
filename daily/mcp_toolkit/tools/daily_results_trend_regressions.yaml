@@ -1,0 +1,23 @@
+version: 1
+kind: command
+description: >
+  Regression scan for a machine: compares the median of each benchmark
+  series over the last recent_days vs. the baseline_days before that, using
+  MAD-based robust stats. Returns one row per series, sorted worst-first by
+  worsening_pct (positive = worse regardless of unit); status is
+  'insufficient_data' when a window doesn't have enough points to be
+  meaningful.
+params:
+- name: machine
+  type: str
+  description: Machine name, e.g. LNL-03.
+- name: recent_days
+  type: str
+  optional: true
+  description: Size of the "recent" window in days. Defaults to 7.
+- name: baseline_days
+  type: str
+  optional: true
+  description: Size of the baseline window immediately preceding the recent window, in days. Defaults to 21.
+run:
+  command: $GNAI_TOOLKIT_ENTRYPOINT $GNAI_TOOLKIT_DIRECTORY/src/trend_regressions.py

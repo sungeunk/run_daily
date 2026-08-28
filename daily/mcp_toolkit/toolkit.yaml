@@ -1,0 +1,9 @@
+version: 1
+name: daily_results
+description: Query local OpenVINO GPU daily/nightly LLM benchmark results (DuckDB-backed)
+template:
+  type: python
+  python:
+    requirements:
+    - duckdb
+    - pandas

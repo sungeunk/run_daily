@@ -1,0 +1,33 @@
+version: 1
+kind: command
+description: >
+  Time series of one benchmark point (machine + model + precision + in/out
+  token counts + exec_mode) over time, with rolling 30-day median/MAD
+  baseline, z-score and pct-diff per point. Use daily_results_list_models and
+  daily_results_run_sql (SELECT DISTINCT precision, in_token, out_token, exec_mode
+  FROM perf ...) to discover valid values first.
+params:
+- name: machine
+  type: str
+  description: Machine name, e.g. LNL-03.
+- name: model
+  type: str
+  description: Model name as it appears in the perf table (see daily_results_list_models).
+- name: precision
+  type: str
+  description: Precision string as stored in perf.precision, e.g. FP16, INT4.
+- name: in_token
+  type: str
+  description: Input token count (perf.in_token).
+- name: out_token
+  type: str
+  description: Output token count (perf.out_token).
+- name: exec_mode
+  type: str
+  description: Execution mode as stored in perf.exec_mode, e.g. 1st, 2nd, avg.
+- name: days
+  type: str
+  optional: true
+  description: How many days of history to include. Defaults to 60.
+run:
+  command: $GNAI_TOOLKIT_ENTRYPOINT $GNAI_TOOLKIT_DIRECTORY/src/perf_history.py

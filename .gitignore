@@ -8,3 +8,4 @@ logs/
 *.duckdb
 *.duckdb.wal
 daily_output/
+.workspace/

@@ -1,0 +1,6 @@
+version: 1
+kind: command
+description: List machines that have daily benchmark results, with the latest run timestamp, OpenVINO version, and pass/fail counts per machine.
+params: []
+run:
+  command: $GNAI_TOOLKIT_ENTRYPOINT $GNAI_TOOLKIT_DIRECTORY/src/list_machines.py

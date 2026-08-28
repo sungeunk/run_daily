@@ -1,0 +1,13 @@
+version: 1
+kind: command
+description: List the most recent daily benchmark runs for a machine (timestamp, OpenVINO version/build/sha, purpose, pass/fail counts).
+params:
+- name: machine
+  type: str
+  description: Machine name, e.g. LNL-03, PTLH-01. Use daily_results_list_machines to see available values.
+- name: limit
+  type: str
+  optional: true
+  description: Max number of runs to return, newest first. Defaults to 10.
+run:
+  command: $GNAI_TOOLKIT_ENTRYPOINT $GNAI_TOOLKIT_DIRECTORY/src/recent_runs.py
