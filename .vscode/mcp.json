@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "daily_results": {
+      "command": "/home/sungeunk/.config/dt/extensions/gnai/gnai",
+      "args": [
+        "toolkits",
+        "serve",
+        "daily_results",
+        "--stdio"
+      ]
+    }
+  }
+}
