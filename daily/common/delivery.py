@@ -502,24 +502,35 @@ def write_pip_freeze(output_path: Path) -> None:
 
 
 def mail_title_suffix(summary: dict) -> str:
-    """Produce the ``(geomean/passed)`` suffix used in mail subjects.
+    """Produce the ``(geomean/success series/failed series)`` suffix used in
+    mail subjects.
 
     Consumes the report builder's summary dict so we avoid reparsing JSON.
+    Series counts come from each test's ``expected_series`` — the same field
+    ``analysis.report._skipped_series`` uses — rather than pytest's
+    test-function counts, since one test function can stand for several
+    benchmark cases (e.g. one LLM test covers N prompts x 1st/2nd, so "2
+    passed" would hide that only 4 of the expected series actually landed).
     """
     from statistics import geometric_mean
 
     values: list[float] = []
+    success_series = 0
+    failed_series = 0
     for t in summary.get('tests', []):
-        if t.get('outcome') != 'passed':
-            continue
         m = t.get('metrics', {})
-        if m.get('test_type') == 'llm_benchmark':
-            for d in m.get('data', []):
-                perf = d.get('perf') or []
-                # 1st-inference latency — mirrors the old geomean input.
-                if perf and isinstance(perf[0], (int, float)):
-                    values.append(float(perf[0]))
+        expected = int(m.get('expected_series') or 0)
+        outcome = t.get('outcome')
+        if outcome == 'passed':
+            success_series += expected
+            if m.get('test_type') == 'llm_benchmark':
+                for d in m.get('data', []):
+                    perf = d.get('perf') or []
+                    # 1st-inference latency — mirrors the old geomean input.
+                    if perf and isinstance(perf[0], (int, float)):
+                        values.append(float(perf[0]))
+        elif outcome in ('failed', 'error'):
+            failed_series += expected
 
     geomean = geometric_mean(values) if values else 0.0
-    passed = summary.get('totals', {}).get('passed', 0)
-    return f'({geomean:.2f}/{passed})'
+    return f'({geomean:.2f}/{success_series}/{failed_series})'
