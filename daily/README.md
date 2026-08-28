@@ -230,8 +230,9 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 * `cmd /c "setupvars.bat && set" | ForEach-Object ...` 는 배치 파일의
   환경을 PowerShell 로 가져오는 정석 방법 — PowerShell 은 .bat 을 직접
   `source` 할 수 없음.
-* 백업은 `scp.exe` 사용 (최신 Windows 10+ OpenSSH 클라이언트에 기본 포함).
-  없으면 OpenSSH 클라이언트 optional feature 설치 필요.
+* 백업은 OS 무관하게 `common.delivery.scp_backup` (Paramiko SFTP) 로 수행 —
+  Windows 에서도 `scp.exe`/OpenSSH 클라이언트를 별도로 쓰지 않음. 로그인에
+  쓰이는 ssh 키/agent 가 릴레이에 등록되어 있으면 됨.
 * Windows 메일은 릴레이를 통해 터널링 (`ssh relay "mail ..."`) 이라
   `MAIL_RELAY_SERVER` 설정과 SSH 키 (`%USERPROFILE%\.ssh\id_rsa`) 가
   릴레이에 등록되어 있어야 함.

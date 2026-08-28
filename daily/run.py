@@ -463,6 +463,9 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         'genai_commit':   _genai_commit(),
         'tok_commit':     tok_version,
         'short_run':      bool(args.short_run),
+        # Jenkins keeps the console only until log rotation, so the URL is
+        # recorded per run rather than re-derived later.
+        'build_url':      os.environ.get('BUILD_URL', '').strip(),
         **_collect_runtime_meta(args.device),
     }
 

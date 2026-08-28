@@ -94,6 +94,7 @@ class RunRecord:
     skipped_cases: int | None = None
     duration_sec: float | None = None
     source_path: str | None = None
+    build_url: str | None = None
     rawlog_path: str | None = None
     file_hash: str | None = None
     devices: list[DeviceRecord] = field(default_factory=list)

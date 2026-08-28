@@ -21,7 +21,6 @@ import platform
 import re
 import shlex
 import subprocess
-import tempfile
 from email.message import EmailMessage
 from email.utils import formatdate
 from pathlib import Path
@@ -458,23 +457,30 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         except subprocess.TimeoutExpired:
             log.warning('send_mail: sendmail path timed out on %s, falling back to mail(1)', relay)
 
-        # Fallback: legacy remote mail command.
-        # Keep command shell-safe and stream body via SSH stdin.
-        quoted_title = shlex.quote(full_title)
-        quoted_to = shlex.quote(recipients)
-        remote_cmd = f'mail --content-type=text/html -s {quoted_title} {quoted_to}'
-        with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.html', delete=False) as tmp:
-            tmp.write(body)
-            body_file = Path(tmp.name)
-
-        shell_cmd = (
-            f'ssh -i "{id_rsa}" -o BatchMode=yes -o ConnectTimeout=20 '
-            f'{DEFAULT_BACKUP_USER}@{relay} "{remote_cmd}" < "{body_file}"'
+        # Fallback: legacy remote mail command. List-based (no shell=True) so
+        # the title/recipients never pass through a second, local shell's
+        # metacharacter parsing on top of the remote shlex.quote()-ing below.
+        remote_cmd = (
+            f'mail --content-type=text/html -s {shlex.quote(full_title)} '
+            f'{shlex.quote(recipients)}'
         )
+        cmd = [
+            'ssh',
+            '-i',
+            str(id_rsa),
+            '-o',
+            'BatchMode=yes',
+            '-o',
+            'ConnectTimeout=20',
+            f'{DEFAULT_BACKUP_USER}@{relay}',
+            remote_cmd,
+        ]
         try:
-            return subprocess.call(shell_cmd, shell=True) == 0
-        finally:
-            body_file.unlink(missing_ok=True)
+            result = subprocess.run(cmd, input=body.encode('utf-8'), timeout=60)
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            log.error('send_mail: fallback mail(1) path timed out on %s', relay)
+            return False
     else:
         cmd = [
             'mail',

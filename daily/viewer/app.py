@@ -33,7 +33,6 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
 
 # Make `viewer.queries` importable when launched via `streamlit run`.
 _HERE = Path(__file__).resolve().parent
@@ -200,15 +199,6 @@ def cached_geomean_runs(run_ids: tuple[str, ...], models: tuple[str, ...],
                         exec_modes: tuple[str, ...], _v: float) -> pd.DataFrame:
     return q.geomean_for_runs(DB, run_ids, models=models or None,
                               exec_modes=exec_modes or None)
-
-
-@st.cache_data(show_spinner=False)
-def cached_geomean_matrix(machines: tuple[str, ...], limit: int,
-                          run_kinds: tuple[str, ...], include_short_run: bool,
-                          models: tuple[str, ...], _v: float) -> pd.DataFrame:
-    return q.geomean_matrix(DB, machines, limit=limit, run_kinds=run_kinds,
-                            include_short_run=include_short_run,
-                            models=models or None)
 
 
 @st.cache_data(show_spinner=False)
@@ -482,9 +472,10 @@ def cached_machines_overview(machines: tuple[str, ...],
 
 
 def _report_url(machine: str, stamp: str, suffix: str) -> str:
+    # Uploads are foldered by the month of the run stamp (YYYYMMDD_HHMM).
     month = f"{stamp[:4]}.{stamp[4:6]}" if len(stamp) >= 6 else ""
-    bucket = f"{machine}/{month}" if month else machine
-    return f"{REPORT_BASE_URL}/{bucket}/daily.{stamp}.{suffix}"
+    prefix = f"{machine}/{month}" if month else machine
+    return f"{REPORT_BASE_URL}/{prefix}/daily.{stamp}.{suffix}"
 
 
 def _fleet_overview(cfg: dict) -> pd.DataFrame:
@@ -515,15 +506,19 @@ def _fleet_overview(cfg: dict) -> pd.DataFrame:
             return "🟢 success"
         return "⚪ unknown"
 
-    def _run_cell(machine: str, stamp: object) -> str:
-        """Timestamp plus its artefact links; st.dataframe allows only one
-        link per cell, hence the markdown table below."""
+    def _run_cell(machine: str, stamp: object, build_url: object) -> str:
+        """Timestamp plus its links; st.dataframe allows only one link per
+        cell, hence the markdown table below."""
         if stamp is None or pd.isna(stamp):
             return "—"
         stamp = str(stamp)
         short = stamp[4:] if len(stamp) >= 13 else stamp
-        return (f"{short} ([html]({_report_url(machine, stamp, 'html')}), "
-                f"[raw]({_report_url(machine, stamp, 'raw')}))")
+        links = [f"[html]({_report_url(machine, stamp, 'html')})"]
+        # Only runs launched by Jenkins carry a build URL.
+        if build_url is not None and not pd.isna(build_url) and str(build_url):
+            console = str(build_url).rstrip("/") + "/consoleText"
+            links.append(f"[console]({console})")
+        return f"{short} ({', '.join(links)})"
 
     header = ("| Status | Machine | device | last success | last fail | "
               "OV version | total | skip | success | failed | Duration (min) |")
@@ -534,8 +529,8 @@ def _fleet_overview(cfg: dict) -> pd.DataFrame:
         rows.append(
             f"| {_status(i)} | {row.machine} | "
             f"{q.short_device_name(row.gpu_name)} | "
-            f"{_run_cell(row.machine, row.last_success_stamp)} | "
-            f"{_run_cell(row.machine, row.last_fail_stamp)} | "
+            f"{_run_cell(row.machine, row.last_success_stamp, row.last_success_build_url)} | "
+            f"{_run_cell(row.machine, row.last_fail_stamp, row.last_fail_build_url)} | "
             f"{row.ov_version or ''} | {int(total.iloc[i])} | "
             f"{int(skipped.iloc[i])} | {int(success.iloc[i])} | "
             f"{int(failed.iloc[i])} | {duration} |"
@@ -550,94 +545,11 @@ def _fleet_overview(cfg: dict) -> pd.DataFrame:
     return overview
 
 
-_METRIC_LABEL = {"1st": "1st token", "2nd": "2nd token",
-                 "pipeline": "pipeline", "throughput": "throughput"}
-
-
-def _machines_in_scope(cfg: dict) -> tuple[str, ...]:
-    """Machines the dashboard reports on, honouring the sidebar rig filter."""
-    machines = cached_machines(cfg["v"])
-    if cfg["daily_only"]:
-        machines = [m for m in machines if m in DAILY_MACHINES] or machines
-    return tuple(machines)
-
-
-def _machine_geomean_figure(frame: pd.DataFrame, cfg: dict) -> go.Figure:
-    """One row of panels for a machine: a geomean per metric, then successes."""
-    metrics = [m for m in q.GEOMEAN_METRICS if (frame["metric"] == m).any()]
-
-    titles = []
-    for metric in metrics:
-        panel = frame[frame["metric"] == metric]
-        unit = str(panel["unit"].iloc[0] or "")
-        n_series = int(panel["n_series"].iloc[0])
-        titles.append(f"{_METRIC_LABEL[metric]} [{unit}] · {n_series} series")
-    titles.append("success count")
-
-    fig = make_subplots(rows=1, cols=len(titles), subplot_titles=titles)
-    for col, metric in enumerate(metrics, start=1):
-        panel = frame[frame["metric"] == metric].sort_values("ts")
-        fig.add_trace(go.Scatter(
-            x=panel["stamp"].str[4:], y=panel["geomean"],
-            mode="lines+markers", showlegend=False, marker=dict(size=7),
-            text=[f"ov={v}" for v in panel["ov_version"].fillna("")],
-            hovertemplate="%{x}<br>%{y:.2f}<br>%{text}<extra></extra>",
-        ), row=1, col=col)
-        y_range = _stable_y_range(panel["geomean"], cfg["y_scale"])
-        if y_range is not None:
-            fig.update_yaxes(range=y_range, row=1, col=col)
-
-    runs = frame.drop_duplicates("run_id").sort_values("ts")
-    counts = runs["success_count"]
-    fig.add_trace(go.Scatter(
-        x=runs["stamp"].str[4:], y=counts, mode="lines+markers+text",
-        showlegend=False, marker=dict(size=7),
-        # A steady success count is a flat line, so print the value on it.
-        texttemplate="%{y:.0f}", textposition="top center", textfont_size=9,
-        cliponaxis=False,
-        hovertemplate="%{x}<br>%{y} cases<extra></extra>",
-    ), row=1, col=len(titles))
-    y_range = _stable_y_range(counts, cfg["y_scale"])
-    if y_range is not None:
-        fig.update_yaxes(range=y_range, row=1, col=len(titles))
-
-    fig.update_layout(height=300, margin=dict(t=52, b=44, l=8, r=8))
-    fig.update_annotations(font_size=12)
-    fig.update_xaxes(autorange="reversed", tickangle=-45, tickfont_size=10)
-    return fig
-
-
-def _geomean_detail(cfg: dict) -> None:
-    machines = _machines_in_scope(cfg)
-    matrix = cached_geomean_matrix(
-        machines, cfg["history_runs"] + cfg["recent_runs"], cfg["run_kinds"],
-        cfg["include_short_run"], cfg["models"], cfg["v"])
-    if matrix.empty:
-        st.info("No perf data for the machines in scope.")
-        return
-
-    st.caption(
-        "Each geomean covers only the series that every one of that machine's "
-        "runs measured, so a run that lost models to failures moves the "
-        "success count instead of the geomean. The series set is resolved per "
-        "machine and per metric — rigs measure different models.")
-
-    for machine in matrix["machine"].drop_duplicates():
-        frame = matrix[matrix["machine"] == machine]
-        plotted = frame["run_id"].nunique()
-        missing = int(frame["cohort_runs"].iloc[0]) - plotted
-        header = f"**{machine}** · {plotted} runs"
-        if missing > 0:
-            header += f" · {missing} run(s) produced no data"
-        st.markdown(header)
-        st.plotly_chart(_machine_geomean_figure(frame, cfg),
-                        width="stretch", key=f"geomean_detail_{machine}")
-
-
 def _tab_dashboard(cfg: dict) -> None:
     overview = _fleet_overview(cfg)
 
     st.divider()
+    st.markdown(f"### {cfg['machine']} — recent trend")
 
     cohort = _cohort(cfg)
     if cohort.empty:
@@ -645,11 +557,15 @@ def _tab_dashboard(cfg: dict) -> None:
         return
 
     run_ids = tuple(cohort["run_id"].tolist())
+    st.caption(f"{len(run_ids)} runs in scope · kinds: "
+               f"{', '.join(cfg['run_kinds'])} · "
+               f"models: {'all' if not cfg['models'] else len(cfg['models'])}")
 
     # --- functional first: a broken run makes its perf numbers meaningless ---
     func_summary = cached_functional_summary(run_ids, cfg["v"])
     issues = cached_functional_issues(run_ids, cfg["models"], cfg["v"])
     latest_run_id = str(cohort.iloc[-1]["run_id"])
+    latest_stamp = str(cohort.iloc[-1]["stamp"])
 
     latest_issues = (issues[issues["run_id"] == latest_run_id]
                      if not issues.empty else pd.DataFrame())
@@ -657,6 +573,20 @@ def _tab_dashboard(cfg: dict) -> None:
                      if not issues.empty else set())
     latest_nodeids = set(latest_issues["nodeid"]) if not latest_issues.empty else set()
     new_issues = latest_nodeids - prior_nodeids
+    resolved = prior_nodeids - latest_nodeids
+
+    if latest_nodeids:
+        st.error(f"🔴 Functional issues in the latest run ({latest_stamp}): "
+                 f"{len(latest_nodeids)} failing test(s), "
+                 f"{len(new_issues)} new.")
+    else:
+        st.success(f"🟢 No functional issues in the latest run ({latest_stamp}).")
+
+    fcols = st.columns(4)
+    fcols[0].metric("Failing now", len(latest_nodeids))
+    fcols[1].metric("New", len(new_issues))
+    fcols[2].metric("Persisting", len(latest_nodeids & prior_nodeids))
+    fcols[3].metric("Resolved", len(resolved))
 
     if not latest_issues.empty:
         with st.expander("Failing tests in the latest run", expanded=bool(new_issues)):
@@ -665,8 +595,41 @@ def _tab_dashboard(cfg: dict) -> None:
             st.dataframe(view[["model", "nodeid", "outcome", "is_new", "message"]],
                          width="stretch", hide_index=True)
 
-    st.markdown("### Performance trend by machine")
-    _geomean_detail(cfg)
+    states, _health = _machine_state_by_run(cfg, run_ids)
+
+    # --- overall performance trend across the cohort ---
+    st.markdown("### Overall performance trend")
+    geo = cached_geomean_runs(run_ids, cfg["models"], (), cfg["v"])
+    if geo.empty:
+        st.info("Not enough perf data for a geomean trend.")
+    else:
+        geo = geo.merge(cohort[["run_id", "stamp"]], on="run_id", how="left")
+        geo["machine_state"] = geo["run_id"].map(lambda r: states.get(r, "unknown"))
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=geo["stamp"], y=geo["geomean"], mode="lines+markers",
+            name="geomean",
+            marker=dict(
+                color=[{"throttled": "#EF5350", "fluctuating": "#FFA726"}
+                       .get(s, "#42A5F5") for s in geo["machine_state"]],
+                size=9,
+            ),
+            text=[f"ov={v}<br>n={n}<br>machine={s}" for v, n, s in
+                  zip(geo["ov_version"].fillna(""), geo["n_samples"],
+                      geo["machine_state"])],
+            hovertemplate="%{x}<br>geomean=%{y:.2f}<br>%{text}<extra></extra>",
+        ))
+        median = geo["geomean"].median()
+        fig.add_hline(y=median, line=dict(dash="dash"),
+                      annotation_text="cohort median")
+        fig.update_layout(height=380, xaxis_title="run",
+                          yaxis_title="geomean (common series)")
+        _apply_y_scale(fig, cfg, geo["geomean"], [median])
+        _newest_left(fig)
+        st.plotly_chart(fig, width="stretch")
+        st.caption("Restricted to series present in every run in scope, so a "
+                   "run that measured fewer models does not shift the curve. "
+                   "Red/orange markers flag throttled or fluctuating machines.")
 
     if not func_summary.empty:
         with st.expander("Run health history"):

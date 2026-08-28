@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS runs (
     skipped_cases  INTEGER,
     duration_sec   DOUBLE,
     source_path    TEXT,                   -- ingested source file (pickle or summary.json)
+    build_url      TEXT,                   -- Jenkins BUILD_URL of the run, when any
     rawlog_path    TEXT,                   -- path to the raw log if available
     file_hash      TEXT,
     ingested_at    TIMESTAMP DEFAULT now()

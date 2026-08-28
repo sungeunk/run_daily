@@ -137,15 +137,12 @@ def _extract_meta_from_summary(summary: dict) -> dict:
 def _guess_machine(path: Path) -> str:
     """Best-effort machine guess when ``meta`` is absent.
 
-    Results live under ``<root>/<MACHINE>/<YYYY.MM>/...`` (older runs sit
-    directly under ``<MACHINE>/``), so the month bucket is stepped over.
+    When the results live under ``/var/www/html/daily/<MACHINE>/...`` the
+    immediate parent directory is authoritative.
     """
-    parent = path.parent
-    if re.fullmatch(r"\d{4}\.\d{2}", parent.name):
-        parent = parent.parent
-    if parent.name in {"output", "viewer", "daily"}:
+    if path.parent.name in {"output", "viewer", "daily"}:
         return platform.node()
-    return parent.name
+    return path.parent.name
 
 
 def _raw_log_candidate(path: Path) -> Path | None:
@@ -305,6 +302,7 @@ def load_summary(path: Path) -> RunRecord:
         skipped_tests=_int_or_none(totals.get("skipped")),
         skipped_cases=_skipped_cases(summary),
         duration_sec=_float_or_none(summary.get("duration_sec")),
+        build_url=(meta.get("build_url") or None),
         source_path=str(path),
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(path)) else None,
         file_hash=file_hash(path),
