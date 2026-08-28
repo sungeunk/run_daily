@@ -705,6 +705,7 @@ def main():
     parser.add_argument('--no_proxy', help='try to download pkgs with no_proxy', action='store_true')
     parser.add_argument('-i', '--install', help='install openvino package from file or dir', type=Path, default=None)
     parser.add_argument('--latest_commit', help='query latest master commit', action='store_true')
+    parser.add_argument('--skip_latest', help='skip the N newest master builds; only used when neither --download_url nor --commit_id is given', type=int, default=0)
     parser.add_argument('--force', help='download ov latest pkg even if it already downloaded', action='store_true')
     args = parser.parse_args()
 
@@ -763,6 +764,10 @@ def main():
                 # We have an old version, and no new versions were found
                 log.info('No new versions found. Exiting.')
                 sys.exit(0) # Not an error, just no new work
+
+            if args.skip_latest > 0:
+                log.info(f'Skipping the {args.skip_latest} newest build(s) of {len(target_url_list)}.')
+                target_url_list = target_url_list[args.skip_latest:]
 
         if not target_url_list:
             log.error('No target URLs specified or found.')
