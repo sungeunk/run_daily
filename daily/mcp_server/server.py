@@ -17,6 +17,7 @@ import logging
 import math
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -76,10 +77,10 @@ def _connect() -> duckdb.DuckDBPyConnection:
     )
 
 
-def _rows(sql: str) -> list[dict]:
+def _rows(sql: str, params: Sequence[Any] | None = None) -> list[dict]:
     """Run a query and return at most MAX_ROWS rows."""
     with _connect() as con:
-        cur = con.execute(sql)
+        cur = con.execute(sql, list(params)) if params else con.execute(sql)
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchmany(MAX_ROWS)]
 
@@ -128,14 +129,31 @@ def daily_results_list_models(machine: str | None = None) -> str:
 @mcp.tool()
 def daily_results_recent_runs(machine: str, limit: int = 10) -> str:
     """List the most recent daily benchmark runs for a machine (timestamp,
-    OpenVINO version/build/sha, purpose, pass/fail counts).
+    OpenVINO version/build/sha, purpose, pass/fail counts), newest first.
 
     Args:
         machine: Machine name, e.g. LNL-03, PTLH-01.
         limit: Max number of runs to return, newest first.
     """
+    limit = max(1, min(limit, MAX_ROWS))
     df = queries.recent_runs(_db_path, machine, limit=limit)
-    return _dump(df.to_dict(orient="records"))
+    # queries.recent_runs returns oldest-first and omits the test counts.
+    runs = list(reversed(df.to_dict(orient="records")))
+    if runs:
+        ids = [r["run_id"] for r in runs]
+        placeholders = ", ".join("?" * len(ids))
+        counts = {
+            row["run_id"]: row
+            for row in _rows(
+                "SELECT run_id, total_tests, passed_tests, failed_tests, "
+                f"error_tests, skipped_tests FROM runs WHERE run_id IN ({placeholders})",
+                ids,
+            )
+        }
+        for run in runs:
+            extra = counts.get(run["run_id"], {})
+            run.update({k: v for k, v in extra.items() if k != "run_id"})
+    return _dump(runs)
 
 
 @mcp.tool()
@@ -234,7 +252,13 @@ def daily_results_run_sql(sql: str) -> str:
     Args:
         sql: A single read-only SQL SELECT/WITH statement (DuckDB dialect).
     """
-    return _dump(_rows(_validate_sql(sql)))
+    try:
+        safe_sql = _validate_sql(sql)
+        return _dump(_rows(safe_sql))
+    except (ValueError, duckdb.Error) as exc:
+        # Surface the reason instead of a generic tool failure, so the caller
+        # can fix the query instead of blindly retrying.
+        return _dump({"error": str(exc)})
 
 
 def main() -> None:
