@@ -1,12 +1,11 @@
 {
   "servers": {
     "daily_results": {
-      "command": "/home/sungeunk/.config/dt/extensions/gnai/gnai",
+      "command": "/home/sungeunk/miniforge3/envs/daily/bin/python",
       "args": [
-        "toolkits",
-        "serve",
-        "daily_results",
-        "--stdio"
+        "/home/sungeunk/repo/run_daily/daily/mcp_server/server.py",
+        "--transport",
+        "stdio"
       ]
     }
   }

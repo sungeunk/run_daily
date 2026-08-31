@@ -1,6 +1,0 @@
-version: 1
-kind: command
-description: List tables and columns available in the daily benchmark DuckDB (use this before writing a daily_results_run_sql query).
-params: []
-run:
-  command: $GNAI_TOOLKIT_ENTRYPOINT $GNAI_TOOLKIT_DIRECTORY/src/describe_schema.py
