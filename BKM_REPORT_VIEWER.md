@@ -1,3 +1,15 @@
+# Daily report services on dg2raptorlake
+
+| Port | Service unit | What it is |
+|------|--------------|------------|
+| [8501](http://dg2raptorlake.ikor.intel.com:8501/) | `viewer_daily_report` | Legacy viewer (pickle/`.report` pipeline) |
+| [8502](http://dg2raptorlake.ikor.intel.com:8502/) | `viewer_daily_report3` | Current viewer (pytest `daily/` pipeline) |
+| [8090](http://dg2raptorlake.ikor.intel.com:8090/mcp) | `daily_results_mcp` | MCP server for agents (read-only, no auth) |
+
+All three are `enabled` (auto-start on reboot). Service name == unit filename.
+
+---
+
 # Legacy viewer (8501)
 
 http://dg2raptorlake.ikor.intel.com:8501/
@@ -9,7 +21,7 @@ reference during the migration to the pytest-based `daily/` suite below.
 dg2raptorlake
 src: /home/sungeunk/repo/run_daily/scripts/run_daily_report_viewer3.py
 service file: /etc/systemd/system/viewer_daily_report.service
-```bash
+```ini
 [Unit]
  Description=Daily report viewer
 
@@ -25,13 +37,14 @@ service file: /etc/systemd/system/viewer_daily_report.service
 
 
 ## Start service
-* service name is the filename.
+```bash
 sudo systemctl daemon-reload
 sudo systemctl stop viewer_daily_report
 sudo systemctl start viewer_daily_report
 sudo systemctl status viewer_daily_report
 
 sudo systemctl restart viewer_daily_report
+```
 
 ---
 
@@ -48,13 +61,13 @@ for the DuckDB schema and tab-by-tab breakdown (Excel/Trend/Regressions/Geomean/
 dg2raptorlake
 src: /home/sungeunk/repo/run_daily/daily/viewer/app.py
 service file: /etc/systemd/system/viewer_daily_report3.service
-```bash
+```ini
 [Unit]
  Description=Daily report viewer3
 
 [Service]
  User=sungeunk
- WorkingDirectory=/home/sungeunk/repo/run_daily/scripts
+ WorkingDirectory=/home/sungeunk/repo/run_daily/daily/viewer
  ExecStart=/home/sungeunk/miniforge3/envs/daily/bin/python -m streamlit run /home/sungeunk/repo/run_daily/daily/viewer/app.py -- --db /var/www/html/daily2/daily_llm_benchmark.duckdb
  Restart=always
 
@@ -62,24 +75,23 @@ service file: /etc/systemd/system/viewer_daily_report3.service
  WantedBy=multi-user.target
 ```
 
-**Note:** currently `disabled` (won't auto-start on reboot) — only
-`viewer_daily_report.service` (legacy, 8501) is `enabled`. Run
-`sudo systemctl enable viewer_daily_report3` if this one should also survive
-a reboot.
-
 ## Start service
-* service name is the filename.
+```bash
 sudo systemctl daemon-reload
 sudo systemctl stop viewer_daily_report3
 sudo systemctl start viewer_daily_report3
 sudo systemctl status viewer_daily_report3
 
 sudo systemctl restart viewer_daily_report3
+```
 
 ---
 
-## Daily results MCP server (remote query via Copilot/Claude)
+# Daily results MCP server (8090)
 
+http://dg2raptorlake.ikor.intel.com:8090/mcp
+
+Remote query surface for Copilot/Claude.
 Server source: `/home/sungeunk/repo/run_daily/daily/mcp_server/server.py` —
 a standalone Python MCP server (official `mcp` SDK, `MCPServer`) exposing 7
 `daily_results_*` tools over the `daily_llm_benchmark.duckdb` central DB.
@@ -111,8 +123,9 @@ Dependencies live in the `daily` conda env (`mcp>=2.1`, `duckdb`, `pandas`):
 /home/sungeunk/miniforge3/envs/daily/bin/python -m pip install -r daily/requirements.txt
 ```
 
-service file: `/etc/systemd/system/daily_results_mcp.service`
+service file: `/etc/systemd/system/daily_results_mcp.service` — install with:
 ```bash
+sudo tee /etc/systemd/system/daily_results_mcp.service > /dev/null <<'EOF'
 [Unit]
 Description=Daily results MCP server (standalone Python, no auth)
 After=network.target
@@ -125,13 +138,20 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
-```
+EOF
 
-```bash
-sudo cp /tmp/daily_results_mcp.service /etc/systemd/system/daily_results_mcp.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now daily_results_mcp
+```
+
+## Start service
+```bash
+sudo systemctl daemon-reload
+sudo systemctl stop daily_results_mcp
+sudo systemctl start daily_results_mcp
 sudo systemctl status daily_results_mcp
+
+sudo systemctl restart daily_results_mcp
 ```
 
 Remote teammate's `.vscode/mcp.json` (or Claude Code MCP config) — no
