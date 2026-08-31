@@ -22,13 +22,14 @@ from typing import Any
 
 DAILY_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = Path("/var/www/html/daily2/daily_llm_benchmark.duckdb")
+MAX_ROWS = 500
 
 if str(DAILY_DIR) not in sys.path:
     sys.path.insert(0, str(DAILY_DIR))
 
+import duckdb  # noqa: E402
 from mcp.server.mcpserver import MCPServer  # noqa: E402
 from viewer import queries  # noqa: E402
-from viewer.queries import _read_only  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -62,42 +63,59 @@ def _dump(obj: Any) -> str:
     return json.dumps(_sanitize(obj), default=str, indent=2)
 
 
+def _connect() -> duckdb.DuckDBPyConnection:
+    """Read-only connection with filesystem access disabled.
+
+    `read_only=True` alone still lets DuckDB table functions such as
+    `read_text`/`read_csv_auto` read arbitrary host files, which matters
+    because this server is exposed unauthenticated.
+    """
+    return duckdb.connect(
+        str(_db_path), read_only=True,
+        config={"enable_external_access": False},
+    )
+
+
+def _rows(sql: str) -> list[dict]:
+    """Run a query and return at most MAX_ROWS rows."""
+    with _connect() as con:
+        cur = con.execute(sql)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchmany(MAX_ROWS)]
+
+
 @mcp.tool()
 def daily_results_describe_schema() -> str:
     """List tables and columns available in the daily benchmark DuckDB (use
     this before writing a daily_results_run_sql query)."""
-    with _read_only(_db_path) as con:
-        df = con.execute(
-            """
-            SELECT table_name, column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema = 'main'
-            ORDER BY table_name, ordinal_position
-            """
-        ).fetchdf()
-    return _dump(df.to_dict(orient="records"))
+    return _dump(_rows(
+        """
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'main'
+        ORDER BY table_name, ordinal_position
+        """
+    ))
 
 
 @mcp.tool()
 def daily_results_list_machines() -> str:
     """List machines that have daily benchmark results, with the latest run
     timestamp, OpenVINO version, and pass/fail counts per machine."""
-    with _read_only(_db_path) as con:
-        df = con.execute(
-            """
-            SELECT r.machine,
-                   count(*) AS total_runs,
-                   max(r.ts) AS latest_run_ts,
-                   arg_max(r.ov_version, r.ts) AS latest_ov_version,
-                   arg_max(r.passed_tests, r.ts) AS latest_passed_tests,
-                   arg_max(r.failed_tests, r.ts) AS latest_failed_tests,
-                   arg_max(r.total_tests, r.ts) AS latest_total_tests
-            FROM runs r
-            GROUP BY r.machine
-            ORDER BY r.machine
-            """
-        ).fetchdf()
-    return _dump(df.to_dict(orient="records"))
+    return _dump(_rows(
+        """
+        SELECT r.machine,
+               count(*) AS total_runs,
+               max(r.ts) AS latest_run_ts,
+               arg_max(r.ov_version, r.ts) AS latest_ov_version,
+               arg_max(r.passed_tests, r.ts) AS latest_passed_tests,
+               arg_max(r.failed_tests, r.ts) AS latest_failed_tests,
+               arg_max(r.total_tests, r.ts) AS latest_total_tests
+        FROM runs r
+        GROUP BY r.machine
+        ORDER BY r.machine
+        """
+    ))
 
 
 @mcp.tool()
@@ -186,15 +204,16 @@ _BLOCKED_KEYWORDS = (
 
 def _validate_sql(sql: str) -> str:
     stripped = sql.strip().rstrip(";").strip()
-    if ";" in stripped:
+    # Blank out string literals so keywords inside them neither trip the
+    # denylist nor hide a statement separator.
+    probe = re.sub(r"'(?:''|[^'])*'", "''", stripped)
+    if ";" in probe:
         raise ValueError("Only a single SQL statement is allowed.")
-    if not re.match(r"^(SELECT|WITH)\b", stripped, re.IGNORECASE):
+    if not re.match(r"^(SELECT|WITH)\b", probe, re.IGNORECASE):
         raise ValueError("Only SELECT/WITH (read-only) statements are allowed.")
     for kw in _BLOCKED_KEYWORDS:
-        if re.search(rf"\b{kw}\b", stripped, re.IGNORECASE):
+        if re.search(rf"\b{kw}\b", probe, re.IGNORECASE):
             raise ValueError(f"Statement contains a disallowed keyword: {kw}")
-    if not re.search(r"\bLIMIT\b", stripped, re.IGNORECASE):
-        stripped += " LIMIT 500"
     return stripped
 
 
@@ -208,16 +227,14 @@ def daily_results_run_sql(sql: str) -> str:
     Key tables: runs (one row per benchmark run: machine, ts, ov_version,
     pass/fail counts), perf (raw per-series numbers: run_id, model, precision,
     in_token, out_token, exec_mode, value, unit), analysis_comparisons
-    (per-series verdicts vs. baseline). The connection is read-only and only a
-    single SELECT/WITH statement is accepted; a LIMIT 500 is added if missing.
+    (per-series verdicts vs. baseline). The connection is read-only with
+    filesystem access disabled, only a single SELECT/WITH statement is
+    accepted, and at most 500 rows are returned.
 
     Args:
         sql: A single read-only SQL SELECT/WITH statement (DuckDB dialect).
     """
-    safe_sql = _validate_sql(sql)
-    with _read_only(_db_path) as con:
-        df = con.execute(safe_sql).fetchdf()
-    return _dump(df.to_dict(orient="records"))
+    return _dump(_rows(_validate_sql(sql)))
 
 
 def main() -> None:

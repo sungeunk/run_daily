@@ -43,12 +43,26 @@ After a reinstall, only the `run_daily` repo is needed. The DuckDB file is
    sudo ufw allow 8090/tcp
    ```
 
-5. Register the three services from the sections below, then verify:
+5. Register the three services from the sections below (each unit has to be
+   written to `/etc/systemd/system/` and enabled — only the MCP section shows
+   the `sudo tee` form, do the same for the two viewers), then verify:
    ```bash
    for s in viewer_daily_report viewer_daily_report3 daily_results_mcp; do
      printf '%-24s %s / %s\n' "$s" "$(systemctl is-enabled $s)" "$(systemctl is-active $s)"
    done
    ```
+
+**Still missing after these steps** (not tracked in this repo, restore by hand):
+
+- `/var/www/html/daily2/ingest_db.sh` — the ingest hook `daily/viewer/app.py`
+  shells out to. Without it the viewer's refresh button does nothing and the
+  DB never gets new runs.
+- The benchmark side itself (OpenVINO + GenAI runtime, models, prompts) if
+  this host is also meant to *run* `daily/` pytest, not just serve results.
+  `daily/requirements.txt` only covers the viewers, the MCP server and the
+  test harness — not OpenVINO/GenAI.
+- There is no crontab entry on this host; whatever triggers the daily runs and
+  the ingest lives elsewhere and has to be reconnected.
 
 ---
 
@@ -110,7 +124,7 @@ service file: /etc/systemd/system/viewer_daily_report3.service
 [Service]
  User=sungeunk
  WorkingDirectory=/home/sungeunk/repo/run_daily/daily/viewer
- ExecStart=/home/sungeunk/miniforge3/envs/daily/bin/python -m streamlit run /home/sungeunk/repo/run_daily/daily/viewer/app.py -- --db /var/www/html/daily2/daily_llm_benchmark.duckdb
+ ExecStart=/home/sungeunk/miniforge3/envs/daily/bin/python -m streamlit run /home/sungeunk/repo/run_daily/daily/viewer/app.py --server.port 8502 -- --db /var/www/html/daily2/daily_llm_benchmark.duckdb
  Restart=always
 
 [Install]
@@ -140,11 +154,14 @@ a standalone Python MCP server (official `mcp` SDK, `MCPServer`) exposing 7
 It reuses `daily/viewer/queries.py`, the same query layer the Streamlit
 viewer uses.
 
-**No authentication.** Anyone on the internal network can query it. This is
-safe because every tool is read-only: the DuckDB connection is opened
-`read_only=True`, and the ad-hoc `daily_results_run_sql` tool additionally
-rejects anything but a single `SELECT`/`WITH` statement (plus a keyword
-denylist and an implicit `LIMIT 500`).
+**No authentication.** Anyone on the internal network can query it, so the
+server is hardened rather than trusted: the DuckDB connection is opened
+`read_only=True` **and** with `enable_external_access=False`, which is what
+stops `read_text`/`read_csv_auto` from reading arbitrary host files. On top of
+that `daily_results_run_sql` accepts only a single `SELECT`/`WITH` statement
+(string literals are blanked before the keyword denylist runs, so `;` or
+`DELETE` inside a literal neither bypasses nor trips the check) and every
+query is capped at 500 rows when fetched, independent of the SQL text.
 
 > Replaced the earlier `gnai toolkits serve` deployment (`daily/mcp_toolkit`).
 > gnai was only providing the MCP transport, the tool schemas and a venv for
