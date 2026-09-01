@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS runs (
     genai_version  TEXT,
     genai_commit   TEXT,
     tok_commit     TEXT,
+    -- Model cache directory the run benchmarked against, e.g.
+    -- 'WW35_llm-optimum_2026.4.0-22930-RC1'.
+    model_cache    TEXT,
     short_run      BOOLEAN DEFAULT FALSE,
     -- pytest outcome counts and wall time for the whole run, taken from
     -- summary.json so the fleet view does not have to re-read every file.
@@ -53,6 +56,9 @@ CREATE TABLE IF NOT EXISTS runs (
     -- Benchmark cases (perf series) lost to skipped tests, from each test's
     -- ``expected_series``. A pytest test can carry several cases.
     skipped_cases  INTEGER,
+    -- Every case the run was meant to produce (all outcomes summed), so a run
+    -- that failed tests can be scored without guessing from its own history.
+    expected_cases INTEGER,
     duration_sec   DOUBLE,
     source_path    TEXT,                   -- ingested source file (pickle or summary.json)
     build_url      TEXT,                   -- Jenkins BUILD_URL of the run, when any

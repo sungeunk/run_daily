@@ -75,7 +75,10 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS error_tests INTEGER",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS skipped_tests INTEGER",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS skipped_cases INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS expected_cases INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS model_cache TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_sec DOUBLE",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS build_url TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS build_url TEXT",
     ]
     for sql in migrations:
@@ -130,11 +133,12 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 purpose, description, run_kind, ts, ww,
                 ov_version, ov_build, ov_sha,
                 host_info, host_memory_size_gb, host_memory_speed_mhz,
-                genai_version, genai_commit, tok_commit,
+                genai_version, genai_commit, tok_commit, model_cache,
                 short_run, source_path, rawlog_path, file_hash,
                 total_tests, passed_tests, failed_tests, error_tests,
-                skipped_tests, skipped_cases, duration_sec, build_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                skipped_tests, skipped_cases, expected_cases,
+                duration_sec, build_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
@@ -154,6 +158,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 genai_version = excluded.genai_version,
                 genai_commit  = excluded.genai_commit,
                 tok_commit    = excluded.tok_commit,
+                model_cache   = excluded.model_cache,
                 short_run     = excluded.short_run,
                 source_path   = excluded.source_path,
                 rawlog_path   = excluded.rawlog_path,
@@ -164,6 +169,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 error_tests   = excluded.error_tests,
                 skipped_tests = excluded.skipped_tests,
                 skipped_cases = excluded.skipped_cases,
+                expected_cases = excluded.expected_cases,
                 duration_sec  = excluded.duration_sec,
                 build_url     = excluded.build_url
             """,
@@ -173,10 +179,11 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 rec.ov_version, rec.ov_build, rec.ov_sha,
                 rec.host_info, rec.host_memory_size_gb, rec.host_memory_speed_mhz,
                 rec.genai_version, rec.genai_commit, rec.tok_commit,
+                rec.model_cache,
                 rec.short_run, rec.source_path, rec.rawlog_path, rec.file_hash,
                 rec.total_tests, rec.passed_tests, rec.failed_tests,
                 rec.error_tests, rec.skipped_tests, rec.skipped_cases,
-                rec.duration_sec, rec.build_url,
+                rec.expected_cases, rec.duration_sec, rec.build_url,
             ],
         )
 
@@ -248,6 +255,23 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 list(monitor_dedup.values()),
+            )
+
+        con.execute("DELETE FROM functional_issues WHERE run_id = ?", [rec.run_id])
+        if rec.issues:
+            issue_dedup: dict[tuple, tuple] = {}
+            for i in rec.issues:
+                issue_dedup[(i.nodeid, i.outcome)] = (
+                    rec.run_id, i.nodeid, i.outcome, i.message,
+                    i.model, i.precision,
+                )
+            con.executemany(
+                """
+                INSERT INTO functional_issues (
+                    run_id, nodeid, outcome, message, model, precision
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                list(issue_dedup.values()),
             )
         con.commit()
     except Exception:

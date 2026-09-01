@@ -178,31 +178,31 @@ def cached_models(machine: str, run_kinds: tuple[str, ...],
 
 @st.cache_data(show_spinner=False)
 def cached_cohort(machine: str, limit: int, run_kinds: tuple[str, ...],
-                  include_short_run: bool, _v: float) -> pd.DataFrame:
+                  min_series: int, _v: float) -> pd.DataFrame:
     return q.recent_runs(DB, machine, limit=limit, run_kinds=run_kinds,
-                         include_short_run=include_short_run)
+                         min_success_series=min_series)
 
 
 @st.cache_data(show_spinner=False)
 def cached_series_trend(machine: str, recent_n: int, history_n: int,
                         run_kinds: tuple[str, ...], models: tuple[str, ...],
-                        include_short_run: bool, _v: float) -> pd.DataFrame:
+                        min_series: int, _v: float) -> pd.DataFrame:
     return q.series_trend(DB, machine, recent_runs_n=recent_n,
                           history_runs_n=history_n, run_kinds=run_kinds,
                           models=models or None,
-                          include_short_run=include_short_run)
+                          min_success_series=min_series)
 
 
 @st.cache_data(show_spinner=False)
 def cached_series_runs(machine: str, model: str, precision: str,
                        in_token: int, out_token: int, exec_mode: str,
                        runs_n: int, run_kinds: tuple[str, ...],
-                       include_short_run: bool, _v: float) -> pd.DataFrame:
+                       min_series: int, _v: float) -> pd.DataFrame:
     return q.series_history_for_runs(DB, machine, model=model,
                                      precision=precision, in_token=in_token,
                                      out_token=out_token, exec_mode=exec_mode,
                                      runs_n=runs_n, run_kinds=run_kinds,
-                                     include_short_run=include_short_run)
+                                     min_success_series=min_series)
 
 
 @st.cache_data(show_spinner=False)
@@ -214,10 +214,10 @@ def cached_geomean_runs(run_ids: tuple[str, ...], models: tuple[str, ...],
 
 @st.cache_data(show_spinner=False)
 def cached_geomean_matrix(machines: tuple[str, ...], limit: int,
-                          run_kinds: tuple[str, ...], include_short_run: bool,
+                          run_kinds: tuple[str, ...], min_series: int,
                           models: tuple[str, ...], _v: float) -> pd.DataFrame:
     return q.geomean_matrix(DB, machines, limit=limit, run_kinds=run_kinds,
-                            include_short_run=include_short_run,
+                            min_success_series=min_series,
                             models=models or None)
 
 
@@ -240,11 +240,13 @@ def cached_functional_summary(run_ids: tuple[str, ...], _v: float) -> pd.DataFra
 @st.cache_data(show_spinner=False)
 def cached_trend_compare(machine: str, run_a: str, run_b: str,
                          history_n: int, run_kinds: tuple[str, ...],
-                         models: tuple[str, ...], _v: float) -> pd.DataFrame:
+                         models: tuple[str, ...], min_series: int,
+                         _v: float) -> pd.DataFrame:
     return q.compare_runs_with_trend(DB, machine, run_a, run_b,
                                      history_runs_n=history_n,
                                      run_kinds=run_kinds,
-                                     models=models or None)
+                                     models=models or None,
+                                     min_success_series=min_series)
 
 
 # ---------------------------------------------------------------------------
@@ -420,9 +422,11 @@ def _sidebar() -> dict:
         st.sidebar.caption("_No run kind selected — showing all._")
         run_kinds = available_kinds
 
-    # Short runs measure fewer prompts and skew comparisons, so they are
-    # always excluded from analysis views.
-    include_short_run = False
+    min_series = st.sidebar.slider(
+        "Min successful series per run", 0, 120, 70, 5,
+        help="Runs at or below this many successful series are dropped from "
+             "every analysis view. Cohort metrics only cover the series all "
+             "runs measured, so one partial run collapses the comparison.")
 
     all_models = cached_models(machine, tuple(run_kinds), v)
     models = st.sidebar.multiselect("Models", all_models, default=[],
@@ -450,7 +454,7 @@ def _sidebar() -> dict:
                 y_scale=Y_SCALE_OPTIONS[y_scale_label],
                 history_runs=history_runs, recent_runs=recent_runs_n,
                 run_kinds=tuple(run_kinds), models=tuple(models),
-                include_short_run=include_short_run)
+                min_series=min_series)
 
 # ---------------------------------------------------------------------------
 # Tabs
@@ -459,7 +463,7 @@ def _sidebar() -> dict:
 def _cohort(cfg: dict) -> pd.DataFrame:
     """Runs in scope for the current sidebar filters, oldest first."""
     return cached_cohort(cfg["machine"], cfg["history_runs"] + cfg["recent_runs"],
-                         cfg["run_kinds"], cfg["include_short_run"], cfg["v"])
+                         cfg["run_kinds"], cfg["min_series"], cfg["v"])
 
 
 def _machine_state_by_run(cfg: dict, run_ids: tuple[str, ...]) -> tuple[dict, pd.DataFrame]:
@@ -487,12 +491,18 @@ REPORT_BASE_URL = os.environ.get(
 
 @st.cache_data(show_spinner=False)
 def cached_machines_overview(machines: tuple[str, ...],
-                             run_kinds: tuple[str, ...],
-                             include_short_run: bool, history_runs: int,
+                             run_kinds: tuple[str, ...], history_runs: int,
                              _v: float) -> pd.DataFrame:
     return q.machines_overview(DB, machines or None, run_kinds=run_kinds,
-                               include_short_run=include_short_run,
                                history_runs=history_runs)
+
+
+@st.cache_data(show_spinner=False)
+def cached_failing_models(machines: tuple[str, ...],
+                          run_kinds: tuple[str, ...], history_runs: int,
+                          _v: float) -> pd.DataFrame:
+    return q.failing_models_overview(DB, machines or None, run_kinds=run_kinds,
+                                     history_runs=history_runs)
 
 
 def _report_url(machine: str, stamp: str, suffix: str) -> str:
@@ -505,7 +515,6 @@ def _fleet_overview(cfg: dict) -> pd.DataFrame:
     """Every daily rig's latest run, rendered as one scannable table."""
     machines = tuple(m for m in DAILY_MACHINES) if cfg["daily_only"] else ()
     overview = cached_machines_overview(machines, cfg["run_kinds"],
-                                        cfg["include_short_run"],
                                         cfg["history_runs"], cfg["v"])
     if overview.empty:
         st.info("No runs match the current filters.")
@@ -515,13 +524,14 @@ def _fleet_overview(cfg: dict) -> pd.DataFrame:
     # test covers 2 prompts x 1st/2nd = 4 cases, resnet50 covers 2 batches.
     skipped = overview["skipped_cases"].fillna(0)
     success = overview["success_cases"].fillna(0)
-    expected = overview["expected_cases"].fillna(0)
-    failed = (expected - success).clip(lower=0)
-    total = expected + skipped
+    total = overview["expected_cases"].fillna(0)
+    failed = (total - success - skipped).clip(lower=0)
+    # Same verdict the last success / last fail columns are built from.
+    is_fail = overview["latest_failed"].fillna(False).astype(bool)
     stale = overview["age_hours"] > 24
 
     def _status(idx: int) -> str:
-        if failed.iloc[idx] > 0:
+        if is_fail.iloc[idx]:
             return "🔴 failed"
         if stale.iloc[idx]:
             return "🟡 stale"
@@ -562,10 +572,53 @@ def _fleet_overview(cfg: dict) -> pd.DataFrame:
 
     st.caption("Counts are benchmark cases, not pytest tests: one LLM test "
                "contributes 2 prompts x 1st/2nd = 4 cases. They describe the "
-               "machine's newest run. `success` is the cases that produced a "
-               "number; `total` is the most this machine has produced in its "
-               "recent runs plus skipped cases.")
+               "machine's newest run. `total` is the cases a full run on this "
+               "machine produces; `success` is the cases that produced a "
+               "number. A run counts as failed — for the status icon and for "
+               "the last success / last fail columns alike — when pytest "
+               "reported a failure or error, when it executed nothing, or "
+               "when it produced fewer cases than a full run.")
     return overview
+
+
+def _failing_models(cfg: dict) -> None:
+    """Models failing in each machine's newest run, new ones called out."""
+    machines = tuple(m for m in DAILY_MACHINES) if cfg["daily_only"] else ()
+    df = cached_failing_models(machines, cfg["run_kinds"],
+                               cfg["history_runs"], cfg["v"])
+
+    st.markdown("### Failing models in the latest run")
+    if df.empty:
+        st.success("No model failed in the newest run of any machine in scope.")
+        return
+
+    def _cache_cell(name: object, changed: object, previous: object) -> str:
+        text = "" if name is None or pd.isna(name) else str(name)
+        if not changed:
+            return text
+        return f"⚠ {text} (was {previous})"
+
+    view = pd.DataFrame({
+        "Machine": df["machine"],
+        "Model": df["model"],
+        "Prec": df["precision"].fillna(""),
+        "Model cache": [_cache_cell(n, c, p) for n, c, p
+                        in zip(df["model_cache"], df["model_cache_changed"],
+                               df["last_pass_model_cache"])],
+        "State": ["🔴 also failed before" if before else "🆕 new in latest run"
+                  for before in df["failed_before"]],
+        "Failed runs": [f"{int(a)} / {int(b)}" for a, b
+                        in zip(df["failed_runs"], df["window_runs"])],
+        "First seen": df["first_seen"],
+        "Last passed": df["last_pass_stamp"].fillna("—"),
+    })
+    st.dataframe(view, width="stretch", hide_index=True)
+    st.caption(f"History window: the newest {cfg['history_runs']} runs per "
+               "machine. `First seen` is the oldest run in that window where "
+               "the model was already failing, so a model marked new was "
+               "passing right up to the latest build. ⚠ on the model cache "
+               "means the cache changed since the model last passed, which "
+               "can explain the failure on its own.")
 
 
 _METRIC_LABEL = {"1st": "1st token", "2nd": "2nd token",
@@ -629,7 +682,7 @@ def _geomean_detail(cfg: dict) -> None:
     machines = _machines_in_scope(cfg)
     matrix = cached_geomean_matrix(
         machines, cfg["history_runs"] + cfg["recent_runs"], cfg["run_kinds"],
-        cfg["include_short_run"], cfg["models"], cfg["v"])
+        cfg["min_series"], cfg["models"], cfg["v"])
     if matrix.empty:
         st.info("No perf data for the machines in scope.")
         return
@@ -656,6 +709,9 @@ def _tab_dashboard(cfg: dict) -> None:
     overview = _fleet_overview(cfg)
 
     st.divider()
+    _failing_models(cfg)
+
+    st.divider()
 
     cohort = _cohort(cfg)
     if cohort.empty:
@@ -663,25 +719,7 @@ def _tab_dashboard(cfg: dict) -> None:
         return
 
     run_ids = tuple(cohort["run_id"].tolist())
-
-    # --- functional first: a broken run makes its perf numbers meaningless ---
     func_summary = cached_functional_summary(run_ids, cfg["v"])
-    issues = cached_functional_issues(run_ids, cfg["models"], cfg["v"])
-    latest_run_id = str(cohort.iloc[-1]["run_id"])
-
-    latest_issues = (issues[issues["run_id"] == latest_run_id]
-                     if not issues.empty else pd.DataFrame())
-    prior_nodeids = (set(issues[issues["run_id"] != latest_run_id]["nodeid"])
-                     if not issues.empty else set())
-    latest_nodeids = set(latest_issues["nodeid"]) if not latest_issues.empty else set()
-    new_issues = latest_nodeids - prior_nodeids
-
-    if not latest_issues.empty:
-        with st.expander("Failing tests in the latest run", expanded=bool(new_issues)):
-            view = latest_issues.copy()
-            view["is_new"] = view["nodeid"].isin(new_issues)
-            st.dataframe(view[["model", "nodeid", "outcome", "is_new", "message"]],
-                         width="stretch", hide_index=True)
 
     st.markdown("### Performance trend by machine")
     _geomean_detail(cfg)
@@ -920,7 +958,7 @@ def _tab_regression(cfg: dict) -> None:
 
     df = cached_series_trend(cfg["machine"], cfg["recent_runs"],
                              cfg["history_runs"], cfg["run_kinds"],
-                             cfg["models"], cfg["include_short_run"], cfg["v"])
+                             cfg["models"], cfg["min_series"], cfg["v"])
     if df.empty:
         st.info("No data for this machine / window.")
         return
@@ -1061,7 +1099,7 @@ def _tab_regression(cfg: dict) -> None:
         cfg["machine"], row["model"], row["precision"],
         int(row["in_token"]), int(row["out_token"]), row["exec_mode"],
         cfg["history_runs"] + cfg["recent_runs"], cfg["run_kinds"],
-        cfg["include_short_run"], cfg["v"])
+        cfg["min_series"], cfg["v"])
     if hist.empty:
         st.info("No history for this series in the selected window.")
         return
@@ -1392,7 +1430,8 @@ def _tab_compare(cfg: dict) -> None:
         return
 
     df = cached_trend_compare(cfg["machine"], run_a, run_b, cfg["history_runs"],
-                              cfg["run_kinds"], cfg["models"], cfg["v"])
+                              cfg["run_kinds"], cfg["models"],
+                              cfg["min_series"], cfg["v"])
     if df.empty:
         st.info("No overlapping series found between the two runs.")
         return
@@ -1487,7 +1526,7 @@ def _tab_compare(cfg: dict) -> None:
         cfg["machine"], row["model"], row["precision"],
         int(row["in_token"]), int(row["out_token"]), row["exec_mode"],
         cfg["history_runs"] + cfg["recent_runs"], cfg["run_kinds"],
-        cfg["include_short_run"], cfg["v"])
+        cfg["min_series"], cfg["v"])
     if hist.empty:
         st.info("No history for this series.")
         return

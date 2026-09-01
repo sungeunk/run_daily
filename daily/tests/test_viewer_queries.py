@@ -17,16 +17,16 @@ if str(DAILY_DIR) not in sys.path:
 from analysis.functional import aggregate_functional  # noqa: E402
 from viewer import queries as q  # noqa: E402
 from viewer.ingest import writer  # noqa: E402
-from viewer.ingest.loader_new import _skipped_cases, classify_run_kind  # noqa: E402
-from viewer.ingest.record import MonitorRow, PerfRow, RunRecord  # noqa: E402
+from viewer.ingest.loader_new import _cases, _skipped_cases, classify_run_kind  # noqa: E402
+from viewer.ingest.record import IssueRow, MonitorRow, PerfRow, RunRecord  # noqa: E402
 
 MACHINE = "TEST-01"
 BASE_TS = datetime(2026, 1, 1, 12, 0)
 
 
 def _record(idx: int, *, value: float, run_kind: str = "daily",
-            model: str = "llama", monitor: MonitorRow | None = None,
-            short_run: bool = False) -> RunRecord:
+            model: str = "llama",
+            monitor: MonitorRow | None = None) -> RunRecord:
     ts = BASE_TS + timedelta(days=idx)
     rec = RunRecord(
         run_id=f"run-{idx:03d}",
@@ -36,7 +36,6 @@ def _record(idx: int, *, value: float, run_kind: str = "daily",
         ts=ts,
         purpose=run_kind,
         run_kind=run_kind,
-        short_run=short_run,
     )
     rec.perf.append(PerfRow(model, "INT4", 32, 128, "2nd", value, "ms"))
     if monitor is not None:
@@ -102,13 +101,25 @@ class TestCohort:
         both = q.recent_runs(db, MACHINE, limit=10, run_kinds=("daily", "pr"))
         assert "run-003" in set(both["run_id"])
 
-    def test_short_runs_can_be_excluded(self, db: Path):
-        records = [_record(i, value=100.0) for i in range(3)]
-        records.append(_record(3, value=100.0, short_run=True))
+    def test_runs_with_too_few_series_are_dropped(self, db: Path):
+        # A partial run would otherwise collapse the common-series
+        # intersection every cohort view is built on.
+        records = []
+        for i in range(3):
+            rec = _record(i, value=100.0)
+            for n in range(4):
+                rec.perf.append(
+                    PerfRow(f"m{n}", "INT4", 32, 128, "2nd", 50.0, "ms"))
+            records.append(rec)
+        records.append(_record(3, value=100.0))
         _write(db, records)
 
-        cohort = q.recent_runs(db, MACHINE, limit=10, include_short_run=False)
+        cohort = q.recent_runs(db, MACHINE, limit=10, min_success_series=3)
         assert "run-003" not in set(cohort["run_id"])
+        assert len(cohort) == 3
+
+        unfiltered = q.recent_runs(db, MACHINE, limit=10)
+        assert "run-003" in set(unfiltered["run_id"])
 
 
 class TestSeriesTrend:
@@ -276,9 +287,32 @@ class TestCaseCounts:
         summary = {"tests": [{"outcome": "skipped", "metrics": {}}]}
         assert _skipped_cases(summary) == 0
 
-    def test_expected_cases_uses_the_machines_best_run(self, db: Path):
-        # A run that broke early must not lower what the machine is expected
-        # to produce, otherwise its failures would vanish from the table.
+    def test_expected_cases_counts_every_outcome(self):
+        summary = {
+            "tests": [
+                {"outcome": "passed", "metrics": {"expected_series": 8}},
+                {"outcome": "failed", "metrics": {"expected_series": 4}},
+                {"outcome": "skipped", "metrics": {"expected_series": 2}},
+            ],
+        }
+        assert _cases(summary) == 14
+
+    def test_expected_cases_comes_from_the_run_itself(self, db: Path):
+        # The run declares 4 cases but produced 1, so 3 are unaccounted for
+        # even though the machine has never produced more than 1.
+        rec = _record(0, value=100.0)
+        rec.expected_cases = 4
+        rec.skipped_cases = 1
+        _write(db, [rec])
+
+        row = q.machines_overview(db, [MACHINE]).iloc[0]
+        assert row["success_cases"] == 1
+        assert row["expected_cases"] == 4
+
+    def test_expected_cases_falls_back_to_the_machines_best_run(self, db: Path):
+        # Runs ingested before ``expected_cases`` existed: a run that broke
+        # early must not lower what the machine is expected to produce,
+        # otherwise its failures would vanish from the table.
         healthy = _record(0, value=100.0)
         healthy.perf.append(PerfRow("qwen", "INT4", 32, 128, "2nd", 50.0, "ms"))
         healthy.perf.append(PerfRow("qwen", "INT4", 64, 128, "2nd", 55.0, "ms"))
@@ -289,6 +323,103 @@ class TestCaseCounts:
         row = ov.iloc[0]
         assert row["success_cases"] == 1
         assert row["expected_cases"] == 3
+
+
+class TestFleetStatus:
+    def _full(self, idx: int) -> RunRecord:
+        rec = _record(idx, value=100.0)
+        rec.perf.append(PerfRow("qwen", "INT4", 32, 128, "2nd", 50.0, "ms"))
+        rec.total_tests, rec.passed_tests = 2, 2
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        rec.expected_cases = 2
+        return rec
+
+    def test_partial_run_is_not_a_success(self, db: Path):
+        # A run that only measured a fraction of the suite must not be
+        # reported as the machine's last success.
+        partial = self._full(1)
+        partial.perf.pop()
+        partial.total_tests = partial.passed_tests = 1
+        partial.expected_cases = 1
+        _write(db, [self._full(0), partial])
+
+        row = q.machines_overview(db, [MACHINE]).iloc[0]
+        assert row["latest_failed"]
+        assert row["last_success_stamp"] == "20260101_1200"
+        assert row["last_fail_stamp"] == "20260102_1200"
+
+    def test_status_and_stamps_agree(self, db: Path):
+        broken = self._full(1)
+        broken.failed_tests, broken.passed_tests = 1, 1
+        broken.perf.pop()
+        _write(db, [self._full(0), broken])
+
+        row = q.machines_overview(db, [MACHINE]).iloc[0]
+        assert row["latest_failed"]
+        assert row["last_fail_stamp"] == row["stamp"]
+
+    def test_clean_run_is_not_a_failure(self, db: Path):
+        _write(db, [self._full(0), self._full(1)])
+
+        row = q.machines_overview(db, [MACHINE]).iloc[0]
+        assert not row["latest_failed"]
+        assert row["last_success_stamp"] == row["stamp"]
+        assert row["last_fail_stamp"] is None
+
+    def test_failed_models_are_named(self, db: Path):
+        broken = self._full(1)
+        broken.failed_tests, broken.passed_tests = 1, 1
+        broken.perf.pop()
+        broken.issues.append(IssueRow(
+            nodeid="tests/test_llm_benchmark.py::test_llm_benchmark[qwen]",
+            outcome="failed", model="qwen", precision="INT4"))
+        _write(db, [self._full(0), broken])
+
+        row = q.failing_models_overview(db, [MACHINE]).iloc[0]
+        assert row["model"] == "qwen"
+        assert not row["failed_before"]
+
+    def test_a_model_failing_before_is_flagged(self, db: Path):
+        records = []
+        for i in range(2):
+            rec = self._full(i)
+            rec.failed_tests, rec.passed_tests = 1, 1
+            rec.perf.pop()
+            rec.issues.append(IssueRow(
+                nodeid="tests/test_llm_benchmark.py::test_llm_benchmark[qwen]",
+                outcome="failed", model="qwen", precision="INT4"))
+            records.append(rec)
+        _write(db, records)
+
+        row = q.failing_models_overview(db, [MACHINE]).iloc[0]
+        assert row["failed_before"]
+        assert row["failed_runs"] == 2
+        assert row["first_seen"] == "20260101_1200"
+
+    def test_model_cache_change_is_flagged(self, db: Path):
+        # The model passed on the old cache, then failed on the new one.
+        passing = self._full(0)
+        passing.model_cache = "WW24_llm-optimum_2026.3.0-22130"
+
+        records = [passing]
+        for i in (1, 2):
+            rec = self._full(i)
+            rec.model_cache = "WW35_llm-optimum_2026.4.0-22930-RC1"
+            rec.failed_tests, rec.passed_tests = 1, 1
+            rec.perf.pop()
+            rec.issues.append(IssueRow(
+                nodeid="tests/test_llm_benchmark.py::test_llm_benchmark[qwen]",
+                outcome="failed", model="qwen", precision="INT4"))
+            records.append(rec)
+        _write(db, records)
+
+        row = q.failing_models_overview(db, [MACHINE]).iloc[0]
+        assert row["model_cache"] == "WW35_llm-optimum_2026.4.0-22930-RC1"
+        # The immediately preceding run already used the new cache; the
+        # comparison must reach back to the last run the model passed in.
+        assert row["last_pass_model_cache"] == "WW24_llm-optimum_2026.3.0-22130"
+        assert row["last_pass_stamp"] == "20260101_1200"
+        assert row["model_cache_changed"]
 
 
 class TestShortDeviceName:

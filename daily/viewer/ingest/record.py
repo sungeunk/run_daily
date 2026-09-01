@@ -63,6 +63,17 @@ class MonitorRow:
 
 
 @dataclass
+class IssueRow:
+    """A test that did not pass, kept so the viewer can name the model."""
+
+    nodeid: str
+    outcome: str
+    message: str | None = None
+    model: str | None = None
+    precision: str | None = None
+
+
+@dataclass
 class RunRecord:
     run_id: str
     source_format: str                  # 'old' | 'new'
@@ -85,6 +96,7 @@ class RunRecord:
     genai_version: str | None = None
     genai_commit: str | None = None
     tok_commit: str | None = None
+    model_cache: str | None = None
     short_run: bool = False
     total_tests: int | None = None
     passed_tests: int | None = None
@@ -92,6 +104,7 @@ class RunRecord:
     error_tests: int | None = None
     skipped_tests: int | None = None
     skipped_cases: int | None = None
+    expected_cases: int | None = None
     duration_sec: float | None = None
     source_path: str | None = None
     build_url: str | None = None
@@ -100,3 +113,4 @@ class RunRecord:
     devices: list[DeviceRecord] = field(default_factory=list)
     perf: list[PerfRow] = field(default_factory=list)
     monitor: list[MonitorRow] = field(default_factory=list)
+    issues: list[IssueRow] = field(default_factory=list)

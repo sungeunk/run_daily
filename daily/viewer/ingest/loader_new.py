@@ -30,7 +30,7 @@ from typing import Iterable
 
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
-from .record import MonitorRow, PerfRow, RunRecord
+from .record import IssueRow, MonitorRow, PerfRow, RunRecord
 
 log = logging.getLogger(__name__)
 
@@ -176,13 +176,39 @@ def _int_or_none(value) -> int | None:
     return None if num is None else int(num)
 
 
-def _skipped_cases(summary: dict) -> int:
-    """Benchmark cases a run never attempted because its test was skipped."""
+def _cases(summary: dict, outcomes: set[str] | None = None) -> int:
+    """Benchmark cases the run's tests were meant to produce.
+
+    A pytest test can carry several cases (one LLM test covers 2 prompts x
+    1st/2nd token), so ``expected_series`` is summed rather than counted.
+    """
     return sum(
         int((test.get("metrics") or {}).get("expected_series") or 0)
         for test in summary.get("tests", []) or []
-        if test.get("outcome") == "skipped"
+        if outcomes is None or test.get("outcome") in outcomes
     )
+
+
+def _skipped_cases(summary: dict) -> int:
+    """Benchmark cases a run never attempted because its test was skipped."""
+    return _cases(summary, {"skipped"})
+
+
+_MODEL_CACHE_RE = re.compile(r"WW\d+[^\\/'\"\s]*")
+
+
+def _model_cache(summary: dict) -> str | None:
+    """Model cache directory the run benchmarked against, e.g.
+    ``WW35_llm-optimum_2026.4.0-22930-RC1``, taken from a test command line."""
+    for test in summary.get("tests", []) or []:
+        cmd = (test.get("metrics") or {}).get("cmd")
+        if isinstance(cmd, list):
+            cmd = " ".join(str(c) for c in cmd)
+        if not cmd:
+            continue
+        if match := _MODEL_CACHE_RE.search(str(cmd)):
+            return match.group(0)
+    return None
 
 
 def _stat(machine: dict, field: str, key: str) -> float | None:
@@ -294,6 +320,7 @@ def load_summary(path: Path) -> RunRecord:
         genai_version=meta.get("genai_version") or None,
         genai_commit=meta.get("genai_commit") or None,
         tok_commit=meta.get("tok_commit") or None,
+        model_cache=_model_cache(summary),
         short_run=bool(meta.get("short_run", False)),
         total_tests=_int_or_none(totals.get("total")),
         passed_tests=_int_or_none(totals.get("passed")),
@@ -301,6 +328,7 @@ def load_summary(path: Path) -> RunRecord:
         error_tests=_int_or_none(totals.get("error")),
         skipped_tests=_int_or_none(totals.get("skipped")),
         skipped_cases=_skipped_cases(summary),
+        expected_cases=_cases(summary),
         duration_sec=_float_or_none(summary.get("duration_sec")),
         build_url=(meta.get("build_url") or None),
         source_path=str(path),
@@ -315,7 +343,16 @@ def load_summary(path: Path) -> RunRecord:
         # overloaded machine is exactly the case worth seeing.
         if (monitor_row := _monitor_row(t, metrics)) is not None:
             rec.monitor.append(monitor_row)
-        if t.get("outcome") != "passed":
+        outcome = t.get("outcome")
+        if outcome in ("failed", "error"):
+            rec.issues.append(IssueRow(
+                nodeid=t.get("nodeid", ""),
+                outcome=outcome,
+                message=(t.get("failure") or None),
+                model=metrics.get("model"),
+                precision=metrics.get("precision"),
+            ))
+        if outcome != "passed":
             continue
         handler = _TYPE_HANDLERS.get(metrics.get("test_type"))
         if handler is None:

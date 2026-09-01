@@ -221,13 +221,18 @@ def list_run_kinds(db_path: Path, machine: str | None = None) -> list[str]:
 
 def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
                 run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
-                include_short_run: bool = True,
+                min_success_series: int = 0,
                 before_ts=None) -> pd.DataFrame:
-    """Return the newest ``limit`` runs matching the filters, oldest first."""
+    """Return the newest ``limit`` runs matching the filters, oldest first.
+
+    Runs with ``min_success_series`` or fewer successful series are dropped:
+    every cohort view reduces its metrics to the series *all* runs measured,
+    so one partial run (``-k`` selection, an aborted launch) would collapse
+    the comparison for the whole cohort.
+    """
     has_kind = _has_column(db_path, "runs", "run_kind")
     clause, params = _run_kind_clause(run_kinds if has_kind else None)
     kind_select = ("COALESCE(run_kind, 'daily')" if has_kind else "'daily'")
-    short_clause = "" if include_short_run else " AND COALESCE(r.short_run, FALSE) = FALSE"
     excl_predicate = _exclusion_predicate(db_path)
     excl_clause = f" AND {excl_predicate}" if excl_predicate else ""
     ts_clause = ""
@@ -242,17 +247,20 @@ def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
                    strftime(ts, '%Y%m%d_%H%M') AS stamp,
                    ww, ov_version, ov_build, ov_sha,
                    purpose, {kind_select} AS run_kind,
-                   description, short_run, source_format,
+                   description, source_format,
                    source_path, rawlog_path
             FROM (
                 SELECT r.*
                 FROM runs r
-                WHERE r.machine = ?{clause}{short_clause}{excl_clause}{ts_clause}
+                WHERE r.machine = ?{clause}{excl_clause}{ts_clause}
+                  AND (SELECT count(*) FROM perf p
+                        WHERE p.run_id = r.run_id) > ?
                 ORDER BY r.ts DESC
                 LIMIT ?
             )
             ORDER BY ts
-        """, [machine, *params, *ts_params, int(limit)]).fetchdf()
+        """, [machine, *params, *ts_params,
+              int(min_success_series), int(limit)]).fetchdf()
 
 
 def list_models(db_path: Path, machine: str | None = None,
@@ -325,7 +333,6 @@ def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
                    ov_sha,
                    purpose,
                    description,
-                   short_run,
                    source_format,
                    report_file,
                      source_path,
@@ -1087,7 +1094,7 @@ def series_trend(db_path: Path, machine: str, *, recent_runs_n: int = 3,
                  run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
                  models: Sequence[str] | None = None,
                  exec_modes: Sequence[str] | None = None,
-                 include_short_run: bool = True,
+                 min_success_series: int = 0,
                  min_history_points: int = 3) -> pd.DataFrame:
     """Per-series comparison of the newest runs against the runs before them.
 
@@ -1099,7 +1106,7 @@ def series_trend(db_path: Path, machine: str, *, recent_runs_n: int = 3,
     cohort = recent_runs(db_path, machine,
                          limit=recent_runs_n + history_runs_n,
                          run_kinds=run_kinds,
-                         include_short_run=include_short_run)
+                         min_success_series=min_success_series)
     if cohort.empty:
         return pd.DataFrame()
 
@@ -1163,10 +1170,10 @@ def series_history_for_runs(db_path: Path, machine: str, *,
                             in_token: int, out_token: int, exec_mode: str,
                             runs_n: int = 20,
                             run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
-                            include_short_run: bool = True) -> pd.DataFrame:
+                            min_success_series: int = 0) -> pd.DataFrame:
     """Value history for one series over the newest ``runs_n`` runs."""
     cohort = recent_runs(db_path, machine, limit=runs_n, run_kinds=run_kinds,
-                         include_short_run=include_short_run)
+                         min_success_series=min_success_series)
     if cohort.empty:
         return pd.DataFrame()
     run_ids = cohort["run_id"].tolist()
@@ -1237,7 +1244,7 @@ def _metric_rows(perf: pd.DataFrame, metric: str) -> pd.DataFrame:
 def geomean_matrix(db_path: Path, machines: Sequence[str], *,
                    limit: int = 10,
                    run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
-                   include_short_run: bool = False,
+                   min_success_series: int = 0,
                    models: Sequence[str] | None = None) -> pd.DataFrame:
     """Per-machine, per-metric geomean trend, each over that machine's cohort.
 
@@ -1258,7 +1265,7 @@ def geomean_matrix(db_path: Path, machines: Sequence[str], *,
     for machine in machines:
         cohort = recent_runs(db_path, machine, limit=limit,
                              run_kinds=run_kinds,
-                             include_short_run=include_short_run)
+                             min_success_series=min_success_series)
         if cohort.empty:
             continue
 
@@ -1428,7 +1435,7 @@ def compare_runs_with_trend(db_path: Path, machine: str,
                             history_runs_n: int = 10,
                             run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
                             models: Sequence[str] | None = None,
-                            include_short_run: bool = True,
+                            min_success_series: int = 0,
                             min_history_points: int = 3) -> pd.DataFrame:
     """Compare two runs with each run's own preceding history as context.
 
@@ -1454,7 +1461,7 @@ def compare_runs_with_trend(db_path: Path, machine: str,
         # +1 then drop: `recent_runs` is inclusive of the anchor run itself.
         cohort = recent_runs(db_path, machine, limit=history_runs_n + 1,
                              run_kinds=run_kinds,
-                             include_short_run=include_short_run,
+                             min_success_series=min_success_series,
                              before_ts=row[0])
         if cohort.empty:
             return pd.DataFrame()
@@ -1584,10 +1591,13 @@ def short_device_name(full_name: object) -> str:
 def machines_overview(db_path: Path,
                       machines: Sequence[str] | None = None, *,
                       run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
-                      include_short_run: bool = False,
                       history_runs: int = 10,
                       expected_window: int = 30) -> pd.DataFrame:
     """Latest run per machine with its health counters and perf delta.
+
+    ``latest_failed``, ``last_success_stamp`` and ``last_fail_stamp`` all come
+    from one ``is_fail`` definition, so the status icon and the two stamps
+    cannot disagree.
 
     The perf delta is a geomean over latency-unit series only: mixing ms with
     FPS in one geomean would make the direction meaningless. It is further
@@ -1605,8 +1615,6 @@ def machines_overview(db_path: Path,
         excl_predicate = _exclusion_predicate(db_path, alias)
         if excl_predicate:
             parts.append(excl_predicate)
-        if not include_short_run:
-            parts.append(f"COALESCE({alias}.short_run, FALSE) = FALSE")
         if machines:
             parts.append("{}.machine IN ({})".format(
                 alias, ",".join(["?"] * len(machines))))
@@ -1615,8 +1623,6 @@ def machines_overview(db_path: Path,
 
     filter_sql, params = _filters("r")
     where = ("WHERE " + filter_sql) if filter_sql else ""
-    sub_sql, sub_params = _filters("r2")
-    sub_where = (" AND " + sub_sql) if sub_sql else ""
 
     tables = _tables_for_db(db_path)
     if "analysis_results" in tables:
@@ -1641,6 +1647,11 @@ def machines_overview(db_path: Path,
     else:
         issue_col = ", CAST(NULL AS INTEGER) AS failing_tests"
 
+    # summary.json states how many cases each test should have produced;
+    # older DBs predate the column and rely on the historical estimate alone.
+    recorded_expr = ("COALESCE(k.expected_cases, 0)"
+                     if _has_column(db_path, "runs", "expected_cases") else "0")
+
     with _read_only(db_path) as con:
         latest = con.execute(f"""
             WITH ranked AS (
@@ -1650,54 +1661,67 @@ def machines_overview(db_path: Path,
                 FROM runs r
                 {where}
             ),
-            l AS (SELECT * FROM ranked WHERE rn = 1)
+            counted AS (
+                SELECT k.*,
+                       (SELECT count(*) FROM perf p WHERE p.run_id = k.run_id)
+                           AS success_cases,
+                       {recorded_expr} AS recorded_cases
+                FROM ranked k
+            ),
+            -- What a full run on this machine looks like: the largest case
+            -- count it has either declared or actually produced recently.
+            expected AS (
+                SELECT machine,
+                       max(GREATEST(recorded_cases,
+                                    success_cases + COALESCE(skipped_cases, 0)))
+                           AS machine_expected_cases
+                FROM counted WHERE rn <= ? GROUP BY machine
+            ),
+            -- One definition of failure for the status icon and both stamps,
+            -- so they can never tell different stories. A run that executed
+            -- nothing (pytest aborted during collection) reports zero of
+            -- everything, and a run that produced fewer cases than a full run
+            -- on this machine is incomplete rather than clean.
+            scored AS (
+                SELECT c.*, e.machine_expected_cases,
+                       (COALESCE(c.failed_tests, 0)
+                          + COALESCE(c.error_tests, 0) > 0
+                        OR COALESCE(c.total_tests, -1) = 0
+                        OR c.success_cases + COALESCE(c.skipped_cases, 0)
+                           < e.machine_expected_cases) AS is_fail
+                FROM counted c JOIN expected e USING (machine)
+            ),
+            l AS (SELECT * FROM scored WHERE rn = 1)
             SELECT l.machine, l.run_id, l.ts,
                    strftime(l.ts, '%Y%m%d_%H%M') AS stamp,
                    l.ww, l.ov_version, l.purpose, l.report_file,
                    l.total_tests, l.passed_tests, l.failed_tests,
                    l.error_tests, l.skipped_tests, l.skipped_cases,
+                   l.success_cases,
+                   l.machine_expected_cases AS expected_cases,
+                   l.is_fail AS latest_failed,
                    l.duration_sec,
-                   (SELECT count(*) FROM perf p WHERE p.run_id = l.run_id)
-                       AS success_cases,
                    (SELECT sd.device FROM system_devices sd
                      WHERE sd.run_id = l.run_id
                      ORDER BY sd.device_index LIMIT 1) AS gpu_name,
-                   -- A run counts as clean only when pytest reported no
-                   -- failure and no error; skips are expected on some rigs.
-                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM runs r2
-                     WHERE r2.machine = l.machine{sub_where}
-                       AND COALESCE(r2.total_tests, 0) > 0
-                       AND COALESCE(r2.failed_tests, 0)
-                         + COALESCE(r2.error_tests, 0) = 0
+                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM scored r2
+                     WHERE r2.machine = l.machine AND NOT r2.is_fail
                      ORDER BY r2.ts DESC LIMIT 1) AS last_success_stamp,
-                   (SELECT r2.build_url FROM runs r2
-                     WHERE r2.machine = l.machine{sub_where}
-                       AND COALESCE(r2.total_tests, 0) > 0
-                       AND COALESCE(r2.failed_tests, 0)
-                         + COALESCE(r2.error_tests, 0) = 0
+                   (SELECT r2.build_url FROM scored r2
+                     WHERE r2.machine = l.machine AND NOT r2.is_fail
                      ORDER BY r2.ts DESC LIMIT 1) AS last_success_build_url,
-                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM runs r2
-                     WHERE r2.machine = l.machine{sub_where}
-                       AND (COALESCE(r2.failed_tests, 0)
-                              + COALESCE(r2.error_tests, 0) > 0
-                            -- A run that started but executed nothing (pytest
-                            -- aborted during collection) reports zero of
-                            -- everything, yet it is a failure. NULL means the
-                            -- run predates these counters, so leave it alone.
-                            OR r2.total_tests = 0)
+                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM scored r2
+                     WHERE r2.machine = l.machine AND r2.is_fail
                      ORDER BY r2.ts DESC LIMIT 1) AS last_fail_stamp,
-                   (SELECT r2.build_url FROM runs r2
-                     WHERE r2.machine = l.machine{sub_where}
-                       AND COALESCE(r2.failed_tests, 0)
-                         + COALESCE(r2.error_tests, 0) > 0
+                   (SELECT r2.build_url FROM scored r2
+                     WHERE r2.machine = l.machine AND r2.is_fail
                      ORDER BY r2.ts DESC LIMIT 1) AS last_fail_build_url
                    {analysis_cols}
                    {issue_col}
             FROM l
             {analysis_join}
             ORDER BY l.machine
-        """, [*params, *sub_params, *sub_params,
-              *sub_params, *sub_params]).fetchdf()
+        """, [*params, int(expected_window)]).fetchdf()
 
         geo = con.execute(f"""            WITH ranked AS (
                 SELECT r.machine, r.run_id,
@@ -1745,33 +1769,103 @@ def machines_overview(db_path: Path,
     if latest.empty:
         return latest
 
-    with _read_only(db_path) as con:
-        # A run that broke early produces almost no series, so the machine's
-        # own best recent run is the only available yardstick for how many
-        # cases it should have produced.
-        expected = con.execute(f"""
-            WITH ranked AS (
-                SELECT r.machine, r.run_id,
-                       ROW_NUMBER() OVER (PARTITION BY r.machine
-                                          ORDER BY r.ts DESC) AS rn
-                FROM runs r
-                {where}
-            ),
-            scoped AS (SELECT * FROM ranked WHERE rn <= ?),
-            per_run AS (
-                SELECT s.machine, s.run_id, count(*) AS cases
-                FROM scoped s JOIN perf p ON p.run_id = s.run_id
-                GROUP BY s.machine, s.run_id
-            )
-            SELECT machine, max(cases) AS expected_cases
-            FROM per_run GROUP BY machine
-        """, [*params, int(expected_window)]).fetchdf()
-
     out = latest.merge(geo, on="machine", how="left")
-    out = out.merge(expected, on="machine", how="left")
     # Latency is lower-is-better, so a rise is a worsening.
     out["perf_pct"] = ((out["latest_geomean"] - out["history_geomean"])
                        / out["history_geomean"])
     out["age_hours"] = ((pd.Timestamp.now() - pd.to_datetime(out["ts"]))
                         .dt.total_seconds() / 3600.0)
     return out.sort_values("machine").reset_index(drop=True)
+
+
+def failing_models_overview(db_path: Path,
+                            machines: Sequence[str] | None = None, *,
+                            run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                            history_runs: int = 10) -> pd.DataFrame:
+    """Models failing in each machine's newest run, with their history.
+
+    ``first_seen`` is the oldest run in the window where the model already
+    failed, so a regression introduced by the newest build is told apart from
+    one that has been failing for days. ``model_cache_changed`` compares the
+    newest run's model cache with the one in use when the model last passed —
+    a cache swap is the other thing that can turn a passing model red.
+    """
+    if "functional_issues" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+
+    parts: list[str] = []
+    params: list = []
+    predicate, kind_args = _run_kind_predicate(
+        run_kinds if _has_column(db_path, "runs", "run_kind") else None, "r")
+    if predicate:
+        parts.append(predicate)
+        params.extend(kind_args)
+    excl_predicate = _exclusion_predicate(db_path, "r")
+    if excl_predicate:
+        parts.append(excl_predicate)
+    if machines:
+        parts.append("r.machine IN ({})".format(",".join(["?"] * len(machines))))
+        params.extend(machines)
+    where = ("WHERE " + " AND ".join(parts)) if parts else ""
+
+    cache_col = ("r.model_cache"
+                 if _has_column(db_path, "runs", "model_cache")
+                 else "CAST(NULL AS TEXT)")
+
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            WITH ranked AS (
+                SELECT r.run_id, r.machine, r.ts,
+                       {cache_col} AS model_cache,
+                       ROW_NUMBER() OVER (PARTITION BY r.machine
+                                          ORDER BY r.ts DESC) AS rn
+                FROM runs r
+                {where}
+            ),
+            scoped AS (SELECT * FROM ranked WHERE rn <= ?),
+            per_machine AS (
+                SELECT machine, count(*) AS window_runs,
+                       any_value(model_cache) FILTER (WHERE rn = 1)
+                           AS model_cache
+                FROM scoped GROUP BY machine
+            ),
+            -- Absence from functional_issues is not proof a model passed: a
+            -- partial run simply never ran it. Perf rows are.
+            passed AS (
+                SELECT DISTINCT s.machine, s.rn, s.ts, s.model_cache, p.model
+                FROM scoped s JOIN perf p ON p.run_id = s.run_id
+            ),
+            last_pass AS (
+                SELECT machine, model,
+                       arg_min(model_cache, rn) AS model_cache,
+                       strftime(arg_min(ts, rn), '%Y%m%d_%H%M') AS stamp
+                FROM passed GROUP BY machine, model
+            ),
+            issues AS (
+                SELECT s.machine, s.rn,
+                       strftime(s.ts, '%Y%m%d_%H%M') AS stamp,
+                       COALESCE(fi.model, fi.nodeid) AS model,
+                       fi.precision, fi.outcome
+                FROM scoped s
+                JOIN functional_issues fi ON fi.run_id = s.run_id
+            )
+            SELECT i.machine, i.model,
+                   any_value(i.precision) AS precision,
+                   any_value(i.outcome)   AS outcome,
+                   bool_or(i.rn > 1)      AS failed_before,
+                   count(DISTINCT i.rn)   AS failed_runs,
+                   any_value(m.window_runs) AS window_runs,
+                   min(i.stamp)           AS first_seen,
+                   any_value(m.model_cache) AS model_cache,
+                   any_value(lp.model_cache) AS last_pass_model_cache,
+                   any_value(lp.stamp)       AS last_pass_stamp,
+                   any_value(lp.model_cache IS NOT NULL
+                             AND lp.model_cache IS DISTINCT FROM
+                                 m.model_cache) AS model_cache_changed
+            FROM issues i
+            JOIN per_machine m USING (machine)
+            LEFT JOIN last_pass lp USING (machine, model)
+            GROUP BY i.machine, i.model
+            HAVING bool_or(i.rn = 1)
+            ORDER BY i.machine, i.model
+        """, [*params, int(history_runs)]).fetchdf()
