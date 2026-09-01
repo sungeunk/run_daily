@@ -82,6 +82,13 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         try:
             con.execute(sql)
         except Exception:
+            # A failed statement leaves DuckDB's transaction in an aborted
+            # state; without the rollback every later statement (including
+            # schema.sql) fails with "Current transaction is aborted".
+            try:
+                con.rollback()
+            except Exception:
+                pass
             # Keep schema setup best-effort for mixed-version deployments.
             log.debug("schema migration skipped: %s", sql)
 
