@@ -479,7 +479,7 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help='Target OpenVINO device (override: $DAILY_DEVICE)')
     p.add_argument('--model-dir', default=_default_model_dir(),
                    help='Root directory for models')
-    p.add_argument('--model-date', default='WW24_llm-optimum_2026.3.0-22130')
+    p.add_argument('--model-date', default='WW35_llm-optimum_2026.4.0-22930-RC1')
     p.add_argument('--cache-dir', default=str(REPO_ROOT / 'llm-cache'))
     p.add_argument('--output-dir', default=str(REPO_ROOT / 'daily_output'))
     p.add_argument('--daily-timeout', type=int, default=1800)

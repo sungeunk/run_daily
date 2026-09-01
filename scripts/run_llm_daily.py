@@ -213,7 +213,7 @@ def main():
     parser.add_argument('-o', '--output_dir', help='output directory to store log files', type=Path, default=convert_path(f'{cfg.PWD}/output'))
 
     # config for test
-    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW24_llm-optimum_2026.3.0-22130')
+    parser.add_argument('--model_cache', help='model cache name. It can be found under --model_dir.', type=str, default='WW35_llm-optimum_2026.4.0-22930-RC1')
     parser.add_argument('--prompt_permutation', help='enable prompt_permutation for llm benchmark', action='store_true')
     parser.add_argument('--continuous_batch', help='nothing', action='store_true')
     parser.add_argument('--test', help='run tests with short config', action='store_true')
