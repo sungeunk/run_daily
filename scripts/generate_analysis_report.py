@@ -20,7 +20,7 @@ Usage::
     python scripts/generate_analysis_report.py --stamp 20260530_0315
 
     # explicit DB path
-    python scripts/generate_analysis_report.py --db daily/viewer/bench.duckdb
+    python scripts/generate_analysis_report.py --db daily_output/<machine>/bench.duckdb
 
     # ingest from custom root and write to custom output directory
     python scripts/generate_analysis_report.py \\
@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import re
 import sys
 from datetime import datetime
@@ -58,7 +59,8 @@ from types import SimpleNamespace
 # ---------------------------------------------------------------------------
 
 DEFAULT_ROOT = Path('/var/www/html/daily2/dg2alderlake')
-DEFAULT_DB = Path(__file__).resolve().parent.parent / 'daily' / 'viewer' / 'bench.duckdb'
+DEFAULT_DB = (Path(__file__).resolve().parent.parent / 'daily_output'
+              / platform.node() / 'bench.duckdb')
 DAILY_DIR = Path(__file__).resolve().parent.parent / 'daily'
 
 STAMP_RE = re.compile(r'daily\.(\d{8}_\d{4})\.summary\.json$')

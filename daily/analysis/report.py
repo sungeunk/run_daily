@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import base64
 import html
+import io
 from pathlib import Path
 
 from .types import AnalysisResult
+
+
+# Longest edge of the inline preview. Outlook blocks remote images, so the
+# thumbnail must be embedded while the full-size file stays on the relay.
+THUMBNAIL_PX = 240
 
 
 def render_analysis_summary(result: AnalysisResult) -> str:
@@ -159,12 +165,65 @@ def _series_counts(summary: dict | None) -> tuple[int, int, int]:
     return skipped, success, failed
 
 
-def _render_image_gallery(summary: dict | None) -> str:
-    """Base64-embed each image_generation test's saved PNG so it survives
-    the mail/upload pipeline without a separate file transfer."""
+def _thumbnail_data_uri(path: Path) -> str | None:
+    """Return a downscaled JPEG data URI, or None when it can't be produced."""
+    try:
+        from PIL import Image  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        with Image.open(path) as image:
+            preview = image.convert("RGB")
+            preview.thumbnail((THUMBNAIL_PX, THUMBNAIL_PX))
+            buffer = io.BytesIO()
+            preview.save(buffer, format="JPEG", quality=80)
+    except (OSError, ValueError):
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _image_cell(path: Path | None, url: str | None, caption: str) -> str:
+    """One thumbnail with its caption, or a placeholder when nothing is available."""
+    src = _thumbnail_data_uri(path) if path else None
+    src = src or url
+    if not src:
+        return (
+            "<div style='display:inline-block;text-align:center;margin:0 8px'>"
+            "<div style='width:150px;height:150px;line-height:150px;border:1px dashed #d9dee7;"
+            "border-radius:8px;color:#9ca3af;font-size:12px'>none</div>"
+            f"<div style='font-size:11px;color:#6b7280;margin-top:4px'>{html.escape(caption)}</div>"
+            "</div>"
+        )
+    img = (
+        f"<img src='{html.escape(src, quote=True)}' "
+        "style='max-width:150px;border:1px solid #d9dee7;border-radius:8px' />"
+    )
+    if url:
+        img = (f"<a href='{html.escape(url, quote=True)}' "
+               f"title='Open full-size image'>{img}</a>")
+    return (
+        "<div style='display:inline-block;text-align:center;margin:0 8px'>"
+        f"{img}"
+        f"<div style='font-size:11px;color:#6b7280;margin-top:4px'>{html.escape(caption)}</div>"
+        "</div>"
+    )
+
+
+def _render_image_gallery(summary: dict | None,
+                          image_assets: dict[str, dict] | None = None,
+                          baseline_stamp: str | None = None) -> str:
+    """Render each generated image next to the baseline run's image for the
+    same slot, as inline thumbnails linked to their full-size copies.
+
+    ``image_assets`` maps a test's ``image_path`` to ``url`` (published
+    full-size copy), ``baseline_path`` (local baseline image) and
+    ``baseline_url``.
+    """
     if not summary:
         return ""
 
+    image_assets = image_assets or {}
+    published = any(a.get("url") for a in image_assets.values())
     cards: list[str] = []
     for test in summary.get("tests", []):
         m = test.get("metrics", {})
@@ -174,45 +233,117 @@ def _render_image_gallery(summary: dict | None) -> str:
             image_path = d.get("image_path")
             if not image_path:
                 continue
-            path = Path(image_path)
-            if not path.is_file():
-                continue
-            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            asset = image_assets.get(image_path) or {}
+            current = _image_cell(Path(image_path), asset.get("url"), "Current")
+            baseline = _image_cell(asset.get("baseline_path"),
+                                   asset.get("baseline_url"),
+                                   f"Baseline {baseline_stamp}" if baseline_stamp else "Baseline")
             label = f"{m.get('model', '')} / {m.get('precision', '')}"
             if d.get("input_token_size") is not None:
                 label += f" (in={d['input_token_size']})"
             cards.append(
-                "<div style='display:inline-block;text-align:center;margin:0 14px 14px 0'>"
-                f"<img src='data:image/png;base64,{encoded}' "
-                "style='max-width:220px;border:1px solid #d9dee7;border-radius:8px' />"
-                f"<div style='font-size:12px;color:#6b7280;margin-top:4px'>{html.escape(label)}</div>"
+                "<div style='display:inline-block;vertical-align:top;text-align:center;"
+                "border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin:0 14px 14px 0'>"
+                f"<div style='font-size:12px;font-weight:700;margin-bottom:6px'>{html.escape(label)}</div>"
+                f"{current}{baseline}"
                 "</div>"
             )
 
     if not cards:
         return ""
 
+    hint = ("Each pair shows this run's image next to the baseline run's image for the "
+            "same model/precision slot.")
+    if published:
+        hint += " Click a thumbnail to open the full-size file."
     return f"""
     <div class="card" style="margin-bottom:14px">
         <h2>Generated Images</h2>
         <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
-            Inline preview of images produced by image_generation tests in this run.
+            {hint}
         </div>
         <div>{"".join(cards)}</div>
     </div>
     """
 
 
-def render_analysis_html(result: AnalysisResult, summary: dict | None = None) -> str:
+def _render_run_summary(result: AnalysisResult, summary: dict | None,
+                        baseline_meta: dict | None) -> tuple[str, int, bool]:
+    """Return ``(rows_html, changed_count, has_baseline)`` for the Run Summary
+    card, flagging every value that differs from the baseline run."""
+    current = result.current_run
+    cur_dedicated, cur_shared = _gpu_memory_text(summary)
+    base_dedicated, base_shared = _gpu_memory_text(
+        {"meta": baseline_meta} if baseline_meta else None)
+
+    def _base(key: str, fmt=None) -> str | None:
+        value = (baseline_meta or {}).get(key)
+        if value in (None, ""):
+            return None
+        return fmt(value) if fmt else str(value)
+
+    fields: list[tuple[str, str | None, str | None]] = [
+        ("Current OV", current.ov_version if current else None, _base("ov_version")),
+        ("Current purpose", current.purpose if current else None, _base("purpose")),
+        ("Machine", current.machine_name if current else None, _base("machine")),
+        ("GPU driver", current.gpu_driver_version if current else None,
+         _base("gpu_driver_version")),
+        ("GPU info", current.gpu_info if current else None, _base("gpu_info")),
+    ]
+    if cur_dedicated is not None:
+        fields.append(("GPU dedicated memory", cur_dedicated, base_dedicated))
+    fields += [
+        ("GPU shared memory", cur_shared, base_shared),
+        ("Host info", current.host_info if current else None, _base("host_info")),
+        ("Memory size", current.memory_size if current else None,
+         _base("host_memory_size_gb", lambda v: f"{float(v):.1f} GB")),
+        ("Memory speed", current.memory_speed if current else None,
+         _base("host_memory_speed_mhz", lambda v: f"{float(v):.0f} MHz")),
+    ]
+
+    has_baseline = bool(baseline_meta)
+    rows: list[str] = []
+    changed = 0
+    for label, cur, base in fields:
+        if cur is None and base is None:
+            continue
+        cur_text = html.escape(cur or "n/a")
+        if not has_baseline:
+            rows.append(f'<tr><td class="k">{label}</td><td>{cur_text}</td></tr>')
+            continue
+        differs = base is not None and base != cur
+        changed += differs
+        if base is None:
+            base_cell = "<span class='muted'>n/a</span>"
+        elif differs:
+            base_cell = f"<span style='color:#a05a00'>{html.escape(base)}</span>"
+        else:
+            base_cell = "<span class='muted'>same</span>"
+        cur_style = " style='color:#a05a00;font-weight:700'" if differs else ""
+        rows.append(
+            f'<tr><td class="k">{label}</td>'
+            f'<td{cur_style}>{cur_text}</td>'
+            f'<td>{base_cell}</td></tr>'
+        )
+    return "\n".join(rows), changed, has_baseline
+
+
+def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
+                         image_assets: dict[str, dict] | None = None,
+                         baseline_meta: dict | None = None) -> str:
     """Return a standalone HTML report for analysis-focused review.
 
     ``summary`` is the normalised daily summary dict (same shape as
     ``daily.*.summary.json``); when given, generated images from
-    image_generation tests are embedded as a gallery card.
+    image_generation tests are shown as thumbnails. ``image_assets`` carries
+    the published URL and the matching baseline image for each of them.
+    ``baseline_meta`` is the baseline run's ``meta`` block, used to flag
+    environment differences in the Run Summary card.
     """
     from datetime import datetime as _dt  # noqa: PLC0415
 
-    image_gallery = _render_image_gallery(summary)
+    image_gallery = _render_image_gallery(summary, image_assets,
+                                          result.baseline.stamp)
 
     improved_rows = sorted(
         [r for r in result.rows if r.verdict == "improved" and r.improvement_pct is not None],
@@ -230,12 +361,34 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
     # skipped tests would have produced.
     series_skipped, series_success, series_failed = _series_counts(summary)
     series_total = series_skipped + series_success + series_failed
-    gpu_dedicated_text, gpu_shared_text = _gpu_memory_text(summary)
-    gpu_dedicated_row = (
-        "" if gpu_dedicated_text is None else
-        f'<tr><td class="k">GPU dedicated memory</td>'
-        f'<td>{html.escape(gpu_dedicated_text)}</td></tr>'
-    )
+
+    baseline_text = "not found"
+    if result.baseline.status == "found":
+        baseline_text = f"{result.baseline.stamp or ''} / {result.baseline.ov_version or 'unknown'}"
+
+    summary_rows, changed_fields, has_baseline_meta = _render_run_summary(
+        result, summary, baseline_meta)
+    # Without the baseline column there is nowhere else the baseline is named.
+    summary_head = ""
+    summary_note = ""
+    baseline_row = f'<tr><td class="k">Baseline</td><td>{html.escape(baseline_text)}</td></tr>'
+    if has_baseline_meta:
+        baseline_row = ""
+        summary_head = (
+            "<tr>"
+            "<th style='background:transparent;font-size:11px;color:#6b7280;padding:0 12px 6px 0'>Field</th>"
+            "<th style='background:transparent;font-size:11px;color:#6b7280;padding:0 0 6px'>Current</th>"
+            "<th style='background:transparent;font-size:11px;color:#6b7280;padding:0 0 6px'>"
+            f"Baseline {html.escape(result.baseline.stamp or '')}</th>"
+            "</tr>"
+        )
+        summary_note = (
+            "<div style='font-size:12px;color:#a05a00;margin-bottom:8px'>"
+            f"{changed_fields} field(s) differ from the baseline run.</div>"
+            if changed_fields else
+            "<div style='font-size:12px;color:#18794e;margin-bottom:8px'>"
+            "Environment matches the baseline run.</div>"
+        )
 
     badge = {
         "green":  ("GREEN",  "#18794e"),
@@ -321,15 +474,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
                 "</tr>"
             )
         failed_rows = "\n".join(rows)
-
-    baseline_text = "not found"
-    if result.baseline.status == "found":
-        baseline_text = f"{result.baseline.stamp or ''} / {result.baseline.ov_version or 'unknown'}"
-
-    current = result.current_run
-
-    def _safe_text(value: str | None) -> str:
-        return html.escape(value) if value else "n/a"
 
     # Column header definitions — (label, tooltip)
     COL_DEFS = [
@@ -444,18 +588,11 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
     <!-- Summary -->
     <div class="card" style="margin-bottom:14px">
         <h2>Run Summary</h2>
+        {summary_note}
         <table role="presentation" class="kvs-table">
-            <tr><td class="k">Current OV</td><td>{_safe_text(current.ov_version if current else None)}</td></tr>
-            <tr><td class="k">Current purpose</td><td>{_safe_text(current.purpose if current else None)}</td></tr>
-            <tr><td class="k">Machine</td><td>{_safe_text(current.machine_name if current else None)}</td></tr>
-            <tr><td class="k">GPU driver</td><td>{_safe_text(current.gpu_driver_version if current else None)}</td></tr>
-            <tr><td class="k">GPU info</td><td>{_safe_text(current.gpu_info if current else None)}</td></tr>
-            {gpu_dedicated_row}
-            <tr><td class="k">GPU shared memory</td><td>{html.escape(gpu_shared_text)}</td></tr>
-            <tr><td class="k">Host info</td><td>{_safe_text(current.host_info if current else None)}</td></tr>
-            <tr><td class="k">Memory size</td><td>{_safe_text(current.memory_size if current else None)}</td></tr>
-            <tr><td class="k">Memory speed</td><td>{_safe_text(current.memory_speed if current else None)}</td></tr>
-            <tr><td class="k">Baseline</td><td>{html.escape(baseline_text)}</td></tr>
+            {summary_head}
+            {summary_rows}
+            {baseline_row}
         </table>
     </div>
 
@@ -547,7 +684,11 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
 
 
 def write_analysis_html(html_path: Path, result: AnalysisResult,
-                        summary: dict | None = None) -> Path:
+                        summary: dict | None = None,
+                        image_assets: dict[str, dict] | None = None,
+                        baseline_meta: dict | None = None) -> Path:
         """Write the analysis-focused HTML report."""
-        html_path.write_text(render_analysis_html(result, summary), encoding="utf-8")
+        html_path.write_text(
+            render_analysis_html(result, summary, image_assets, baseline_meta),
+            encoding="utf-8")
         return html_path

@@ -248,7 +248,7 @@ else                                -> no match
 
 ```bash
 # 전체 ingest
-cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db viewer/bench.duckdb
+cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db ../daily_output/<machine>/bench.duckdb
 
 # 단일 파일 ingest (new format)
 cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
@@ -263,7 +263,7 @@ cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html
 conda run -n daily python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
 
 # Viewer 실행
-cd daily && conda run -n daily streamlit run viewer/app.py -- --db viewer/bench.duckdb
+cd daily && conda run -n daily streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
 
 # env var로 다른 DB 지정
 DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py

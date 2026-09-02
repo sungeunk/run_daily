@@ -104,7 +104,7 @@ daily/
 ### 입력
 
 1. 현재 run의 `summary.json`
-2. 누적 DuckDB 경로, 기본값 `daily/viewer/bench.duckdb`
+2. 누적 DuckDB 경로, 기본값 `daily_output/<machine>/bench.duckdb`
 3. 분석 설정
    - pct threshold
    - z threshold

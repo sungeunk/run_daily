@@ -23,7 +23,7 @@ viewer/
 
 ```bash
 # Auto-detect under a tree (handles both formats)
-python -m viewer.ingest.cli --root /var/www/html/daily --db viewer/bench.duckdb
+python -m viewer.ingest.cli --root /var/www/html/daily --db ../../daily_output/<machine>/bench.duckdb
 
 # Single file
 python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.20250722_0136.2025.3.0-19553-f705706fbce.pickle
@@ -43,7 +43,7 @@ leave the table alone.
 ## Viewer
 
 ```bash
-streamlit run viewer/app.py -- --db viewer/bench.duckdb
+streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
 # or set DAILY_DB=.../bench.duckdb in the env
 ```
 

@@ -3,7 +3,7 @@
 
 Run with::
 
-    streamlit run daily/viewer/app.py -- --db daily/viewer/bench.duckdb
+    streamlit run daily/viewer/app.py -- --db daily_output/<machine>/bench.duckdb
 
 The DB is built by ``python -m viewer.ingest.cli``. The sidebar can refresh
 the configured daily DB by running the local ingestion script.
@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +52,7 @@ from viewer import queries as q  # noqa: E402
 # Config / connection
 # ---------------------------------------------------------------------------
 
-DEFAULT_DB = _HERE / "bench.duckdb"
+DEFAULT_DB = _HERE.parents[1] / "daily_output" / platform.node() / "bench.duckdb"
 INGEST_SCRIPT = Path("/var/www/html/daily2/ingest_db.sh")
 
 

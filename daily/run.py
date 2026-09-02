@@ -25,6 +25,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import ctypes
@@ -34,7 +35,13 @@ from pathlib import Path
 
 DAILY_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DAILY_DIR.parent
-VIEWER_DB = DAILY_DIR / 'viewer' / 'bench.duckdb'
+sys.path.insert(0, str(DAILY_DIR))
+
+from common.paths import machine_dir, run_dir  # noqa: E402
+
+# Pre-dated location of the viewer DB, relocated under the output root on
+# first use so a machine's history travels with its artefacts.
+LEGACY_VIEWER_DB = DAILY_DIR / 'viewer' / 'bench.duckdb'
 
 
 def _default_model_dir() -> str:
@@ -506,34 +513,105 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
-def _run_analysis(html_report: Path, summary_json: Path) -> Path | None:
-    """Best-effort: ingest output_dir artefacts, then run analysis and write the HTML report."""
-    output_dir = summary_json.parent
+def _image_assets(staged_images: dict[str, Path], root: Path,
+                  baseline_stamp: str | None, *, publish: bool) -> dict[str, dict]:
+    """Pair each staged image with its published URL and the baseline run's
+    image for the same slot."""
+    from common.delivery import (backup_server_url, image_slot_name,
+                                 staged_images_for)
+
+    baseline_slots = staged_images_for(root, baseline_stamp) if baseline_stamp else {}
+    assets: dict[str, dict] = {}
+    for source, staged in staged_images.items():
+        baseline = baseline_slots.get(image_slot_name(staged.name))
+        assets[source] = {
+            'url': backup_server_url(None, staged.name) if publish else None,
+            'baseline_path': baseline,
+            'baseline_url': (backup_server_url(None, baseline.name)
+                             if baseline and publish else None),
+        }
+    return assets
+
+
+def _viewer_db(root: Path) -> Path:
+    """Per-machine viewer DB, moving the legacy in-package one on first use."""
+    db = machine_dir(root) / 'bench.duckdb'
+    if not db.exists() and LEGACY_VIEWER_DB.exists():
+        db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(LEGACY_VIEWER_DB), str(db))
+        print(f'[run.py] viewer db moved: {LEGACY_VIEWER_DB} -> {db}')
+    return db
+
+
+def _baseline_meta(root: Path, stamp: str | None, db_path: Path) -> dict:
+    """``meta``-shaped view of the baseline run.
+
+    Prefers the baseline's own summary.json anywhere in the output tree;
+    falls back to the viewer DB so a rotated-away artefact still yields an
+    environment comparison.
+    """
+    if not stamp:
+        return {}
+    for path in sorted(Path(root).rglob(f'daily.{stamp}.summary.json')):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            break
+        return payload.get('meta') or {}
+    return _baseline_meta_from_db(db_path, stamp)
+
+
+def _baseline_meta_from_db(db_path: Path, stamp: str) -> dict:
+    columns = ('machine', 'purpose', 'ov_version', 'host_info',
+               'host_memory_size_gb', 'host_memory_speed_mhz',
+               'gpu_info', 'gpu_driver_version',
+               'gpu_dedicated_memory_mb', 'gpu_shared_memory_mb')
+    try:
+        import duckdb
+        with duckdb.connect(str(db_path), read_only=True) as con:
+            row = con.execute(
+                f"SELECT {', '.join(columns)} FROM runs "
+                "WHERE strftime(ts, '%Y%m%d_%H%M') = ? ORDER BY ts DESC LIMIT 1",
+                [stamp],
+            ).fetchone()
+    except Exception:  # noqa: BLE001 — the report must not fail on a missing DB
+        return {}
+    return {k: v for k, v in zip(columns, row or ()) if v is not None}
+
+
+def _run_analysis(html_report: Path, summary_json: Path, root: Path,
+                  db_path: Path,
+                  staged_images: dict[str, Path] | None = None,
+                  *, publish: bool = False) -> Path | None:
+    """Best-effort: ingest the output tree, then run analysis and write the HTML report."""
     try:
         from viewer.ingest.cli import discover, ingest_files
         from analysis.engine import analyze_run
         from analysis.report import write_analysis_html
         from analysis.persistence import write_analysis_to_summary
 
-        files = discover(output_dir, fmt='auto')
+        files = discover(root, fmt='auto')
         if files:
-            added, skipped, failures = ingest_files(files, VIEWER_DB)
+            added, skipped, failures = ingest_files(files, db_path)
             if failures:
                 raise RuntimeError(
                     f'ingest failed for {len(failures)} file(s); first error: {failures[0][1]}'
                 )
             print(
                 f'[run.py] ingest: candidates={len(files)} added={added} '
-                f'skipped={skipped} db={VIEWER_DB}'
+                f'skipped={skipped} db={db_path}'
             )
         else:
-            print(f'[run.py] ingest skipped: no artefacts found under {output_dir}')
+            print(f'[run.py] ingest skipped: no artefacts found under {root}')
 
-        result = analyze_run(summary_json, VIEWER_DB)
+        result = analyze_run(summary_json, db_path)
         write_analysis_to_summary(summary_json, result)
 
         summary_data = json.loads(summary_json.read_text(encoding='utf-8'))
-        write_analysis_html(html_report, result, summary_data)
+        image_assets = _image_assets(staged_images or {}, root,
+                                     result.baseline.stamp, publish=publish)
+        write_analysis_html(html_report, result, summary_data, image_assets,
+                            _baseline_meta(root, result.baseline.stamp, db_path))
         print(f'[run.py] analysis html report: {html_report}')
         return html_report
     except Exception as exc:  # noqa: BLE001 — analysis must not fail the run
@@ -541,14 +619,13 @@ def _run_analysis(html_report: Path, summary_json: Path) -> Path | None:
         return None
 
 
-def _convert_monitor_parquet(output_dir: Path, stamp: str, meta: dict,
+def _convert_monitor_parquet(output_dir: Path, root: Path, stamp: str, meta: dict,
                              summary_json: Path, keep_days: float) -> Path | None:
     """Fold this run's monitor JSONL into one Parquet file for publishing.
 
     The JSONL originals stay for ``keep_days`` so a bad conversion is
     recoverable and ``metrics.machine.file`` keeps resolving.
     """
-    sys.path.insert(0, str(DAILY_DIR))
     from common.monitor_parquet import convert_run, prune_jsonl
     from viewer.ingest._common import parse_stamp_from_name, run_id_of
 
@@ -565,17 +642,21 @@ def _convert_monitor_parquet(output_dir: Path, stamp: str, meta: dict,
         machine=machine,
     )
     if parquet is not None:
-        prune_jsonl(output_dir, keep_days)
+        prune_jsonl(root, keep_days)
     return parquet
 
 
 def main() -> int:
     args, passthrough = _parse_args()
 
-    output_dir = Path(args.output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    root = Path(args.output_dir).resolve()
     stamp = _now_stamp()
+    # Artefacts are bucketed exactly like the relay backup, so a run's files
+    # sit at the same relative path locally and on the server.
+    output_dir = run_dir(root, stamp)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    db_path = _viewer_db(root)
+
     pytest_json = output_dir / f'daily.{stamp}.pytest.json'
     summary_json = output_dir / f'daily.{stamp}.summary.json'
     html_report_path = output_dir / f'daily.{stamp}.html'
@@ -626,9 +707,9 @@ def main() -> int:
     sys.path.insert(0, str(DAILY_DIR))
     from report.builder import build_reports
     from common.delivery import (backup_server_url, mail_title_suffix,
-                                 prepend_links_html,
+                                 cleanup_genai_scratch, prepend_links_html,
                                  render_links_block, scp_backup, send_mail,
-                                 write_pip_freeze)
+                                 stage_report_images, write_pip_freeze)
 
     extra_meta = _collect_meta(stamp, args)
     summary = build_reports(pytest_json,
@@ -641,7 +722,12 @@ def main() -> int:
     print(f'[run.py] summary json:   {summary_json}')
     print(f'[run.py] pytest json:    {pytest_json}')
 
-    html_report = _run_analysis(html_report_path, summary_json)
+    # Generated images are staged every run so the next run can show them as a
+    # baseline; with --backup they are also published and linked from the report.
+    staged_images = stage_report_images(summary, output_dir, stamp)
+
+    html_report = _run_analysis(html_report_path, summary_json, root, db_path,
+                                staged_images, publish=args.backup)
 
     # --- post-run delivery ---
     # Find the session raw log. New naming is "daily.<stamp>.raw";
@@ -650,7 +736,7 @@ def main() -> int:
     if not raw_logs:
         raw_logs = sorted(output_dir.glob(f'daily.{stamp}.*.raw'))
     monitor_parquet = _convert_monitor_parquet(
-        output_dir, stamp, extra_meta, summary_json, args.monitor_keep_days)
+        output_dir, root, stamp, extra_meta, summary_json, args.monitor_keep_days)
 
     if args.pip_freeze or args.backup or args.mail:
         write_pip_freeze(pip_freeze_file)
@@ -675,7 +761,7 @@ def main() -> int:
                 prepend_links_html(html_report, links_block)
             print(f'[run.py] links:          {backup_server_url(None, "")}')
 
-        scp_backup(to_upload)
+        scp_backup(to_upload + list(staged_images.values()))
 
     if args.mail:
         if html_report:
@@ -691,6 +777,12 @@ def main() -> int:
         print(f'[run.py] raw log:        {raw_logs[-1]}')
     else:
         print(f'[run.py] raw log:        not found for daily.{stamp}.raw')
+
+    # Only now are the originals redundant: the report embeds thumbnails and
+    # the staged copies have been published.
+    removed = cleanup_genai_scratch(output_dir)
+    if removed:
+        print(f'[run.py] cleanup:        removed {removed} genai scratch file(s)')
 
     # Run completed end-to-end. Test pass/fail is reflected in the JSON
     # summary and the mail/backup artefacts; don't double-report via exit

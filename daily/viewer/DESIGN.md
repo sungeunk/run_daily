@@ -246,7 +246,7 @@ All three are OR'd. `TRY_CAST` returns `NULL` for non-integer strings, which cle
 
 ```bash
 # Ingest all
-cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db viewer/bench.duckdb
+cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db ../daily_output/<machine>/bench.duckdb
 
 # Ingest one (new format)
 cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
@@ -261,7 +261,7 @@ cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html
 conda run -n daily python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
 
 # Launch viewer
-cd daily && conda run -n daily streamlit run viewer/app.py -- --db viewer/bench.duckdb
+cd daily && conda run -n daily streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
 
 # Alternative DB via env var
 DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py

@@ -173,13 +173,13 @@ def prune_jsonl(output_dir: Path, keep_days: float, log=print) -> int:
 
     cutoff = time.time() - keep_days * 86400
     removed = 0
-    for f in Path(output_dir).glob('daily.*.monitor.*.jsonl'):
+    for f in Path(output_dir).rglob('daily.*.monitor.*.jsonl'):
         try:
             if f.stat().st_mtime >= cutoff:
                 continue
             # Only drop samples that made it into a parquet file.
             stamp = f.name.split('.')[1]
-            if not parquet_path(output_dir, stamp).exists():
+            if not parquet_path(f.parent, stamp).exists():
                 continue
             f.unlink()
             removed += 1

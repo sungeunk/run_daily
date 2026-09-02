@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 import platform
 import time
 
@@ -184,6 +185,9 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     
     # Parse JSON report instead of console output
     data = parse_json_report(json_report_path)
+    # Kept verbatim so the per-test file can be dropped without losing detail.
+    raw_report = json.loads(json_report_path.read_text(encoding='utf-8'))
+    json_report_path.unlink(missing_ok=True)
 
     record_metrics({
         'test_type': 'llm_benchmark',
@@ -194,6 +198,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'duration_sec': result.duration_sec,
         'machine': result.machine,
         'data': data,
+        'raw_report': raw_report,
     })
 
     assert data, 'JSON parser returned no data rows'

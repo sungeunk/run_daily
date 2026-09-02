@@ -79,7 +79,10 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS model_cache TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_sec DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS build_url TEXT",
-        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS build_url TEXT",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS gpu_info TEXT",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS gpu_driver_version TEXT",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS gpu_dedicated_memory_mb DOUBLE",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS gpu_shared_memory_mb DOUBLE",
     ]
     for sql in migrations:
         try:
@@ -133,12 +136,14 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 purpose, description, run_kind, ts, ww,
                 ov_version, ov_build, ov_sha,
                 host_info, host_memory_size_gb, host_memory_speed_mhz,
+                gpu_info, gpu_driver_version,
+                gpu_dedicated_memory_mb, gpu_shared_memory_mb,
                 genai_version, genai_commit, tok_commit, model_cache,
                 short_run, source_path, rawlog_path, file_hash,
                 total_tests, passed_tests, failed_tests, error_tests,
                 skipped_tests, skipped_cases, expected_cases,
                 duration_sec, build_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
@@ -155,6 +160,10 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 host_info     = excluded.host_info,
                 host_memory_size_gb = excluded.host_memory_size_gb,
                 host_memory_speed_mhz = excluded.host_memory_speed_mhz,
+                gpu_info      = excluded.gpu_info,
+                gpu_driver_version = excluded.gpu_driver_version,
+                gpu_dedicated_memory_mb = excluded.gpu_dedicated_memory_mb,
+                gpu_shared_memory_mb = excluded.gpu_shared_memory_mb,
                 genai_version = excluded.genai_version,
                 genai_commit  = excluded.genai_commit,
                 tok_commit    = excluded.tok_commit,
@@ -178,6 +187,8 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 rec.purpose, rec.description, rec.run_kind, rec.ts, rec.ww,
                 rec.ov_version, rec.ov_build, rec.ov_sha,
                 rec.host_info, rec.host_memory_size_gb, rec.host_memory_speed_mhz,
+                rec.gpu_info, rec.gpu_driver_version,
+                rec.gpu_dedicated_memory_mb, rec.gpu_shared_memory_mb,
                 rec.genai_version, rec.genai_commit, rec.tok_commit,
                 rec.model_cache,
                 rec.short_run, rec.source_path, rec.rawlog_path, rec.file_hash,

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import platform
 import time
 from pathlib import Path
 from typing import Iterable
@@ -27,7 +28,9 @@ from .writer import (already_ingested, connect, ensure_schema,
 
 log = logging.getLogger("ingest")
 
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "bench.duckdb"
+# Each machine keeps its DB beside its own artefacts under the output root.
+DEFAULT_DB = (Path(__file__).resolve().parents[3] / "daily_output"
+              / platform.node() / "bench.duckdb")
 DEFAULT_PROFILE = (Path(__file__).resolve().parent.parent
                    / "profiles" / "default.yaml")
 

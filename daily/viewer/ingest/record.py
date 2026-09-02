@@ -93,6 +93,8 @@ class RunRecord:
     host_memory_speed_mhz: float | None = None
     gpu_info: str | None = None
     gpu_driver_version: str | None = None
+    gpu_dedicated_memory_mb: float | None = None
+    gpu_shared_memory_mb: float | None = None
     genai_version: str | None = None
     genai_commit: str | None = None
     tok_commit: str | None = None

@@ -296,6 +296,8 @@ def load_summary(path: Path) -> RunRecord:
     host_memory_speed_mhz = _float_or_none(meta.get("host_memory_speed_mhz"))
     gpu_info = meta.get("gpu_info") or meta.get("device")
     gpu_driver_version = meta.get("gpu_driver_version")
+    gpu_dedicated_memory_mb = _float_or_none(meta.get("gpu_dedicated_memory_mb"))
+    gpu_shared_memory_mb = _float_or_none(meta.get("gpu_shared_memory_mb"))
     devices = []
 
     rec = RunRecord(
@@ -317,6 +319,8 @@ def load_summary(path: Path) -> RunRecord:
         host_memory_speed_mhz=host_memory_speed_mhz,
         gpu_info=gpu_info,
         gpu_driver_version=gpu_driver_version,
+        gpu_dedicated_memory_mb=gpu_dedicated_memory_mb,
+        gpu_shared_memory_mb=gpu_shared_memory_mb,
         genai_version=meta.get("genai_version") or None,
         genai_commit=meta.get("genai_commit") or None,
         tok_commit=meta.get("tok_commit") or None,

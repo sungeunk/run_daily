@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS runs (
     host_info      TEXT,
     host_memory_size_gb DOUBLE,
     host_memory_speed_mhz DOUBLE,
+    -- GPU under test. Also kept per device in system_devices, but denormalised
+    -- here so a run's environment can be compared without a join.
+    gpu_info       TEXT,
+    gpu_driver_version TEXT,
+    -- DXGI adapter memory. On an iGPU the dedicated figure is only the BIOS
+    -- carve-out; shared is the system RAM the adapter may borrow.
+    gpu_dedicated_memory_mb DOUBLE,
+    gpu_shared_memory_mb DOUBLE,
     genai_version  TEXT,
     genai_commit   TEXT,
     tok_commit     TEXT,

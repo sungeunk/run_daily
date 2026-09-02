@@ -20,11 +20,14 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 from email.message import EmailMessage
 from email.utils import formatdate
 from pathlib import Path
 from typing import Any, Iterable
+
+from common.paths import machine_name, relative_dir
 
 
 log = logging.getLogger(__name__)
@@ -44,25 +47,92 @@ DEFAULT_MAIL_FROM = f'jenkins <jenkins@{DEFAULT_BACKUP_HOST}>'
 # can coexist with the old one without mixing files.
 REMOTE_BASE_DIR = '/var/www/html/daily2'
 
-# Artefact stamp: ``daily.<YYYYMMDD>_<HHMM>.*``
-_STAMP_RE = re.compile(r'\.(\d{4})(\d{2})\d{2}_\d{3,4}\.')
+_UNSAFE_NAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
 
+_STAGED_IMAGE_RE = re.compile(r'^daily\.\d{8}_\d{3,4}\.image\.(?P<slot>.+)$')
 
-def month_dir_for(name: str) -> str:
-    """``YYYY.MM`` bucket for an artefact, or '' when it carries no stamp.
-
-    Derived from the artefact's own name rather than the wall clock so a
-    re-upload lands in the month the run happened.
-    """
-    m = _STAMP_RE.search(name)
-    return f'{m.group(1)}.{m.group(2)}' if m else ''
+# Scratch files the genai benchmark writes next to the artefacts, e.g.
+# ``flux.1-schnell_p0_iter1_pid8196_output.png``.
+_GENAI_SCRATCH_RE = re.compile(
+    r'_p\d+_(?:iter\d+_)?pid\d+_(?:input\.txt|output\.png)$')
 
 
 def backup_relative_dir(name: str = '') -> str:
     """Path under the backup root that ``name`` belongs in."""
-    month = month_dir_for(name)
-    node = platform.node()
-    return f'{node}/{month}' if month else node
+    return relative_dir(name)
+
+
+def stage_report_images(summary: dict, output_dir: Path, stamp: str
+                        ) -> dict[str, Path]:
+    """Copy generated images to publishable filenames.
+
+    Returns ``{original image_path: staged Path}``. The staged name carries
+    the run stamp so it sorts and publishes with the run's other artefacts.
+    """
+    staged: dict[str, Path] = {}
+    for test in summary.get('tests', []):
+        metrics = test.get('metrics') or {}
+        if metrics.get('test_type') != 'image_generation':
+            continue
+        label = _UNSAFE_NAME_RE.sub(
+            '_', f"{metrics.get('model', '')}_{metrics.get('precision', '')}"
+        ).strip('_') or 'image'
+        for idx, entry in enumerate(metrics.get('data') or []):
+            source = entry.get('image_path')
+            if not source or source in staged:
+                continue
+            source_path = Path(source)
+            if not source_path.is_file():
+                continue
+            output_dir.mkdir(parents=True, exist_ok=True)
+            target = output_dir / f'daily.{stamp}.image.{label}_{idx}{source_path.suffix.lower()}'
+            try:
+                shutil.copyfile(source_path, target)
+            except OSError as exc:
+                log.error('stage image: copy failed for %s: %s', source_path, exc)
+                continue
+            staged[source] = target
+    return staged
+
+
+def cleanup_genai_scratch(output_dir: Path) -> int:
+    """Delete the genai benchmark's raw image/prompt dumps.
+
+    Only safe once the report has embedded its thumbnails and the staged
+    copies have been published; callers run this at the end of a run.
+    """
+    removed = 0
+    for path in Path(output_dir).iterdir():
+        if not path.is_file() or not _GENAI_SCRATCH_RE.search(path.name):
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            log.warning('cleanup: could not remove %s: %s', path, exc)
+            continue
+        removed += 1
+    return removed
+
+
+def image_slot_name(staged_name: str) -> str:
+    """The ``<model>_<precision>_<idx>.<ext>`` part of a staged image name.
+
+    Stable across runs, so it pairs a run's image with the baseline's.
+    """
+    match = _STAGED_IMAGE_RE.match(staged_name)
+    return match.group('slot') if match else staged_name
+
+
+def staged_images_for(root: Path, stamp: str) -> dict[str, Path]:
+    """Staged images of the run identified by ``stamp``, keyed by slot name.
+
+    Searches the whole output tree so a baseline from an earlier month is
+    still found.
+    """
+    return {
+        image_slot_name(p.name): p
+        for p in sorted(Path(root).rglob(f'daily.{stamp}.image.*'))
+    }
 
 
 def _html_report_body(report_path: Path) -> str:
@@ -426,7 +496,7 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
     if not recipients:
         return False
 
-    full_title = f'[{platform.node()}/{now_stamp}] {title} {suffix_title}'.strip()
+    full_title = f'[{machine_name()}/{now_stamp}] {title} {suffix_title}'.strip()
     analysis_block = _html_analysis_summary_block(summary_json) if summary_json else ''
     body = _html_report_body(report_path)
     if analysis_block:
