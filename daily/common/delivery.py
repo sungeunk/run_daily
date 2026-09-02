@@ -36,6 +36,9 @@ log = logging.getLogger(__name__)
 DEFAULT_BACKUP_HOST = 'dg2raptorlake.ikor.intel.com'
 DEFAULT_BACKUP_USER = 'sungeunk'
 
+# Sender shown in the mail client. Overridable with ``DAILY_MAIL_FROM``.
+DEFAULT_MAIL_FROM = f'jenkins <jenkins@{DEFAULT_BACKUP_HOST}>'
+
 # Remote directory under which every machine's artefacts live. Kept distinct
 # from the legacy ``/var/www/html/daily`` path so the new pytest-based pipeline
 # can coexist with the old one without mixing files.
@@ -188,9 +191,10 @@ def _build_html_email_message(recipients: str, subject: str, html_body: str) -> 
     msg['Subject'] = subject
     msg['Date'] = formatdate(localtime=True)
 
-    sender = os.environ.get('DAILY_MAIL_FROM', '').strip()
-    if sender:
-        msg['From'] = sender
+    # Without an explicit From, the relay stamps the SSH account and Outlook
+    # resolves it to that person's GAL display name instead of the job's.
+    sender = os.environ.get('DAILY_MAIL_FROM', '').strip() or DEFAULT_MAIL_FROM
+    msg['From'] = sender
 
     msg.set_content(
         'This message contains an HTML report. '
@@ -507,7 +511,7 @@ def mail_title_suffix(summary: dict) -> str:
 
     Consumes the report builder's summary dict so we avoid reparsing JSON.
     Series counts come from each test's ``expected_series`` — the same field
-    ``analysis.report._skipped_series`` uses — rather than pytest's
+    ``analysis.report._series_counts`` uses — rather than pytest's
     test-function counts, since one test function can stand for several
     benchmark cases (e.g. one LLM test covers N prompts x 1st/2nd, so "2
     passed" would hide that only 4 of the expected series actually landed).

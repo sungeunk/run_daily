@@ -108,8 +108,12 @@ def render_analysis_summary(result: AnalysisResult) -> str:
     return "\n".join(lines)
 
 
-def _gpu_memory_text(summary: dict | None) -> tuple[str, str]:
-    """Return ``(dedicated, shared)`` display strings from the run metadata."""
+def _gpu_memory_text(summary: dict | None) -> tuple[str | None, str]:
+    """Return ``(dedicated, shared)`` display strings from the run metadata.
+
+    ``dedicated`` is ``None`` on an iGPU, where the DXGI figure is only the
+    BIOS carve-out and not a meaningful amount of usable memory.
+    """
     meta = (summary or {}).get("meta") or {}
 
     def _mb(value) -> str:
@@ -119,19 +123,13 @@ def _gpu_memory_text(summary: dict | None) -> tuple[str, str]:
 
     shared = _mb(meta.get("gpu_shared_memory_mb"))
     override = meta.get("gpu_shared_memory_override")
-    if shared != "—" and override is not None:
-        if int(override) == 0:
-            present = meta.get("gpu_shared_memory_override_present")
-            shared += " — driver default" if present else " — driver default (IncreaseFixedSegment unset)"
-        else:
-            shared += f" — overridden (IncreaseFixedSegment={int(override)})"
+    if shared != "—" and override:
+        shared += f" — overridden (IncreaseFixedSegment={int(override)})"
 
     dedicated_mb = meta.get("gpu_dedicated_memory_mb")
-    dedicated = _mb(dedicated_mb)
-    # On an iGPU the DXGI dedicated figure is only the BIOS carve-out, not usable VRAM.
-    if dedicated != "—" and _is_carve_out(dedicated_mb, meta.get("gpu_shared_memory_mb")):
-        dedicated += " — iGPU carve-out, usable memory is shared"
-    return dedicated, shared
+    if _is_carve_out(dedicated_mb, meta.get("gpu_shared_memory_mb")):
+        return None, shared
+    return _mb(dedicated_mb), shared
 
 
 def _is_carve_out(dedicated_mb, shared_mb) -> bool:
@@ -141,15 +139,24 @@ def _is_carve_out(dedicated_mb, shared_mb) -> bool:
         return False
 
 
-def _skipped_series(summary: dict | None) -> int:
-    """Series lost to skipped tests, as reported by each test's ``expected_series``."""
-    if not summary:
-        return 0
-    return sum(
-        int((test.get("metrics") or {}).get("expected_series") or 0)
-        for test in summary.get("tests", [])
-        if test.get("outcome") == "skipped"
-    )
+def _series_counts(summary: dict | None) -> tuple[int, int, int]:
+    """Return ``(skipped, success, failed)`` series counts for the run.
+
+    Counted per ``expected_series`` rather than per test function, matching
+    ``common.delivery.mail_title_suffix``: one test function can stand for
+    several benchmark series.
+    """
+    skipped = success = failed = 0
+    for test in (summary or {}).get("tests", []):
+        expected = int((test.get("metrics") or {}).get("expected_series") or 0)
+        outcome = test.get("outcome")
+        if outcome == "skipped":
+            skipped += expected
+        elif outcome == "passed":
+            success += expected
+        elif outcome in ("failed", "error"):
+            failed += expected
+    return skipped, success, failed
 
 
 def _render_image_gallery(summary: dict | None) -> str:
@@ -219,12 +226,16 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
     # Keep original engine order so this table matches the main report table order.
     all_rows = list(result.rows)
     fluctuation_same = sum(1 for r in result.rows if r.within_fluctuation)
-    # Top table counts one perf series as one unit; skipped tests report the
-    # series they would have produced via ``expected_series``.
-    series_run = result.performance.compared
-    series_skipped = _skipped_series(summary)
-    series_total = series_run + series_skipped
+    # Top table counts one benchmark series as one unit, including the series
+    # skipped tests would have produced.
+    series_skipped, series_success, series_failed = _series_counts(summary)
+    series_total = series_skipped + series_success + series_failed
     gpu_dedicated_text, gpu_shared_text = _gpu_memory_text(summary)
+    gpu_dedicated_row = (
+        "" if gpu_dedicated_text is None else
+        f'<tr><td class="k">GPU dedicated memory</td>'
+        f'<td>{html.escape(gpu_dedicated_text)}</td></tr>'
+    )
 
     badge = {
         "green":  ("GREEN",  "#18794e"),
@@ -418,16 +429,14 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
             <tr>
                 <th>Total</th>
                 <th>Skip</th>
-                <th>Run</th>
-                <th>Improvements</th>
-                <th>Regressions</th>
+                <th>Success</th>
+                <th>Fail</th>
             </tr>
             <tr>
                 <td>{series_total}</td>
                 <td style="color:{'#a05a00' if series_skipped else '#6b7280'}">{series_skipped}</td>
-                <td>{series_run}</td>
-                <td style="color:{'#18794e' if result.performance.improved else '#6b7280'}">{result.performance.improved}</td>
-                <td style="color:{'#b42318' if result.performance.regressed else '#18794e'}">{result.performance.regressed}</td>
+                <td style="color:{'#18794e' if series_success else '#6b7280'}">{series_success}</td>
+                <td style="color:{'#b42318' if series_failed else '#18794e'}">{series_failed}</td>
             </tr>
         </table>
     </div>
@@ -441,7 +450,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None) ->
             <tr><td class="k">Machine</td><td>{_safe_text(current.machine_name if current else None)}</td></tr>
             <tr><td class="k">GPU driver</td><td>{_safe_text(current.gpu_driver_version if current else None)}</td></tr>
             <tr><td class="k">GPU info</td><td>{_safe_text(current.gpu_info if current else None)}</td></tr>
-            <tr><td class="k">GPU dedicated memory</td><td>{html.escape(gpu_dedicated_text)}</td></tr>
+            {gpu_dedicated_row}
             <tr><td class="k">GPU shared memory</td><td>{html.escape(gpu_shared_text)}</td></tr>
             <tr><td class="k">Host info</td><td>{_safe_text(current.host_info if current else None)}</td></tr>
             <tr><td class="k">Memory size</td><td>{_safe_text(current.memory_size if current else None)}</td></tr>
