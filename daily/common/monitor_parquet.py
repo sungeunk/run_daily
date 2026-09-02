@@ -257,7 +257,9 @@ def _backfill_main(argv: list[str] | None = None) -> int:
 
     for directory in args.dirs:
         machine = directory.resolve().name
-        for archive in sorted(directory.glob('daily.*.monitor.tar.gz')):
+        # Archives live either directly under the machine directory (legacy
+        # flat layout) or in its <YYYY.MM> buckets.
+        for archive in sorted(directory.rglob('daily.*.monitor.tar.gz')):
             stamp = archive.name.split('.')[1]
             run_id = run_ids.get((machine, stamp))
             if run_id is None:
