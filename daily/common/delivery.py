@@ -62,6 +62,16 @@ def backup_relative_dir(name: str = '') -> str:
     return relative_dir(name)
 
 
+def staged_image_slot(model: str, precision: str, idx: int, suffix: str) -> str:
+    """Slot name ``stage_report_images`` gives the ``idx``-th image of a test.
+
+    Deterministic from the summary alone, so a report regenerated later can
+    find the staged copy without the original staging run.
+    """
+    label = _UNSAFE_NAME_RE.sub('_', f'{model}_{precision}').strip('_') or 'image'
+    return f'{label}_{idx}{suffix.lower()}'
+
+
 def stage_report_images(summary: dict, output_dir: Path, stamp: str
                         ) -> dict[str, Path]:
     """Copy generated images to publishable filenames.
@@ -74,9 +84,6 @@ def stage_report_images(summary: dict, output_dir: Path, stamp: str
         metrics = test.get('metrics') or {}
         if metrics.get('test_type') != 'image_generation':
             continue
-        label = _UNSAFE_NAME_RE.sub(
-            '_', f"{metrics.get('model', '')}_{metrics.get('precision', '')}"
-        ).strip('_') or 'image'
         for idx, entry in enumerate(metrics.get('data') or []):
             source = entry.get('image_path')
             if not source or source in staged:
@@ -84,8 +91,11 @@ def stage_report_images(summary: dict, output_dir: Path, stamp: str
             source_path = Path(source)
             if not source_path.is_file():
                 continue
+            slot = staged_image_slot(metrics.get('model', ''),
+                                     metrics.get('precision', ''),
+                                     idx, source_path.suffix)
             output_dir.mkdir(parents=True, exist_ok=True)
-            target = output_dir / f'daily.{stamp}.image.{label}_{idx}{source_path.suffix.lower()}'
+            target = output_dir / f'daily.{stamp}.image.{slot}'
             try:
                 shutil.copyfile(source_path, target)
             except OSError as exc:

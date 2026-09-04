@@ -45,6 +45,7 @@ Quick re-run alias (runs from any directory)::
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import re
@@ -116,7 +117,6 @@ def _ingest_from_root(*, root: Path, db_path: Path) -> tuple[int, int, int, str 
     """
     from viewer.ingest.cli import discover, ingest_files
     from viewer.ingest.loader_new import load_summary
-    from viewer.ingest.loader_old import load_report
 
     if not root.exists() or not root.is_dir():
         return (0, 0, 0, None)
@@ -125,19 +125,73 @@ def _ingest_from_root(*, root: Path, db_path: Path) -> tuple[int, int, int, str 
     if not files:
         return (0, 0, 0, None)
 
-    latest_path, latest_fmt = max(
+    latest_path, _fmt = max(
         files,
         key=lambda pf: (_stamp_of_any(pf[0]), int(pf[0].stat().st_mtime)),
     )
-    if latest_fmt == "new":
-        latest_run_id = load_summary(latest_path).run_id
-    else:
-        latest_run_id = load_report(latest_path).run_id
+    latest_run_id = load_summary(latest_path).run_id
 
     added, skipped, failures = ingest_files(files, db_path, force=False)
     if failures:
         raise RuntimeError(f"ingest failed: {files[0][0]} -> {failures[0][1]}")
     return (len(files), added, skipped, latest_run_id)
+
+
+def _load_summary(source_path: str | None) -> dict | None:
+    """The run's own ``summary.json``, which carries the per-test case counts."""
+    if not source_path:
+        return None
+    path = Path(source_path)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _load_baseline_meta(root: Path, stamp: str | None, db_path: Path) -> dict:
+    from run import _baseline_meta  # noqa: PLC0415 — daily/ is on sys.path by now
+
+    return _baseline_meta(root, stamp, db_path)
+
+
+def _image_assets_from_backup(root: Path, stamp: str, baseline_stamp: str | None,
+                              summary: dict | None) -> dict[str, dict]:
+    """Pair each generated image with its staged copy in the backup tree.
+
+    ``image_path`` in a summary points at the benchmark machine's filesystem,
+    which this host cannot read, so each entry is re-pointed at the published
+    copy before the gallery renders it.
+    """
+    from common.delivery import staged_image_slot, staged_images_for  # noqa: PLC0415
+
+    current = staged_images_for(root, stamp) if stamp else {}
+    baseline = staged_images_for(root, baseline_stamp) if baseline_stamp else {}
+    if not current and not baseline:
+        return {}
+
+    assets: dict[str, dict] = {}
+    for test in (summary or {}).get('tests', []):
+        metrics = test.get('metrics') or {}
+        if metrics.get('test_type') != 'image_generation':
+            continue
+        for idx, entry in enumerate(metrics.get('data') or []):
+            source = entry.get('image_path')
+            if not source:
+                continue
+            slot = staged_image_slot(metrics.get('model', ''),
+                                     metrics.get('precision', ''),
+                                     idx, Path(source).suffix)
+            staged = current.get(slot)
+            if staged is not None:
+                entry['image_path'] = str(staged)
+            assets[entry['image_path']] = {
+                'url': None,
+                'baseline_path': baseline.get(slot),
+                'baseline_url': None,
+            }
+    return assets
 
 
 def _pick_run_from_db(con, *, run_id: str | None, stamp: str | None):
@@ -486,12 +540,27 @@ def main(argv: list[str] | None = None) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
 
         now_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
-        current_stamp = _resolve_stamp_from_name(str(run_id))
+        # The run_id is a hash, so the artefact name is the only place the
+        # run's own stamp survives.
+        current_stamp = _resolve_stamp_from_name(
+            Path(source_path).name if source_path else str(run_id))
 
         print(f'[report] current  : run_id={run_id} machine={machine}')
         result = _analyze_run_id_from_db(con, run_id, cfg)
 
-    html = render_analysis_html(result)
+    # The Run Summary case counts come from the run's own summary.json, and the
+    # baseline column only appears when the baseline's meta block is supplied.
+    summary_data = _load_summary(source_path)
+    baseline_meta = _load_baseline_meta(args.root, result.baseline.stamp, db_path)
+    image_assets = _image_assets_from_backup(
+        args.root, current_stamp, result.baseline.stamp, summary_data)
+    if summary_data is None:
+        print(f'[report] summary  : not found next to {source_path}', file=sys.stderr)
+    if not baseline_meta:
+        print('[report] baseline : meta unavailable, rendering single-column summary',
+              file=sys.stderr)
+
+    html = render_analysis_html(result, summary_data, image_assets, baseline_meta)
     out_path = _unique_out_path(out_dir, current_stamp, now_tag)
     out_path.write_text(html, encoding='utf-8')
 
