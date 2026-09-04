@@ -148,6 +148,10 @@ CREATE TABLE IF NOT EXISTS analysis_comparisons (
     worsening_z        DOUBLE,
     reference_source   TEXT,
     within_fluctuation BOOLEAN,
+    -- Newest published release build, read over MCP from the central server.
+    release_run_id          TEXT,
+    release_value           DOUBLE,
+    release_improvement_pct DOUBLE,
     PRIMARY KEY (run_id, model, precision, in_token, out_token, exec_mode)
 );
 

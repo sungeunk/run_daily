@@ -278,6 +278,17 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     summary_head = ""
     summary_note = ""
     baseline_row = f'<tr><td class="k">Baseline</td><td>{html.escape(baseline_text)}</td></tr>'
+    release_row = ""
+    rel = result.release
+    if rel is not None and rel.status != "disabled":
+        if rel.status == "found":
+            release_text = (f"{rel.stamp or ''} / {rel.ov_version or 'unknown'} "
+                            f"({rel.matched_count} series)")
+        elif rel.status == "not_found":
+            release_text = "no release run published yet"
+        else:
+            release_text = f"unavailable ({rel.detail or 'query failed'})"
+        release_row = f'<tr><td class="k">Release</td><td>{html.escape(release_text)}</td></tr>'
     if has_baseline_meta:
         baseline_row = ""
         summary_head = (
@@ -340,6 +351,15 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             return "<span title='Delta is within historical fluctuation range — treated as same' style='font-size:11px;background:#e5e7eb;color:#374151;padding:1px 6px;border-radius:999px'>fluct</span>"
         return ""
 
+    def _release_delta_style(v: float | None) -> str:
+        if v is None:
+            return ""
+        if v < 0:
+            return "color:#b42318"
+        if v > 0:
+            return "color:#18794e"
+        return ""
+
     def _row_html(row, show_fluct: bool = True) -> str:
         k = row.key
         unit = row.unit or ""
@@ -348,6 +368,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         fluct = _fluct_badge(row.within_fluctuation) if show_fluct else ""
         delta_style = f"text-align:right;{delta_s};white-space:nowrap" if delta_s else "text-align:right;white-space:nowrap"
         cv_style = f"text-align:right;{cv_s};white-space:nowrap" if cv_s else "text-align:right;white-space:nowrap"
+        rel_s = _release_delta_style(row.release_improvement_pct)
+        rel_style = f"text-align:right;{rel_s};white-space:nowrap" if rel_s else "text-align:right;white-space:nowrap"
         return (
             "<tr>\n"
             f"<td>{html.escape(k.model)}</td>\n"
@@ -357,6 +379,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.current_value, unit)}</td>\n"
             f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.baseline_value, unit)}</td>\n"
             f"<td class='num' style='{delta_style}'>{_fmt_pct(row.improvement_pct)}{fluct}</td>\n"
+            f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.release_value, unit)}</td>\n"
+            f"<td class='num' style='{rel_style}'>{_fmt_pct(row.release_improvement_pct)}</td>\n"
             f"<td class='num' style='text-align:right'>{row.history_count}</td>\n"
             f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.history_sigma, unit)}</td>\n"
             f"<td class='num' style='{cv_style}'>{_fmt_cv(row.history_cv)}</td>\n"
@@ -364,8 +388,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             "</tr>"
         )
 
-    improved_table  = "\n".join(_row_html(r) for r in improved_rows)  or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
-    regressed_table = "\n".join(_row_html(r) for r in regressed_rows) or "<tr><td colspan='11' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
+    improved_table  = "\n".join(_row_html(r) for r in improved_rows)  or "<tr><td colspan='13' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
+    regressed_table = "\n".join(_row_html(r) for r in regressed_rows) or "<tr><td colspan='13' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
     all_table       = "\n".join(_row_html(r, show_fluct=True) for r in all_rows)
     failed_rows = ""
     if result.functional.issues:
@@ -388,9 +412,13 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         ("In / Out",   "Input token count / Output token count used in the benchmark run"),
         ("Mode",       "Execution mode: 'latency' = single-request, 'throughput' = concurrent batches"),
         ("Current",    "Measured value from today's run (unit shown alongside the number)"),
-        ("Reference",  "Statistical reference: mean of the top-K best runs from the recent history window"),
+        ("Reference",  "Value of the most recent timer-scheduled run on this machine"),
         ("Delta",      "Relative change vs reference (+% = improved, -% = regressed). "
                        "Grayed-out 'fluct' badge means the delta is within historical noise — treated as same."),
+        ("Release",    "Value of the newest published release build for this machine, read from the "
+                       "central daily_results server; 'n/a' means no release run covers this series yet"),
+        ("Δ Release",  "Relative change vs the release build (+% = better than release). "
+                       "Informational only — it never changes the verdict"),
         ("N",          "Number of historical comparable runs (same machine / model / precision / mode) "
                        "used to build the reference distribution"),
         ("Sigma (σ)",  "Standard deviation of historical values — larger σ means the machine is noisier "
@@ -398,12 +426,12 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         ("CV",         "Coefficient of Variation = σ / mean.  ≤5% (green) = stable, "
                        "5–10% (orange) = moderate noise, >10% (red) = high noise — be cautious with verdicts"),
         ("Ref Source", "How the reference value was chosen: "
-                       "'topk_mean' = top-K best historical runs averaged (preferred), "
-                       "'baseline' = direct previous run (fallback when history is short)"),
+                       "'baseline' = latest timer-scheduled run, "
+                       "'no_baseline' / 'unit_mismatch' = nothing comparable was found"),
     ]
 
     def _th(label: str, tip: str) -> str:
-        numeric_headers = {"Current", "Reference", "Delta", "N", "Sigma (σ)", "CV"}
+        numeric_headers = {"Current", "Reference", "Delta", "Release", "Δ Release", "N", "Sigma (σ)", "CV"}
         th_class = "num-h" if label in numeric_headers else ""
         return (f"<th title='{html.escape(tip)}' "
             f"class='{th_class}' style='cursor:help;border-bottom:2px solid #bcd0f0'>{label} "
@@ -499,6 +527,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             {summary_head}
             {summary_rows}
             {baseline_row}
+            {release_row}
         </table>
     </div>
 

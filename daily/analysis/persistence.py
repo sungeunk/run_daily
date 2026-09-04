@@ -134,11 +134,13 @@ def _try_upsert_analysis_comparisons(
             unit, current_value, baseline_value,
             improvement_pct, verdict, threshold_pct,
             history_count, history_median, history_mad, history_sigma,
-            history_cv, worsening_z, reference_source, within_fluctuation
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            history_cv, worsening_z, reference_source, within_fluctuation,
+            release_run_id, release_value, release_improvement_pct
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            _row_tuple(run_id, result.baseline.run_id, row, threshold_pct)
+            _row_tuple(run_id, result.baseline.run_id, row, threshold_pct,
+                       _release_run_id(result))
             for row in result.rows
         ],
     )
@@ -169,11 +171,17 @@ def _try_upsert_functional_issues(
 # Serialisation helpers
 # ---------------------------------------------------------------------------
 
+def _release_run_id(result: AnalysisResult) -> str | None:
+    release = result.release
+    return release.run_id if release is not None and release.status == "found" else None
+
+
 def _row_tuple(
     run_id: str,
     baseline_run_id: str | None,
     row: ComparisonRow,
     threshold_pct: float | None,
+    release_run_id: str | None = None,
 ) -> tuple:
     k = row.key
     return (
@@ -184,6 +192,7 @@ def _row_tuple(
         row.history_count, row.history_median, row.history_mad,
         row.history_sigma, row.history_cv, row.worsening_z,
         row.reference_source, row.within_fluctuation,
+        release_run_id, row.release_value, row.release_improvement_pct,
     )
 
 
@@ -215,6 +224,8 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
             "baseline_value": row.baseline_value,
             "improvement_pct": row.improvement_pct,
             "verdict": row.verdict,
+            "release_value": row.release_value,
+            "release_improvement_pct": row.release_improvement_pct,
             "history_count": row.history_count,
             "reference_source": row.reference_source,
             "history_median": row.history_median,
@@ -266,7 +277,20 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
         ],
         "top_regressions": [_row_dict(r) for r in result.top_regressions],
     }
-    
+
+    if result.release is not None:
+        rel = result.release
+        payload["release"] = {
+            "status": rel.status,
+            "run_id": rel.run_id,
+            "stamp": rel.stamp,
+            "ov_version": rel.ov_version,
+            "machine": rel.machine,
+            "source_url": rel.source_url,
+            "matched_count": rel.matched_count,
+            "detail": rel.detail,
+        }
+
     # Include config snapshot for reproducibility
     if config is not None:
         from dataclasses import asdict as dc_asdict

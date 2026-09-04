@@ -15,11 +15,12 @@ import json
 import logging
 import math
 from pathlib import Path
-from statistics import mean, median
+from statistics import median
 from types import SimpleNamespace
 
-from .baseline import _reference_purposes, find_last_known_good, select_baseline
+from .baseline import find_last_known_good, reference_purpose_sql, select_baseline
 from .functional import aggregate_functional
+from .release import fetch_release
 from .types import (
     AnalysisConfig,
     AnalysisResult,
@@ -32,7 +33,7 @@ from .types import (
     PerformanceResult,
     SeriesKey,
 )
-from .verdict import improvement_pct, make_comparison_row, verdict_from_pct, verdict_from_signal
+from .verdict import improvement_pct, make_comparison_row, verdict_from_pct
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +105,8 @@ def analyze_run(
         ensure_schema(con)
         upsert_run(con, rec)
         baseline_info = select_baseline(con, rec, config)
-        rows = _fetch_comparison_rows(con, rec, baseline_info, config)
+        release_info, release_values = fetch_release(config, getattr(rec, "machine", None))
+        rows = _fetch_comparison_rows(con, rec, baseline_info, config, release_values)
 
         # --- aggregate ---
         performance = _aggregate_performance(rows)
@@ -131,6 +133,7 @@ def analyze_run(
             models=models,
             top_regressions=top_regressions,
             current_run=_build_current_run_info(rec),
+            release=release_info,
             last_known_good=last_known_good,
             bisect_delta=bisect_delta,
             rows=rows,
@@ -159,6 +162,7 @@ def _fetch_comparison_rows(
     rec,
     baseline_info: BaselineInfo,
     config: AnalysisConfig,
+    release_values: dict[tuple, tuple[float, str | None]] | None = None,
 ) -> list[ComparisonRow]:
     if isinstance(rec, str):
         run_id = rec
@@ -293,59 +297,69 @@ def _fetch_comparison_rows(
             )
             continue
 
-        reference_value = baseline_value
-        reference_source = "baseline"
-        enough_history_for_topk = history_stats["count"] >= max(
+        # The noise gates need a populated history; without one a regression
+        # would be reported as "insufficient" instead of being shown.
+        gates_available = history_stats["count"] >= max(
             config.min_recent_points,
             config.min_baseline_points,
         )
-        if history_stats["topk_mean"] is not None and enough_history_for_topk:
-            reference_value = history_stats["topk_mean"]
-            reference_source = "topk_mean"
+        worsening_z = history_stats["worsening_z"](current_value)
 
-        row = make_comparison_row(key, unit, current_value, reference_value, config)
-        row.reference_source = reference_source
+        row = make_comparison_row(
+            key,
+            unit,
+            current_value,
+            baseline_value,
+            config,
+            worsening_z=worsening_z if gates_available else None,
+            recent_cv=history_stats["cv"] if gates_available else None,
+            recent_n=history_stats["count"] if gates_available else None,
+            baseline_n=history_stats["count"] if gates_available else None,
+        )
+        row.reference_source = "baseline"
         row.history_count = history_stats["count"]
         row.history_median = history_stats["median"]
         row.history_mad = history_stats["mad"]
         row.history_sigma = history_stats["sigma"]
         row.history_cv = history_stats["cv"]
-        row.worsening_z = history_stats["worsening_z"](current_value)
+        row.worsening_z = worsening_z
 
-        if reference_source == "topk_mean":
-            row.improvement_pct = improvement_pct(current_value, reference_value, unit)
-            row.verdict = verdict_from_signal(
-                row.improvement_pct,
-                config,
-                worsening_z=row.worsening_z,
-                recent_cv=row.history_cv,
-                recent_n=row.history_count,
-                baseline_n=row.history_count,
-            )
-
-            # When the delta is within historical fluctuation range,
-            # downgrade to "same" even if pct threshold was crossed.
-            if _is_within_fluctuation(
-                current=current_value,
-                reference=reference_value,
-                sigma=row.history_sigma,
-                scale=config.fluctuation_sigma_scale,
-            ) and row.verdict in {"improved", "regressed"}:
-                row.within_fluctuation = True
-                row.verdict = "same"
+        # A delta inside the historical fluctuation band is not a real move.
+        if gates_available and _is_within_fluctuation(
+            current=current_value,
+            reference=baseline_value,
+            sigma=row.history_sigma,
+            scale=config.fluctuation_sigma_scale,
+        ) and row.verdict in {"improved", "regressed"}:
+            row.within_fluctuation = True
+            row.verdict = "same"
 
         result.append(row)
+
+    _attach_release(result, release_values or {})
     return result
 
 
+def _attach_release(rows: list[ComparisonRow], release_values: dict[tuple, tuple[float, str | None]]) -> None:
+    """Fill the release-build column; unmatched series simply stay empty."""
+    if not release_values:
+        return
+    for row in rows:
+        k = row.key
+        entry = release_values.get((k.model, k.precision, k.in_token, k.out_token, k.exec_mode))
+        if entry is None:
+            continue
+        value, release_unit = entry
+        if row.unit is not None and release_unit is not None and row.unit != release_unit:
+            continue
+        row.release_value = value
+        current = row.current_value
+        if current is not None and math.isfinite(current):
+            row.release_improvement_pct = improvement_pct(current, value, row.unit or release_unit)
+
+
 def _load_series_history(con, rec, config: AnalysisConfig) -> dict[tuple, list[float]]:
-    reference_purposes = _reference_purposes(config, getattr(rec, "purpose", None))
-    if len(reference_purposes) == 1:
-        purpose_clause = "COALESCE(r.purpose, '') = COALESCE(?, '')"
-    else:
-        purpose_clause = "COALESCE(r.purpose, '') IN ({})".format(
-            ", ".join("?" for _ in reference_purposes)
-        )
+    purpose_clause, purpose_params = reference_purpose_sql(config)
     try:
         rows = con.execute(
             """
@@ -379,7 +393,7 @@ def _load_series_history(con, rec, config: AnalysisConfig) -> dict[tuple, list[f
                 rec.run_id,
                 rec.ts,
                 rec.short_run,
-                *reference_purposes,
+                *purpose_params,
                 config.history_window,
             ],
         ).fetchall()
@@ -403,7 +417,6 @@ def _history_stats(values: list[float], unit: str | None, config: AnalysisConfig
     if not values:
         return {
             "count": 0,
-            "topk_mean": None,
             "median": None,
             "mad": None,
             "sigma": None,
@@ -419,10 +432,7 @@ def _history_stats(values: list[float], unit: str | None, config: AnalysisConfig
     if sigma is not None and med not in (None, 0.0):
         cv = sigma / abs(med)
 
-    top_k = max(1, min(config.reference_top_k, len(values)))
     lower_is_better = unit in {"ms", "s", "%"}
-    selected = sorted(values)[:top_k] if lower_is_better else sorted(values, reverse=True)[:top_k]
-    topk_mean = mean(selected)
 
     def _worsening_z(current: float) -> float | None:
         if sigma is None or sigma <= 0.0 or not math.isfinite(sigma):
@@ -433,7 +443,6 @@ def _history_stats(values: list[float], unit: str | None, config: AnalysisConfig
 
     return {
         "count": len(values),
-        "topk_mean": topk_mean,
         "median": med,
         "mad": mad,
         "sigma": sigma,

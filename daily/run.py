@@ -67,8 +67,23 @@ def _default_device() -> str:
     return os.environ.get('DAILY_DEVICE', 'GPU')
 
 
-def _now_stamp() -> str:
-    return dt.datetime.now().strftime('%Y%m%d_%H%M')
+def _now_stamp(root: Path | None = None) -> str:
+    """Run stamp, unique among the artefacts already under ``root``.
+
+    Stamps only carry minutes, so back-to-back runs started within the same
+    minute would overwrite each other's report files. Keep the format (it is
+    parsed by the viewer, the month bucketing and the baseline queries) and
+    move to the next free minute instead.
+    """
+    now = dt.datetime.now()
+    if root is None:
+        return now.strftime('%Y%m%d_%H%M')
+    for _ in range(60):
+        stamp = now.strftime('%Y%m%d_%H%M')
+        if not (run_dir(root, stamp) / f'daily.{stamp}.pytest.json').exists():
+            return stamp
+        now += dt.timedelta(minutes=1)
+    return now.strftime('%Y%m%d_%H%M')
 
 
 def _windows_total_memory_gb() -> float | None:
@@ -478,6 +493,9 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
 
 
 def _parse_args() -> tuple[argparse.Namespace, list[str]]:
+    from analysis.types import AnalysisConfig
+
+    release_defaults = AnalysisConfig()
     p = argparse.ArgumentParser(
         description='Run the daily test suite and build a report.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -510,6 +528,18 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help='Free-text tag used in the mail subject')
     p.add_argument('--pip-freeze', action='store_true',
                    help='Also write pip-freeze output alongside the report')
+
+    # --- release comparison (daily_results MCP server) ---
+    p.add_argument('--no-release', dest='release', action='store_false',
+                   help='Skip the release-build column in the analysis report')
+    p.add_argument('--release-mcp-url',
+                   default=os.environ.get('DAILY_RELEASE_MCP_URL',
+                                          release_defaults.release_mcp_url),
+                   help='daily_results MCP endpoint used to fetch the release run')
+    p.add_argument('--release-purpose-like',
+                   default=os.environ.get('DAILY_RELEASE_PURPOSE_LIKE',
+                                          release_defaults.release_purpose_like),
+                   help="SQL LIKE pattern matched against runs.purpose to find release runs")
     return p.parse_known_args()
 
 
@@ -579,10 +609,25 @@ def _baseline_meta_from_db(db_path: Path, stamp: str) -> dict:
     return {k: v for k, v in zip(columns, row or ()) if v is not None}
 
 
+def _analysis_config(args: argparse.Namespace):
+    """Build the analysis tuning object from the CLI options."""
+    try:
+        from analysis.types import AnalysisConfig
+    except ImportError:
+        return None
+
+    return AnalysisConfig(
+        release_enabled=args.release,
+        release_mcp_url=args.release_mcp_url,
+        release_purpose_like=args.release_purpose_like,
+    )
+
+
 def _run_analysis(html_report: Path, summary_json: Path, root: Path,
                   db_path: Path,
                   staged_images: dict[str, Path] | None = None,
-                  *, publish: bool = False) -> Path | None:
+                  *, publish: bool = False,
+                  analysis_config=None) -> Path | None:
     """Best-effort: ingest the output tree, then run analysis and write the HTML report."""
     try:
         from viewer.ingest.cli import discover, ingest_files
@@ -604,7 +649,7 @@ def _run_analysis(html_report: Path, summary_json: Path, root: Path,
         else:
             print(f'[run.py] ingest skipped: no artefacts found under {root}')
 
-        result = analyze_run(summary_json, db_path)
+        result = analyze_run(summary_json, db_path, analysis_config)
         write_analysis_to_summary(summary_json, result)
 
         summary_data = json.loads(summary_json.read_text(encoding='utf-8'))
@@ -650,7 +695,7 @@ def main() -> int:
     args, passthrough = _parse_args()
 
     root = Path(args.output_dir).resolve()
-    stamp = _now_stamp()
+    stamp = _now_stamp(root)
     # Artefacts are bucketed exactly like the relay backup, so a run's files
     # sit at the same relative path locally and on the server.
     output_dir = run_dir(root, stamp)
@@ -727,7 +772,8 @@ def main() -> int:
     staged_images = stage_report_images(summary, output_dir, stamp)
 
     html_report = _run_analysis(html_report_path, summary_json, root, db_path,
-                                staged_images, publish=args.backup)
+                                staged_images, publish=args.backup,
+                                analysis_config=_analysis_config(args))
 
     # --- post-run delivery ---
     # Find the session raw log. New naming is "daily.<stamp>.raw";

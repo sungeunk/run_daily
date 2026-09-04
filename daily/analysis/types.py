@@ -34,6 +34,13 @@ class AnalysisConfig:
                              dual-gate mode (default 5).
         min_baseline_points: Minimum number of baseline points required for
                              dual-gate mode (default 7).
+        release_enabled:     When True, fetch the newest release-build run
+                             from the central daily_results MCP server and
+                             show it as a third column next to the reference.
+        release_mcp_url:     Streamable-HTTP endpoint of that MCP server.
+        release_purpose_like: SQL LIKE pattern matched against ``runs.purpose``
+                             to recognise a release-build run.
+        release_timeout_sec: Per-request timeout for the MCP calls.
     """
 
     pct_threshold: float = 0.05
@@ -44,9 +51,12 @@ class AnalysisConfig:
     min_recent_points: int = 5
     min_baseline_points: int = 7
     history_window: int = 10
-    reference_top_k: int = 5
     fluctuation_sigma_scale: float = 1.5
     baseline_purpose: str | None = None
+    release_enabled: bool = True
+    release_mcp_url: str = "http://dg2raptorlake.ikor.intel.com:8090/mcp"
+    release_purpose_like: str = "%release%"
+    release_timeout_sec: float = 20.0
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +88,8 @@ class ComparisonRow:
     baseline_value: float
     improvement_pct: float | None   # positive = better, None = unavailable
     verdict: Verdict
+    release_value: float | None = None
+    release_improvement_pct: float | None = None
     history_count: int = 0
     reference_source: str = "baseline"
     history_median: float | None = None
@@ -112,6 +124,25 @@ class BaselineInfo:
     stamp: str | None = None
     ov_version: str | None = None
     selection_reason: str | None = None   # human-readable why this run was picked
+
+
+@dataclass
+class ReleaseInfo:
+    """Metadata about the release-build run pulled from the central MCP server.
+
+    ``unavailable`` means the server could not be queried at all, which is
+    reported separately from ``not_found`` so a network problem is not mistaken
+    for "no release run has been published yet".
+    """
+
+    status: Literal["found", "not_found", "unavailable", "disabled"]
+    run_id: str | None = None
+    stamp: str | None = None
+    ov_version: str | None = None
+    machine: str | None = None
+    source_url: str | None = None
+    matched_count: int = 0
+    detail: str | None = None
 
 
 @dataclass
@@ -210,5 +241,6 @@ class AnalysisResult:
     top_regressions: list[ComparisonRow]
     rows: list[ComparisonRow]           # full comparison table (not in JSON output)
     current_run: CurrentRunInfo | None = None
+    release: ReleaseInfo | None = None
     last_known_good: BaselineInfo | None = None
     bisect_delta: BisectDelta | None = None

@@ -17,24 +17,40 @@ if TYPE_CHECKING:
 from .types import AnalysisConfig, BaselineInfo
 
 log = logging.getLogger(__name__)
-REFERENCE_PURPOSES = ("daily_CB timer", "daily2 timer")
+
+# Scheduled runs are tagged by the task scheduler with a purpose such as
+# "daily_CB timer" or "daily2 timer"; only those are comparable reference runs.
+REFERENCE_PURPOSE_LIKE = "%timer%"
 
 
-def _reference_purposes(config: AnalysisConfig, current_purpose: str | None) -> tuple[str, ...]:
-    """Return the purpose values that count as the daily reference set."""
-    if config.baseline_purpose:
-        values = tuple(
-            purpose.strip()
-            for purpose in config.baseline_purpose.split(",")
-            if purpose.strip()
-        )
-        if values:
-            return values
-    if current_purpose == "daily2 timer":
-        return REFERENCE_PURPOSES
-    if current_purpose:
-        return (current_purpose,)
-    return REFERENCE_PURPOSES
+def reference_purpose_sql(
+    config: AnalysisConfig,
+    column: str = "r.purpose",
+) -> tuple[str, list]:
+    """SQL predicate (and params) selecting runs eligible as reference."""
+    values = _explicit_purposes(config)
+    if values:
+        placeholders = ", ".join("?" for _ in values)
+        return f"COALESCE({column}, '') IN ({placeholders})", list(values)
+    return f"lower(COALESCE({column}, '')) LIKE ?", [REFERENCE_PURPOSE_LIKE]
+
+
+def reference_purpose_label(config: AnalysisConfig) -> str:
+    """Human-readable form of the reference purpose filter."""
+    values = _explicit_purposes(config)
+    if values:
+        return f"purpose in {', '.join(values)}"
+    return f"purpose like '{REFERENCE_PURPOSE_LIKE}'"
+
+
+def _explicit_purposes(config: AnalysisConfig) -> tuple[str, ...]:
+    if not config.baseline_purpose:
+        return ()
+    return tuple(
+        purpose.strip()
+        for purpose in config.baseline_purpose.split(",")
+        if purpose.strip()
+    )
 
 
 def select_baseline(
@@ -42,45 +58,41 @@ def select_baseline(
     rec: "RunRecord",
     config: AnalysisConfig,
 ) -> BaselineInfo:
-    """Return the most recent comparable baseline run for *rec*.
+    """Return the most recent timer-scheduled run comparable with *rec*.
 
-    Selection priority (matching the logic previously in ``run.py``):
+    Selection priority:
 
-    1. same machine + same short_run + same purpose + older timestamp
-    2. same machine + same short_run + older timestamp
-    3. same machine + older timestamp
+    1. same machine + same short_run + timer purpose + older timestamp
+    2. same machine + timer purpose + older timestamp
 
     When *config.baseline_green_only* is True the query additionally
     requires ``overall_status = 'green'`` in the ``analysis_results``
     table.  If that table does not yet exist the flag is silently ignored.
     """
     green_join = _green_join(con) if config.baseline_green_only else ""
-
-    reference_purposes = _reference_purposes(config, rec.purpose)
+    label = reference_purpose_label(config)
 
     # --- priority 1: same short_run + reference purpose ---
     row = _query_baseline(
         con,
         rec=rec,
+        config=config,
         green_join=green_join,
         include_short_run=True,
-        include_purpose=True,
-        purpose_values=reference_purposes,
     )
     if row:
-        return _make_info(row, f"same machine, short_run, purpose in {', '.join(reference_purposes)}")
+        return _make_info(row, f"latest run with same machine, short_run, {label}")
 
     # --- priority 2: same machine + reference purpose ---
     row = _query_baseline(
         con,
         rec=rec,
+        config=config,
         green_join=green_join,
         include_short_run=False,
-        include_purpose=True,
-        purpose_values=reference_purposes,
     )
     if row:
-        return _make_info(row, f"same machine, purpose in {', '.join(reference_purposes)}")
+        return _make_info(row, f"latest run with same machine, {label}")
 
     return BaselineInfo(status="not_found")
 
@@ -102,9 +114,8 @@ def find_last_known_good(
     try:
         where_sql, params = _candidate_filters(
             rec,
+            config=config or AnalysisConfig(),
             include_short_run=True,
-            include_purpose=True,
-            purpose_values=_reference_purposes(config or AnalysisConfig(), rec.purpose),
             require_overlap=False,
         )
         row = con.execute(
@@ -147,16 +158,14 @@ def _query_baseline(
     con: "duckdb.DuckDBPyConnection",
     *,
     rec: "RunRecord",
+    config: AnalysisConfig,
     green_join: str,
     include_short_run: bool,
-    include_purpose: bool,
-    purpose_values: tuple[str, ...] | None = None,
 ) -> tuple | None:
     where_sql, params = _candidate_filters(
         rec,
+        config=config,
         include_short_run=include_short_run,
-        include_purpose=include_purpose,
-        purpose_values=purpose_values,
         require_overlap=True,
     )
     sql = f"""
@@ -175,9 +184,8 @@ def _query_baseline(
 def _candidate_filters(
     rec: "RunRecord",
     *,
+    config: AnalysisConfig,
     include_short_run: bool,
-    include_purpose: bool,
-    purpose_values: tuple[str, ...] | None,
     require_overlap: bool,
 ) -> tuple[str, list]:
     """Build shared candidate-policy predicates for baseline/LKG lookup."""
@@ -191,15 +199,10 @@ def _candidate_filters(
     if include_short_run:
         clauses.append("r.short_run IS NOT DISTINCT FROM ?")
         params.append(rec.short_run)
-    if include_purpose:
-        values = purpose_values or _reference_purposes(AnalysisConfig(), rec.purpose)
-        if len(values) == 1:
-            clauses.append("COALESCE(r.purpose, '') = COALESCE(?, '')")
-            params.append(values[0])
-        else:
-            placeholders = ", ".join("?" for _ in values)
-            clauses.append(f"COALESCE(r.purpose, '') IN ({placeholders})")
-            params.extend(values)
+
+    purpose_sql, purpose_params = reference_purpose_sql(config)
+    clauses.append(purpose_sql)
+    params.extend(purpose_params)
 
     if require_overlap:
         clauses.append(
