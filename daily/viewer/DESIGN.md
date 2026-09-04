@@ -95,24 +95,26 @@ DuckDB helpers used by `app.py`. All return pandas DataFrames.
 | `geomean_trend` | `exp(avg(ln(value)))` per run, filtered by `exec_mode` / `in_bucket` / `out_bucket` / `excluded_models` |
 
 ### `daily/viewer/app.py`
-Streamlit entry. 5 tabs.
+Streamlit entry. 4 tabs.
 
 | Tab | Purpose |
 |---|---|
-| Dashboard | First tab. Selects the latest run whose purpose/description matches `DEFAULT_RUN_FILTER` (fallback: `daily_CB`), then reviews summary / `.pytest.json` / `.raw` artifacts to show whether tests actually ran, pass/fail totals, grouped failure causes, per-test pytest-json/summary messages, and the raw pytest log text. Artifact siblings are derived from `source_path` stem (`.summary.json` / `.pickle` suffix stripped) — `report_file` is source-identity only, never fed to text/JSON readers. |
+| Dashboard | One bordered card per machine, narrowed by a machine-name substring box. Each card holds, in order: failing models in the latest run, a rig-change note, the machine's newest clean run and newest failed run as two side-by-side run cards, and the per-metric geomean trend. |
 | Excel | Select runs → wide matrix (profile rows × run stamps) + tab-separated paste block + "extra rows" expander |
-| Regression | MERGED tab (was separate Trend + Regressions). Shows a ranked table of series by worsening %, plus a one-series-at-a-time trend plot for the selected row. Baseline median + recent median rendered as Scatter traces with legend entries; rolling ±2σ band drawn with a visible fill (rgba 0.28) so it reads on bright monitors. |
-| Geomean | `exec_mode × in_bucket × out_bucket` geomean trend + band + latest-point alert (user-requested) |
-| Noise | Per-series CV table sorted desc (iGPU diagnostics) |
+| Compare | Run A vs run B at series level; every A/B delta is also compared against the history preceding each run so scatter is told apart from a real change |
+| Exclusions | Manually hide a machine+run from every cohort-based view |
 
-Sidebar:
-- **Machine filter:** "Daily machines only" checkbox (default `True`). When `True`, dropdown is filtered by `DAILY_MACHINES` constant (`dg2alderlake`, `MTL-01`, `ARLH-01`, `BMG-02`, `LNL-03`, `LNL-04`, `DUT4580PTLH`, `DUT6047BMGFRD`). Falls back to full list if none intersect.
-- **Default filter:** Excel tab purpose filter defaults to `daily_CB timer` via `DEFAULT_RUN_FILTER` constant.
-- **Days slider:** 7–60 day range for trend history. All tab-local "days" inputs (Geomean, Noise) capped at 60 for consistency.
+Sidebar holds global settings only: DB path, "Refresh database", display
+profile, chart y-axis range.
+
+Analysis scope is per tab (`_scope_controls`): history depth in runs (3–20),
+`Purpose` filter, and the minimum successful series a run must have. Each view
+owns its own window instead of sharing one sidebar state; the machine is also
+chosen per tab (`_machine_picker`).
 
 Other:
-- **Unit display:** every user-visible numeric carries its unit — table median columns render as `8.060 s`, trend heading shows `[s]`, caption prints `Recent median = 8.060 s`. Prevents SD pipeline seconds from being mis-read as ms.
-- **Caching:** all queries wrapped with `@st.cache_data` keyed on DB mtime to auto-invalidate on re-ingest.
+- **Unit display:** every user-visible numeric carries its unit — trend heading shows `[s]`, captions print `Recent median = 8.060 s`. Prevents SD pipeline seconds from being mis-read as ms.
+- **Caching:** all queries wrapped with `@st.cache_data` keyed on `_cache_version()` (see below).
 - **Config source:** `DAILY_DB` env var or `-- --db <path>` trailing arg (streamlit swallows its own flags).
 
 ### `daily/run.py`
@@ -121,13 +123,15 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 - **Exit policy:** always returns `0` if the run completed end-to-end (report built). Test failures are reflected in JSON summary / mail, not exit code. Only infra failures (no pytest JSON produced) propagate a non-zero rc. Changed per user request; relied on by Jenkins to distinguish "test failed" from "run itself broke".
 
 ### Legacy / independent modules
+All of them are gone; the entries stay so the removal is not re-litigated.
+
 | Path | Status |
 |---|---|
-| `daily/viewer/_old_viewer.py` | Legacy reference. Do not import. |
-| `daily/viewer/_old_ingest.py` | Legacy reference. Do not import. |
-| `daily/viewer/_old_schema.sql` | Legacy reference. Do not use. |
-| `daily/viewer/perf_rows.py` | Used by `xlsx_update.py` path (flatten summary → lookup dict). Kept as-is. **NOTE:** this one DOES bucket (`'short'` / `'long'`) for the xlsx template — do not reuse for DB ingest (which must keep raw tokens). |
-| `daily/viewer/xlsx_update.py` | Separate xlsx append path invoked from `run.py`. Independent of the DuckDB pipeline. |
+| `daily/viewer/_old_viewer.py` | Deleted. Superseded by `app.py`, no importers. |
+| `daily/viewer/_old_ingest.py` | Deleted. Superseded by `ingest/`. |
+| `daily/viewer/_old_schema.sql` | Deleted. Superseded by `schema.sql`. |
+| `daily/viewer/perf_rows.py` | Deleted with the xlsx path. It flattened `summary.json` into the master-xlsx lookup key and bucketed tokens into `'short'` / `'long'` for the old `FIXED_ROW_ORDER` template. The DuckDB path never used it — `ingest/loader_new.py` does its own extraction and keeps raw tokens. |
+| `daily/viewer/xlsx_update.py` | Deleted. The master-xlsx workflow (`run.py --xlsx-update`) no longer exists; the DuckDB viewer replaced it. |
 
 ---
 
@@ -148,7 +152,8 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 - **User request:** B — ingest is data-as-is; viewer does the bucketing.
 - **Implementation:** `perf_with_buckets` view derives `in_bucket` / `out_bucket`. Threshold lives in SQL — change the view to retune, no re-ingest needed.
 
-### Regression detection method (current approach)
+### Regression detection method (query layer)
+- **Scope:** this describes `queries.trend_regressions` / `compare_runs_with_trend`. The dedicated "Regression" tab was removed; the method now surfaces in the Compare tab (each A/B delta is judged against the history preceding each run) and in mail alerts.
 - **Choice:** two-window median comparison — recent-window median vs baseline-window median.
 - **Rejected:**
   - Single-point robust z-score — user feedback: they want to see whether the recent BLOCK is drifting, not whether today is an outlier. Single-point tests flip on any blip and are useless when data is noisy or occasionally corrupted.
@@ -159,14 +164,13 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 - **UI threshold defaults:** `pct_threshold_from_sidebar=0.05`, `z_threshold_from_sidebar=3.0`, `noisy_cv_threshold=0.10`.
   > These are controlled by the Streamlit sidebar, not by `trend_regressions`.
 - **Direction normalisation:** `worsening_pct` is signed so positive always means "worse" — ms/s/%: `+pct` when recent>baseline; FPS/tps: `+pct` when recent<baseline. `worsening_z` uses baseline MAD (`sigma ≈ 1.4826 * MAD`) so recent noise does not hide or inflate the comparison. UI sorts by threshold-normalised severity = `max(worsening_pct / pct_threshold, worsening_z / z_threshold)`.
-- **Purpose filter:** regression summary and selected-series history are filtered to purpose containing `daily_CB timer` so personal PR runs do not pollute baseline/recent windows. The chart rolling band is recomputed from filtered `perf_flat` rows, not from `perf_stats`, because `perf_stats` is an all-purpose view.
-- **UI:** single merged "Regression" tab. Ranked table (worst first by threshold-normalised severity) + one trend chart per selected row. See `app.py:_tab_regression`.
-- **Supersedes:** the earlier rolling z-score point-vs-band helper was removed; `trend_regressions` is the single regression signal used by UI and mail alerts.
+- **Purpose filter:** regression summary and selected-series history are filtered by the tab's `Purpose` scope control so personal PR runs do not pollute baseline/recent windows. The chart rolling band is recomputed from filtered `perf_flat` rows, not from `perf_stats`, because `perf_stats` is an all-purpose view.
+- **Supersedes:** the earlier rolling z-score point-vs-band helper was removed; `trend_regressions` is the single regression signal used by mail alerts.
 
 ### One series per trend chart
-- **Choice:** enforce single-series plot in the Regression tab.
+- **Choice:** enforce single-series plots (Compare tab).
 - **Why:** mixing models with wildly different value ranges on one chart makes it unreadable. Table-plus-single-chart is the pattern that scales.
-- **Implementation:** row selection in the summary table drives which series is plotted. Default = row 0 (worst drift). The y-axis range has a minimum relative span so tiny stable differences (e.g. `31.6 ms` vs `31.95 ms`) are not over-zoomed into visually noisy fluctuations.
+- **Implementation:** row selection in the summary table drives which series is plotted. The y-axis range has a minimum relative span so tiny stable differences (e.g. `31.6 ms` vs `31.95 ms`) are not over-zoomed into visually noisy fluctuations.
 
 ### SD pipeline unit normalization
 - **Problem observed:** legacy `TestStableDiffusion` pickle stored ms; newer `TestStableDiffusionGenai` / `TestStableDiffusionDGfxE2eAi` pickles stored seconds. The original `_sd_perf` lumped them all into `unit='ms'`, so SD-XL pipeline (actually 8 s) showed up as 8 ms in comparisons.
@@ -179,15 +183,15 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 - **Why:** raw numbers without units caused the SD-XL confusion above. User should never have to remember which test type is in which unit.
 - **Implementation:** regression table builds display-only `recent` / `baseline` columns like `8.060 s`; raw numeric columns hidden via `column_config` but retained for plot/caption code paths.
 
-### Geomean alerting
-- **User request:** C — user explicitly wants geomean-level trend alerts (not just per-series).
-- **Implementation:** `geomean_trend()` groups by `(machine, exec_mode, in_bucket, out_bucket)`. Tab computes median + MAD of the geomean series itself and shows a banner if latest point falls outside `±z·σ` AND `±pct%`.
+### Geomean on the dashboard
+- **Choice:** each machine card carries a geomean trend per metric, restricted to the series every run of that machine measured (`geomean_matrix`).
+- **Why:** a run that lost models to failures must move the success count, not the geomean — otherwise a failure reads as a performance change.
+- **History:** the standalone "Geomean" tab (bucket geomean + ±2σ band + latest-point banner, backed by `geomean_trend`) was removed. `geomean_trend` is now unused by the UI.
 
 ### Daily machines filter
-- **Choice:** hardcoded `DAILY_MACHINES` tuple in `app.py` with sidebar checkbox (default `True`).
-- **Rejected:** DB-backed list (operational set doesn't need runtime mutation and git is the right source of truth).
-- **Machines:** `dg2alderlake`, `MTL-01`, `ARLH-01`, `BMG-02`, `LNL-03`, `LNL-04`, `DUT4580PTLH`, `DUT6047BMGFRD`.
-- **Fallback:** if the checkbox filter leaves the dropdown empty (fresh DB), falls back to the full machine list.
+- **Choice:** hardcoded `DAILY_MACHINES` tuple in `app.py`, applied unconditionally by `_machines_in_scope()`.
+- **Rejected:** DB-backed list (operational set doesn't need runtime mutation and git is the right source of truth); a sidebar toggle (the report root also holds one-off folders, so showing them was never useful).
+- **Fallback:** if no DB machine intersects the tuple (fresh DB), falls back to the full machine list.
 
 ### `run.py` exit-code policy
 - **User request:** always return `0` when the run completes, not when tests pass. Infra failure vs test failure must be distinguishable.
@@ -217,12 +221,79 @@ Daily suite entry — runs pytest, builds reports, ships mail/xlsx.
 - **Why:** partial-state bugs in the old ingest (separate inserts) were painful. Run is the natural unit.
 
 ### Streamlit caching
-- **Choice:** `@st.cache_data` with `_v=DB.stat().st_mtime` as a tiebreaker argument.
-- **Why:** Streamlit cache invalidates when any cache key changes. Passing mtime means re-ingest auto-refreshes all cached queries without manual invalidation.
+- **Choice:** `@st.cache_data` with `_v=_cache_version()` as a tiebreaker argument, where `_cache_version() = max(DB mtime, queries.py mtime)`.
+- **Why:** Streamlit cache invalidates when any cache key changes. DB mtime alone auto-refreshes on re-ingest, but a long-running server kept serving frames built by the *previous* SQL after a `queries.py` deploy — the schema of a cached frame then no longer matched the code reading it. Folding the query module's mtime in makes a code change invalidate the cache too.
+- **Note:** `_db_version()` stays DB-only; it is used for the "DB exists" check and for detecting that another session rebuilt the DB during a refresh.
 
 ### Trend plot axis orientation
-- **Choice:** `xaxis autorange reversed` — newest on the left.
-- **Why:** user request — matches the team's convention of reading newest-first.
+- **Choice:** default `xaxis autorange` — oldest on the left, newest on the right.
+- **Why:** user request — charts read chronologically; tables stay newest-first.
+
+---
+
+## UI design guidelines
+
+The viewer is an operations tool. The goal is unambiguous separation of data,
+not visual richness. Treat this section as the house style: follow it instead
+of inventing per-tab styling.
+
+### Reference sources
+
+| Topic | Source |
+|---|---|
+| Table alignment, density, separators | [Pencil & Paper — Data Table Design UX Patterns](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-data-tables) |
+| Formatting numbers for reading | [Datawrapper — data tables](https://www.datawrapper.de/blog/data-tables/) |
+| Chart palettes, dashboard composition | [IBM Carbon — Data visualization](https://carbondesignsystem.com/data-visualization/getting-started/) |
+| Dashboard purpose, cognitive load, meaningful colour | [Grafana — Dashboard best practices](https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/best-practices/) |
+| Which signals are worth showing | [Google SRE Book — Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/) |
+| App-wide theming | [Streamlit — Theming](https://docs.streamlit.io/develop/concepts/configuration/theming) |
+
+### Rules
+
+1. **One question per surface.** Each card answers "is this machine healthy
+   today, and if not, since when". Anything that does not help answer it does
+   not belong on the card.
+2. **Worst news first.** Card order is failing models → rig change note → the
+   two run cards → trend. The reader should not have to scroll to learn that
+   something broke.
+3. **Colour carries meaning, never decoration.** Only the status palette below
+   is allowed. A neutral value gets no colour.
+4. **Numbers are right-aligned and fixed-precision**, and always carry their
+   unit (`8.06 s`, `41.2 min`, `85`). Never centre-align anything.
+5. **Text is left-aligned.** Do not repeat a column's noun in every cell.
+6. **No zebra stripes.** Streamlit's dataframe already has hover/selection
+   states; alternating backgrounds add a third grey that collides with them.
+   Grouping is done with `st.container(border=True)` cards instead.
+7. **Charts read chronologically, left to right**, with a minimum y-axis span
+   so a stable series renders flat rather than as a sawtooth. The newest run is
+   ringed with a dotted circle, and every point's hover carries OV version and
+   purpose.
+8. **Empty states are written out** (`never`, `none.`, `—`) rather than left
+   blank or shown as `None`.
+9. **Theme in one place.** App-level colours, fonts and radii belong in
+   `.streamlit/config.toml`; code-level colours belong in a single module
+   constant, not inline in each call site.
+
+### Status and case colours
+
+| Meaning | Colour | Used by |
+|---|---|---|
+| success / normal | `#1f77b4` | case bar, success counts |
+| skipped / neutral | `#9e9e9e` | case bar, skip counts |
+| failed / bad | `#d62728` | case bar, failed counts |
+
+Run status is additionally carried by an emoji prefix (`🟢 success`,
+`🟡 stale`, `🔴 failed`, `⚪ unknown`) so the signal survives greyscale and
+colour-blind viewing. If the palette is ever retuned, prefer the Okabe–Ito
+colour-blind-safe set (`#0072B2` blue, `#999999` grey, `#D55E00` vermillion),
+which keeps blue/red separable for deuteranopia.
+
+### Known deviations
+
+- `_case_bar()` emits raw HTML because `st.progress` is single-colour and the
+  success/skip/failed split has to be visible in one bar.
+- Colours are still literals in `app.py`; folding them into `config.toml`
+  (`theme.chartCategoricalColors`) is open work.
 
 ---
 
@@ -296,3 +367,5 @@ DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 - **`perf_stats` still uses correlated subqueries (O(n·m) conceptually).** Measured ~0.57s for 322k `perf_stats` rows on 2026-04-27, so no cached table is needed yet. If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest.
 - **Email regression alerts from `run.py`.** Implemented as a best-effort report section before mail delivery. Future work: tune thresholds or add a dedicated HTML table if recipients want richer formatting.
 - **Additional display profiles.** The sidebar hides the profile dropdown when only one profile exists. Add an iGPU-focused profile when there is a real second display layout to choose from.
+- **Dead code removed (2026-09).** `_old_viewer.py`, `_old_ingest.py`, `_old_schema.sql`, `perf_rows.py` and `xlsx_update.py` were deleted, along with the query functions orphaned when the Regression/Geomean/Noise/Functional tabs went away: `geomean_trend`, `noise_summary`, `list_run_kinds`, `machine_stats_for_run`, `monitor_samples_for_run`, `functional_summary_for_runs`, `fetch_functional_history`, `fetch_functional_summary`, `fetch_analysis_overview`. `trend_regressions` and `fetch_run_comparison` stayed — mail alerts and `compare_runs_with_trend` still call them.
+- **Colour tokens in `config.toml`.** Card and chart colours are still literals in `app.py`; move them to `.streamlit/config.toml` so the theme is set in one place.

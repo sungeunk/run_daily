@@ -97,24 +97,25 @@ DuckDB upsert (각 `RunRecord` 단위 transaction) + display-profile loader입�
 | `geomean_trend` | run별 `exp(avg(ln(value)))`, `exec_mode` / `in_bucket` / `out_bucket` / `excluded_models`로 filter |
 
 ### `daily/viewer/app.py`
-Streamlit entry입니다. 5개 tab이 있습니다.
+Streamlit entry입니다. 4개 tab이 있습니다.
 
 | Tab | 목적 |
 |---|---|
-| Dashboard | 첫 번째 tab입니다. `DEFAULT_RUN_FILTER`와 purpose/description이 match되는 최신 run을 선택합니다. fallback은 `daily_CB`입니다. summary / `.pytest.json` / `.raw` artifact를 검토해서 test가 실제로 실행되었는지, pass/fail total, grouped failure cause, per-test pytest-json/summary message, raw pytest log text를 보여줍니다. Artifact sibling은 `source_path` stem에서 파생합니다. (`.summary.json` / `.pickle` suffix 제거) `report_file`은 source identity일 뿐이며 text/JSON reader에 직접 넣지 않습니다. |
+| Dashboard | machine 이름 부분 문자열 filter로 좁힌 뒤, machine마다 bordered card 하나를 보여줍니다. card 구성 순서는 latest run의 failing models -> rig 변경 note -> newest clean run과 newest failed run을 좌우 두 run card로 -> metric별 geomean trend입니다. |
 | Excel | run 선택 -> wide matrix (profile rows x run stamps) + tab-separated paste block + "extra rows" expander |
-| Regression | MERGED tab입니다. 이전의 Trend + Regressions를 합쳤습니다. worsening % 기준으로 ranked table을 보여주고, 선택된 row에 대해 one-series-at-a-time trend plot을 표시합니다. Baseline median + recent median은 legend entry가 보이도록 Scatter trace로 렌더링합니다. rolling ±2σ band는 밝은 모니터에서도 보이도록 visible fill (rgba 0.28)로 그립니다. |
-| Geomean | `exec_mode x in_bucket x out_bucket` geomean trend + band + latest-point alert (사용자 요청) |
-| Noise | Per-series CV table sorted desc (iGPU diagnostics) |
+| Compare | run A와 run B를 series 단위로 비교합니다. 모든 A/B delta는 각 run 이전 history와도 비교해서 단순 scatter인지 실제 변화인지 구분합니다. |
+| Exclusions | 특정 machine+run을 모든 cohort 기반 view에서 수동으로 제외합니다. |
 
-Sidebar:
-- **Machine filter:** "Daily machines only" checkbox (default `True`). `True`이면 dropdown은 `DAILY_MACHINES` constant (`dg2alderlake`, `MTL-01`, `ARLH-01`, `BMG-02`, `LNL-03`, `LNL-04`, `DUT4580PTLH`, `DUT6047BMGFRD`)로 filter됩니다. 교집합이 없으면 full list로 fallback합니다.
-- **Default filter:** Excel tab의 purpose filter는 `DEFAULT_RUN_FILTER` constant를 통해 `daily_CB timer`가 기본값입니다.
-- **Days slider:** trend history는 7-60일 범위입니다. Geomean, Noise의 tab-local "days" input도 일관성을 위해 60으로 cap합니다.
+Sidebar에는 global 설정만 둡니다: DB path, "Refresh database", display profile,
+chart y-axis range.
+
+Analysis scope는 tab별입니다 (`_scope_controls`): history depth (run 단위, 3-20),
+`Purpose` filter, run당 최소 successful series 수. sidebar state를 공유하지 않고
+각 view가 자기 window를 소유합니다. machine 선택도 tab별입니다 (`_machine_picker`).
 
 Other:
-- **Unit display:** 사용자에게 보이는 모든 numeric에는 unit을 붙입니다. table median column은 `8.060 s`, trend heading은 `[s]`, caption은 `Recent median = 8.060 s`처럼 표시합니다. SD pipeline seconds가 ms로 오해되는 것을 막습니다.
-- **Caching:** 모든 query는 DB mtime을 key로 포함하는 `@st.cache_data`로 감쌉니다. re-ingest 후 cache가 자동 invalidation됩니다.
+- **Unit display:** 사용자에게 보이는 모든 numeric에는 unit을 붙입니다. trend heading은 `[s]`, caption은 `Recent median = 8.060 s`처럼 표시합니다. SD pipeline seconds가 ms로 오해되는 것을 막습니다.
+- **Caching:** 모든 query는 `_cache_version()`을 key로 포함하는 `@st.cache_data`로 감쌉니다. (아래 참조)
 - **Config source:** `DAILY_DB` env var 또는 `-- --db <path>` trailing arg를 사용합니다. streamlit이 자체 flag를 먼저 소비하기 때문입니다.
 
 ### `daily/run.py`
@@ -123,13 +124,15 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **Exit policy:** run이 end-to-end로 완료되어 report가 생성되면 test failure와 관계없이 항상 `0`을 반환합니다. Test failure는 JSON summary / mail에 반영하고 exit code로 표현하지 않습니다. pytest JSON이 생성되지 않는 진짜 infra failure만 non-zero rc를 propagate합니다. Jenkins가 "test failed"와 "run itself broke"를 구분할 수 있도록 사용자 요청에 따라 변경되었습니다.
 
 ### Legacy / independent modules
-| Path | 상태 |
+모두 제거되었습니다. 삭제 결정을 다시 되풀지 않도록 항목은 남겨둡니다.
+
+| Path | Status |
 |---|---|
-| `daily/viewer/_old_viewer.py` | Legacy reference. import하지 마세요. |
-| `daily/viewer/_old_ingest.py` | Legacy reference. import하지 마세요. |
-| `daily/viewer/_old_schema.sql` | Legacy reference. 사용하지 마세요. |
-| `daily/viewer/perf_rows.py` | `xlsx_update.py` path에서 사용합니다. summary를 flatten해서 lookup dict로 만듭니다. 그대로 유지합니다. **NOTE:** 이 경로는 xlsx template용으로 bucketing (`'short'` / `'long'`)을 수행합니다. RAW token을 유지해야 하는 DB ingest에는 재사용하지 마세요. |
-| `daily/viewer/xlsx_update.py` | `run.py`에서 호출하는 별도 xlsx append path입니다. DuckDB pipeline과 독립적입니다. |
+| `daily/viewer/_old_viewer.py` | 삭제됨. `app.py`로 대체, import하는 곳 없음. |
+| `daily/viewer/_old_ingest.py` | 삭제됨. `ingest/`로 대체. |
+| `daily/viewer/_old_schema.sql` | 삭제됨. `schema.sql`로 대체. |
+| `daily/viewer/perf_rows.py` | xlsx 경로와 함께 삭제됨. `summary.json`을 master xlsx lookup key 형태로 평탄화하고 구 `FIXED_ROW_ORDER` template을 위해 token을 `'short'` / `'long'`으로 bucketing했습니다. DuckDB 경로는 이를 사용한 적이 없으며 `ingest/loader_new.py`가 자체 추출하고 raw token을 유지합니다. |
+| `daily/viewer/xlsx_update.py` | 삭제됨. master xlsx workflow(`run.py --xlsx-update`)는 더 이상 존재하지 않으며 DuckDB viewer가 그 역할을 대체했습니다. |
 
 ---
 
@@ -150,7 +153,8 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **User request:** B — ingest는 data-as-is이고, viewer가 bucketing합니다.
 - **Implementation:** `perf_with_buckets` view가 `in_bucket` / `out_bucket`을 파생합니다. Threshold는 SQL에 있으므로 view만 바꾸면 되고 re-ingest는 필요 없습니다.
 
-### Regression detection method (current approach)
+### Regression detection method (query layer)
+- **Scope:** 이 항목은 `queries.trend_regressions` / `compare_runs_with_trend`를 설명합니다. 전용 "Regression" tab은 제거되었고, 해당 방식은 Compare tab(각 A/B delta를 그 run 이전 history와 비교)과 mail alert에서 사용됩니다.
 - **Choice:** two-window median comparison — recent-window median vs baseline-window median.
 - **Rejected:**
   - Single-point robust z-score — 사용자 피드백: 오늘의 outlier가 아니라 최근 block이 drift 중인지 보고 싶습니다. Single-point test는 작은 blip에도 뒤집히고, data가 noisy하거나 가끔 corrupt될 때 쓸모가 떨어집니다.
@@ -161,14 +165,13 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **UI threshold defaults:** `pct_threshold_from_sidebar=0.05`, `z_threshold_from_sidebar=3.0`, `noisy_cv_threshold=0.10`.
   > 이 값들은 `trend_regressions`가 아니라 Streamlit sidebar에서 제어합니다.
 - **Direction normalisation:** `worsening_pct`는 positive가 항상 "worse"가 되도록 sign 처리합니다. ms/s/%는 recent>baseline이면 `+pct`, FPS/tps는 recent<baseline이면 `+pct`입니다. `worsening_z`는 baseline MAD (`sigma ≈ 1.4826 * MAD`)를 사용해서 recent noise가 비교를 숨기거나 부풀리지 않도록 합니다. UI는 threshold-normalised severity = `max(worsening_pct / pct_threshold, worsening_z / z_threshold)` 기준으로 정렬합니다.
-- **Purpose filter:** regression summary와 selected-series history는 purpose에 `daily_CB timer`가 포함된 run만 사용합니다. 개인 PR run이 baseline/recent window를 오염시키지 않도록 하기 위함입니다. Chart rolling band는 `perf_stats`가 아니라 filtered `perf_flat` rows에서 재계산합니다. `perf_stats`는 all-purpose view이기 때문입니다.
-- **UI:** single merged "Regression" tab. Ranked table (worst first by threshold-normalised severity) + selected row별 one trend chart. `app.py:_tab_regression`을 참고하세요.
-- **Supersedes:** 이전 rolling z-score point-vs-band helper는 제거했습니다. `trend_regressions`가 UI와 mail alert에서 사용하는 단일 regression signal입니다.
+- **Purpose filter:** regression summary와 selected-series history는 tab의 `Purpose` scope control로 filter합니다. 개인 PR run이 baseline/recent window를 오염시키지 않도록 하기 위함입니다. Chart rolling band는 `perf_stats`가 아니라 filtered `perf_flat` rows에서 재계산합니다. `perf_stats`는 all-purpose view이기 때문입니다.
+- **Supersedes:** 이전 rolling z-score point-vs-band helper는 제거했습니다. `trend_regressions`가 mail alert에서 사용하는 단일 regression signal입니다.
 
 ### One series per trend chart
-- **Choice:** Regression tab에서 single-series plot을 강제합니다.
+- **Choice:** single-series plot을 강제합니다 (Compare tab).
 - **Why:** 값 범위가 크게 다른 model을 하나의 chart에 섞으면 읽기 어렵습니다. Table-plus-single-chart가 scale되는 pattern입니다.
-- **Implementation:** summary table의 row selection이 plot할 series를 결정합니다. 기본값은 row 0 (worst drift)입니다. y-axis range에는 minimum relative span이 있어 `31.6 ms` vs `31.95 ms` 같은 작은 안정적 차이를 과도하게 zoom해서 visually noisy하게 만들지 않습니다.
+- **Implementation:** summary table의 row selection이 plot할 series를 결정합니다. y-axis range에는 minimum relative span이 있어 `31.6 ms` vs `31.95 ms` 같은 작은 안정적 차이를 과도하게 zoom해서 visually noisy하게 만들지 않습니다.
 
 ### SD pipeline unit normalization
 - **Problem observed:** legacy `TestStableDiffusion` pickle은 ms를 저장했고, newer `TestStableDiffusionGenai` / `TestStableDiffusionDGfxE2eAi` pickle은 seconds를 저장했습니다. 기존 `_sd_perf`는 모두 `unit='ms'`로 묶어 SD-XL pipeline (실제로는 8 s)이 comparison에서 8 ms처럼 보였습니다.
@@ -181,15 +184,15 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **Why:** unit 없는 raw number 때문에 SD-XL confusion이 생겼습니다. 사용자가 어떤 test type이 어떤 unit인지 외울 필요가 없어야 합니다.
 - **Implementation:** regression table은 `8.060 s` 같은 display-only `recent` / `baseline` column을 만듭니다. raw numeric column은 `column_config`로 숨기지만 plot/caption code path를 위해 유지합니다.
 
-### Geomean alerting
-- **User request:** C — per-series뿐 아니라 geomean-level trend alert도 명시적으로 원했습니다.
-- **Implementation:** `geomean_trend()`는 `(machine, exec_mode, in_bucket, out_bucket)` 기준으로 group합니다. Tab은 geomean series 자체의 median + MAD를 계산하고 latest point가 `±z·σ` AND `±pct%` 밖이면 banner를 표시합니다.
+### Geomean on the dashboard
+- **Choice:** machine card마다 metric별 geomean trend를 둘고, 해당 machine의 모든 run이 측정한 series로만 제한합니다 (`geomean_matrix`).
+- **Why:** failure로 model을 잃은 run은 geomean이 아니라 success count가 움직여야 합니다. 그렇지 않으면 failure가 performance 변화처럼 읽힙니다.
+- **History:** 단독 "Geomean" tab(bucket geomean + ±2σ band + latest-point banner, `geomean_trend` 기반)은 제거되었습니다. `geomean_trend`는 현재 UI에서 사용되지 않습니다.
 
 ### Daily machines filter
-- **Choice:** `app.py`의 hardcoded `DAILY_MACHINES` tuple + sidebar checkbox (default `True`).
-- **Rejected:** DB-backed list. 운영 대상 machine set은 runtime mutation이 필요 없고 git이 source of truth로 적합합니다.
-- **Machines:** `dg2alderlake`, `MTL-01`, `ARLH-01`, `BMG-02`, `LNL-03`, `LNL-04`, `DUT4580PTLH`, `DUT6047BMGFRD`.
-- **Fallback:** checkbox filter 후 dropdown이 비면 (fresh DB) full machine list로 fallback합니다.
+- **Choice:** `app.py`의 hardcoded `DAILY_MACHINES` tuple을 `_machines_in_scope()`에서 무조건 적용합니다.
+- **Rejected:** DB-backed list. 운영 대상 machine set은 runtime mutation이 필요 없고 git이 source of truth로 적합합니다. sidebar toggle도 제거했습니다. report root에는 일회성 folder가 남아 있어 이를 보여주는 것은 의미가 없었습니다.
+- **Fallback:** DB의 machine과 교집합이 없으면 (fresh DB) full machine list로 fallback합니다.
 
 ### `run.py` exit-code policy
 - **User request:** test pass 여부가 아니라 run이 완료되었으면 항상 `0`을 반환해야 합니다. Infra failure와 test failure는 구분되어야 합니다.
@@ -219,12 +222,74 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **Why:** old ingest의 partial-state bug (separate insert)는 고통스러웠습니다. Run이 자연스러운 단위입니다.
 
 ### Streamlit caching
-- **Choice:** `_v=DB.stat().st_mtime`을 tiebreaker argument로 넣은 `@st.cache_data`.
-- **Why:** Streamlit cache는 cache key가 바뀌면 invalidation됩니다. mtime을 넘기면 re-ingest 후 cached query가 수동 invalidation 없이 자동 refresh됩니다.
+- **Choice:** `_v=_cache_version()`을 tiebreaker argument로 넣은 `@st.cache_data`. `_cache_version() = max(DB mtime, queries.py mtime)`입니다.
+- **Why:** Streamlit cache는 cache key가 바뀌면 invalidation됩니다. DB mtime만 넣으면 re-ingest는 커버되지만, 서버가 오래 떠 있는 상태에서 `queries.py`를 배포하면 이전 SQL로 만들어진 frame이 계속 반환되어 column schema가 코드와 어긍나는 문제가 있었습니다. query module mtime을 함께 보면 코드 변경도 cache를 invalidation합니다.
+- **Note:** `_db_version()`은 DB 전용으로 남겨둡니다. DB 존재 확인과, refresh 중 다른 session이 DB를 재생성했는지 감지하는 데 쓰입니다.
 
 ### Trend plot axis orientation
-- **Choice:** `xaxis autorange reversed` — newest on the left.
-- **Why:** 사용자 요청입니다. 팀의 newest-first 읽기 convention과 맞습니다.
+- **Choice:** default `xaxis autorange` — oldest on the left, newest on the right.
+- **Why:** 사용자 요청입니다. chart는 시간순으로 읽고, table은 newest-first를 유지합니다.
+
+---
+
+## UI design guidelines
+
+viewer는 운영 도구입니다. 목표는 화려함이 아니라 데이터가 명확히 구분되는 것입니다.
+이 섹션을 house style로 간주하고, tab마다 새 styling을 만들지 마십시오.
+
+### 참고 자료
+
+| 주제 | 출처 |
+|---|---|
+| Table 정렬/밀도/구분선 | [Pencil & Paper — Data Table Design UX Patterns](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-data-tables) |
+| 숫자 표기 | [Datawrapper — data tables](https://www.datawrapper.de/blog/data-tables/) |
+| Chart palette, dashboard 구성 | [IBM Carbon — Data visualization](https://carbondesignsystem.com/data-visualization/getting-started/) |
+| Dashboard 목적, 인지 부하, 의미 있는 색 사용 | [Grafana — Dashboard best practices](https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/best-practices/) |
+| 어떤 signal을 보여줄 것인가 | [Google SRE Book — Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/) |
+| App 전체 theming | [Streamlit — Theming](https://docs.streamlit.io/develop/concepts/configuration/theming) |
+
+### 규칙
+
+1. **한 화면은 한 질문에만 답합니다.** 각 card가 답하는 질문은 "이 machine은 오늘
+   정상인가, 아니라면 언제부터인가"입니다. 이에 도움이 안 되는 것은 card에 넣지
+   않습니다.
+2. **나쁜 소식을 먼저.** card 순서는 failing models -> rig 변경 note -> run card
+   2개 -> trend입니다. 무언가 깨졌다는 사실을 알려고 scroll하게 하지 않습니다.
+3. **색은 의미만 전달합니다.** 장식용 색은 쓰지 않으며, 아래 status palette만
+   허용합니다. 중립적인 값은 색을 입히지 않습니다.
+4. **숫자는 우측 정렬 + 고정 소수점**이며 항상 unit을 함께 표시합니다
+   (`8.06 s`, `41.2 min`, `85`). 가운데 정렬은 쓰지 않습니다.
+5. **텍스트는 좌측 정렬**하고, column 이름을 모든 cell에 반복하지 않습니다.
+6. **Zebra stripe를 쓰지 않습니다.** Streamlit dataframe에는 이미 hover/selection
+   state가 있어 교차 배경이 세 번째 회색으로 충돌합니다. 그룹핑은
+   `st.container(border=True)` card로 합니다.
+7. **Chart는 왼쪽에서 오른쪽으로 시간순**으로 읽히며, y축에 최소 span을 두어
+   안정적인 series가 톱니 모양으로 보이지 않게 합니다. 최신 run에는 점선 원을
+   씨우고, 모든 점의 hover에 OV version과 purpose를 담습니다.
+8. **빈 상태는 글로 쓴다** (`never`, `none.`, `—`). 공백이나 `None`으로 두지
+   않습니다.
+9. **Theme은 한 곳에.** App 수준의 색/폰트/radius는 `.streamlit/config.toml`에,
+   코드 수준의 색은 module 상수 하나에 둡니다. 호출부에 inline하지 않습니다.
+
+### Status / case 색상
+
+| 의미 | 색 | 사용처 |
+|---|---|---|
+| success / 정상 | `#1f77b4` | case bar, success count |
+| skipped / 중립 | `#9e9e9e` | case bar, skip count |
+| failed / 문제 | `#d62728` | case bar, failed count |
+
+Run status는 emoji prefix(`🟢 success`, `🟡 stale`, `🔴 failed`, `⚪ unknown`)로도
+표시해서 흑백이나 색각 이상 환경에서도 식별되도록 합니다. palette를 다시 잡을 경우
+색각 안전한 Okabe-Ito set(`#0072B2` 파랑, `#999999` 회색, `#D55E00` 주황)을
+우선합니다. 적록색약에서도 파랑/빨강 구분이 유지됩니다.
+
+### 알려진 예외
+
+- `_case_bar()`는 raw HTML을 쓴다. `st.progress`는 단색이라 success/skip/failed
+  분할을 막대 하나에 보여줄 수 없습니다.
+- 색상이 아직 `app.py`에 literal로 남아 있습니다. `config.toml`의
+  `theme.chartCategoricalColors`로 옮기는 것은 미완료 작업입니다.
 
 ---
 
@@ -298,3 +363,5 @@ DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 - **`perf_stats`는 여전히 correlated subquery를 사용합니다. (개념적으로 O(n·m))** 2026-04-27 기준 322k `perf_stats` rows에서 약 0.57초로 측정되어 아직 cached table은 필요 없습니다. query time이 1초를 넘으면 ingest 시점에 Python-side precomputation으로 `perf_stats_cached` table에 쓰는 방식으로 바꾸는 것을 고려합니다.
 - **`run.py`의 email regression alert.** mail delivery 전에 best-effort report section으로 구현했습니다. Future work: 수신자가 더 풍부한 형식을 원하면 threshold tuning이나 전용 HTML table 추가를 고려합니다.
 - **추가 display profile.** profile이 하나뿐이면 sidebar는 profile dropdown을 숨깁니다. 실제로 선택할 두 번째 display layout이 생기면 iGPU-focused profile을 추가합니다.
+- **Dead code 제거 완료 (2026-09).** `_old_viewer.py`, `_old_ingest.py`, `_old_schema.sql`, `perf_rows.py`, `xlsx_update.py`를 삭제했고, Regression/Geomean/Noise/Functional tab 제거로 호출자를 잃은 query 함수도 함께 제거했습니다: `geomean_trend`, `noise_summary`, `list_run_kinds`, `machine_stats_for_run`, `monitor_samples_for_run`, `functional_summary_for_runs`, `fetch_functional_history`, `fetch_functional_summary`, `fetch_analysis_overview`. `trend_regressions`와 `fetch_run_comparison`은 mail alert와 `compare_runs_with_trend`가 여전히 사용해서 유지했습니다.
+- **Colour token을 `config.toml`로.** card와 chart 색이 아직 `app.py`에 literal로 남아 있습니다. `.streamlit/config.toml`로 옮겨 theme을 한 곳에서 지정합니다.

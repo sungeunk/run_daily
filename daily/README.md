@@ -25,7 +25,7 @@ daily/
   parsers/                출력 파서 (llm_benchmark 등)
   tests/                  실제 테스트 파일
   report/                 리포트 빌더 (pytest JSON → text + summary JSON)
-  viewer/                 perf_rows 평탄화 + xlsx 업데이트
+  viewer/                 DuckDB ingest + Streamlit 뷰어
 ```
 
 ## 머신별 설정
@@ -114,49 +114,10 @@ sudo chmod 775 /var/www/html/daily2
 ssh 사용자에게 권한이 없으면 `<hostname>` 디렉토리 자동 생성이 실패하고,
 어떤 조치가 필요한지 에러 메시지로 안내.
 
-### 공유 master xlsx (OneDrive / SharePoint)
-
-팀이 SharePoint 에 xlsx 하나를 유지 — 각 컬럼이 하나의 일일 런.
-`--xlsx-update` 에 로컬 싱크된 경로를 주면 오늘의 결과로 새 컬럼을 추가하고
-in-place 저장. OneDrive 가 이후 sync 를 담당.
-
-```bash
-python daily/run.py \
-    --xlsx-update "/home/me/OneDrive/daily-perf.xlsx" \
-    --xlsx-sheet Daily
-```
-
-시트 해석 방식 (모두 구성 가능):
-
-| knob | 기본값 | 의미 |
-|------|---------|---------|
-| `--xlsx-sheet` | 첫 번째 시트 | 쓸 시트 |
-| `--xlsx-key-cols` | `1,2,3,4,5` (A..E) | `(model, precision, in, out, exec)` 가 있는 컬럼 |
-| `--xlsx-header-rows` | `3` | commit / workweek / datetime 용 헤더 행 수 |
-
-writer 동작:
-1. `header_rows + 1` 행부터 키 컬럼들을 읽어 행 순서를 파악
-   — `FIXED_ROW_ORDER` 상수 유지 불필요.
-2. 가장 오른쪽에 컬럼 하나 추가.
-3. 헤더 3셀 (`ov_version`, `workweek`, `datetime`) 과, 이번 런 결과에 있는
-   키에 해당하는 값 하나씩 채움. 매칭 안 되는 행은 빈 셀로 남김.
-
-빈 셀로 남는 행은 xlsx 가 기대한 메트릭을 이번 런이 만들지 않았다는 뜻 —
-테스트가 skip/fail 됐거나, xlsx 의 키 튜플이 `perf_rows.py` 가 내놓는 값과
-다른 경우. 조건문으로 우회하지 말고 xlsx 나 파서를 맞춰야 함.
-
-### 수동 xlsx 업데이트 (cron 외 상황)
-
-```bash
-python -m daily.viewer.xlsx_update \
-    --summary daily/output/daily.20260422_0104.summary.json \
-    --xlsx "/path/to/master.xlsx"
-```
-
 ## 전체 cron 예시 (Linux)
 
 야간 잡이 실제로 하는 일 전부 — OpenVINO 소싱, 머신별 디바이스 설정,
-전체 수트 실행, share / mail / master xlsx 로 결과 전달.
+전체 수트 실행, share / mail 로 결과 전달.
 
 ```bash
 #!/usr/bin/env bash
@@ -176,9 +137,7 @@ export MAIL_RELAY_SERVER=dg2raptorlake.ikor.intel.com
 python daily/run.py \
     --backup \
     --mail your.email@intel.com \
-    --description "LLM nightly" \
-    --xlsx-update "/home/sungeunk/OneDrive/daily-perf.xlsx" \
-    --xlsx-sheet Daily
+    --description "LLM nightly"
 ```
 
 crontab 엔트리 (매일 01:00 실행):
@@ -214,9 +173,7 @@ $env:MAIL_RELAY_SERVER = 'dg2raptorlake.ikor.intel.com'
 python daily\run.py `
     --backup `
     --mail your.email@intel.com `
-    --description "LLM nightly" `
-    --xlsx-update "C:\Users\me\OneDrive\daily-perf.xlsx" `
-    --xlsx-sheet Daily
+    --description "LLM nightly"
 ```
 
 수동 실행:
@@ -239,13 +196,11 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 
 ## 공통 주의사항 (Linux / Windows)
 
-* 스크립트는 준-멱등(idempotent-ish): 재실행 시 새 타임스탬프 + 새 xlsx
-  컬럼이 생성되며, 기존 마스터 xlsx 데이터는 덮어쓰지 않음.
+* 스크립트는 준-멱등(idempotent-ish): 재실행 시 새 타임스탬으로 산출물이
+  생성되며, 기존 결과를 덮어쓰지 않음.
 * `--backup` 은 `MAIL_RELAY_SERVER` 가 설정되어 있어야 동작. 없으면 경고만
   찍고 스킵. `--mail` 은 Linux 에서 `mail(1)` PATH 에, Windows 에서는
   릴레이 SSH 접근이 필요.
-* `--xlsx-update` 는 OneDrive 싱크 중 파일이 잠긴 상태면 non-zero 로 실패.
-  재시도하거나, OneDrive 가 건드리지 않는 로컬 경로로 가리키는 방법 검토.
 
 ## 산출물
 
@@ -315,7 +270,7 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 
 ## 진행 상태
 
-모든 테스트 포팅 + 백업/메일 + xlsx 업데이트 완료.
+모든 테스트 포팅 + 백업/메일 완료.
 
 - [x] llm_benchmark           (15 케이스)
 - [x] benchmark_app           (2 케이스)
@@ -323,5 +278,4 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 - [x] stable_diffusion_genai  (5 케이스, whisper + flux 포함)
 - [x] stable_diffusion_dgfx   (2 케이스)
 - [x] 백업 / 메일 (`--backup`, `--mail`)
-- [x] 공유 xlsx 업데이트 (`--xlsx-update`)
 - [ ] end-to-end 검증 후 `scripts/` 제거

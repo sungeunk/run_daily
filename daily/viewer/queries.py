@@ -205,20 +205,6 @@ def _run_kind_clause(run_kinds: Sequence[str] | None,
     return f" AND {predicate}", params
 
 
-def list_run_kinds(db_path: Path, machine: str | None = None) -> list[str]:
-    if not _has_column(db_path, "runs", "run_kind"):
-        return ["daily"]
-    where = "" if machine is None else "WHERE machine = ?"
-    params = [] if machine is None else [machine]
-    with _read_only(db_path) as con:
-        rows = con.execute(f"""
-            SELECT DISTINCT COALESCE(run_kind, 'daily') AS run_kind
-            FROM runs {where}
-        """, params).fetchall()
-    found = {r[0] for r in rows if r[0]}
-    return [k for k in RUN_KINDS if k in found] + sorted(found - set(RUN_KINDS))
-
-
 def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
                 run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
                 min_success_series: int = 0,
@@ -680,34 +666,6 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
 
 
 # ---------------------------------------------------------------------------
-# Noise diagnostics: per-series CV across recent window
-# ---------------------------------------------------------------------------
-
-def noise_summary(db_path: Path, machine: str | None = None,
-                  days: int = 30) -> pd.DataFrame:
-    where = "WHERE ts >= current_date - (? || ' DAY')::INTERVAL"
-    params: list = [str(days)]
-    if machine:
-        where += " AND machine = ?"
-        params.append(machine)
-    with _read_only(db_path) as con:
-        return con.execute(f"""
-            SELECT
-                machine, model, precision, in_token, out_token, exec_mode, unit,
-                count(*)       AS n,
-                median(value)  AS median_value,
-                stddev_samp(value) AS std_value,
-                CASE WHEN median(value) = 0 THEN NULL
-                     ELSE stddev_samp(value) / median(value) END AS cv
-            FROM perf_flat
-            {where}
-            GROUP BY ALL
-            HAVING count(*) >= 3
-            ORDER BY cv DESC NULLS LAST
-        """, params).fetchdf()
-
-
-# ---------------------------------------------------------------------------
 # Trend-based regression detection: recent window vs older baseline.
 # ---------------------------------------------------------------------------
 
@@ -844,143 +802,6 @@ def trend_regressions(db_path: Path, machine: str,
 
 
 # ---------------------------------------------------------------------------
-# Geomean trend: one number per run across a stable model set
-# ---------------------------------------------------------------------------
-
-def geomean_trend(db_path: Path, machine: str,
-                  *, exec_mode: str = "2nd",
-                  in_bucket: str | None = None,
-                  out_bucket: str | None = None,
-                  exclude_models: tuple[str, ...] = (),
-                  days: int = 90,
-                  purpose_filter: str | None = None) -> pd.DataFrame:
-    """Geomean of ``value`` per run for a bucket of perf rows.
-
-    ``exec_mode`` filters rows ('1st', '2nd', 'pipeline', ...).
-    Bucket filters let the UI separate short-prompt from long-prompt trends,
-    which is the usual way to read LLM 2nd-token latency.
-    """
-    filters = ["f.machine = ?", "f.exec_mode = ?"]
-    params: list = [machine, exec_mode]
-    if purpose_filter:
-        filters.append("COALESCE(f.purpose, '') ILIKE ?")
-        params.append(f"%{purpose_filter}%")
-    if in_bucket:
-        filters.append("f.in_bucket = ?")
-        params.append(in_bucket)
-    if out_bucket:
-        filters.append("f.out_bucket = ?")
-        params.append(out_bucket)
-    if exclude_models:
-        filters.append("f.model NOT IN (" + ",".join(["?"] * len(exclude_models)) + ")")
-        params.extend(exclude_models)
-    filters.append("f.ts >= current_date - (? || ' DAY')::INTERVAL")
-    params.append(str(days))
-
-    where = " AND ".join(filters)
-    with _read_only(db_path) as con:
-        return con.execute(f"""
-            SELECT
-                f.run_id,
-                f.ts,
-                f.date,
-                f.ov_version,
-                f.ov_build,
-                f.ww,
-                exp(avg(ln(f.value))) AS geomean,
-                count(*) AS n_samples
-            FROM perf_flat f
-            WHERE {where}
-              AND f.value > 0
-            GROUP BY f.run_id, f.ts, f.date, f.ov_version, f.ov_build, f.ww
-            ORDER BY f.ts
-        """, params).fetchdf()
-
-
-# ---------------------------------------------------------------------------
-# Functional issue history
-# ---------------------------------------------------------------------------
-
-def fetch_functional_history(
-    db_path: Path,
-    machine: str | None = None,
-    days: int = 30,
-) -> pd.DataFrame:
-    """Return functional_issues joined with run metadata, newest first.
-
-    Each row represents one failed/errored test in a run.
-    Returns an empty DataFrame when the table does not exist (pre-migration DB).
-    """
-    with _read_only(db_path) as con:
-        if "functional_issues" not in _tables_for_db(db_path):
-            return pd.DataFrame()
-
-        machine_filter = "AND r.machine = ?" if machine else ""
-        params: list[object] = [str(days)]
-        if machine:
-            params.append(machine)
-
-        return con.execute(f"""
-            SELECT
-                fi.run_id,
-                r.machine,
-                strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
-                r.ts,
-                r.ov_version,
-                fi.nodeid,
-                fi.outcome,
-                CAST(NULL AS TEXT) AS category,
-                fi.message
-            FROM functional_issues fi
-            JOIN runs r ON r.run_id = fi.run_id
-            WHERE r.ts >= current_date - (? || ' DAY')::INTERVAL
-              {machine_filter}
-            ORDER BY r.ts DESC, fi.nodeid
-        """, params).fetchdf()
-
-
-def fetch_functional_summary(
-    db_path: Path,
-    machine: str | None = None,
-    days: int = 30,
-) -> pd.DataFrame:
-    """Return per-run functional counts joined with analysis_results.
-
-    Useful for building the functional health history chart.
-    Returns an empty DataFrame when analysis tables do not exist.
-    """
-    with _read_only(db_path) as con:
-        if "analysis_results" not in _tables_for_db(db_path):
-            return pd.DataFrame()
-
-        machine_filter = "AND r.machine = ?" if machine else ""
-        params: list[object] = [str(days)]
-        if machine:
-            params.append(machine)
-
-        return con.execute(f"""
-            SELECT
-                r.run_id,
-                r.machine,
-                strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
-                r.ts,
-                r.ov_version,
-                ar.overall_status,
-                ar.functional_fail_count,
-                ar.functional_fail_count AS functional_issue_count,
-                ar.regressed_count,
-                ar.compared_count,
-                ar.improved_count,
-                ar.same_count
-            FROM analysis_results ar
-            JOIN runs r ON r.run_id = ar.run_id
-            WHERE r.ts >= current_date - (? || ' DAY')::INTERVAL
-              {machine_filter}
-            ORDER BY r.ts
-        """, params).fetchdf()
-
-
-# ---------------------------------------------------------------------------
 # Run-to-run comparison
 # ---------------------------------------------------------------------------
 
@@ -1043,38 +864,6 @@ def fetch_run_comparison(
             ORDER BY model, precision, in_token, out_token, exec_mode
         """, [run_id_a, run_id_b, run_id_a, run_id_b]).fetchdf()
         return _apply_fallback_metrics(df)
-
-
-def fetch_analysis_overview(db_path: Path, run_id: str) -> pd.DataFrame:
-    """Return analysis summary row for one run, enriched with baseline metadata.
-
-    Returns empty DataFrame when analysis tables are unavailable or the run
-    has not been analyzed yet.
-    """
-    with _read_only(db_path) as con:
-        if "analysis_results" not in _tables_for_db(db_path):
-            return pd.DataFrame()
-
-        return con.execute("""
-            SELECT
-                ar.run_id,
-                ar.overall_status,
-                ar.compared_count,
-                ar.improved_count,
-                ar.same_count,
-                ar.regressed_count,
-                ar.functional_fail_count,
-                ar.functional_fail_count AS functional_issue_count,
-                ar.baseline_run_id,
-                strftime(rb.ts, '%Y%m%d_%H%M') AS baseline_stamp,
-                rb.ov_version AS baseline_ov_version,
-                rs.source_path AS run_source_path
-            FROM analysis_results ar
-            LEFT JOIN runs rb ON rb.run_id = ar.baseline_run_id
-            LEFT JOIN runs rs ON rs.run_id = ar.run_id
-            WHERE ar.run_id = ?
-            LIMIT 1
-        """, [run_id]).fetchdf()
 
 
 # ---------------------------------------------------------------------------
@@ -1275,7 +1064,8 @@ def geomean_matrix(db_path: Path, machines: Sequence[str], *,
             continue
 
         counts = success_counts(db_path, run_ids)
-        meta = cohort[["run_id", "ts", "stamp", "ov_version"]].copy()
+        meta = cohort[["run_id", "ts", "stamp", "ov_version",
+                       "purpose"]].copy()
         meta["machine"] = machine
         meta["success_count"] = meta["run_id"].map(counts).fillna(0).astype(int)
         # Runs that produced nothing drop out of the merge below, so carry the
@@ -1325,53 +1115,6 @@ def machine_health_for_runs(db_path: Path,
         """, list(run_ids)).fetchdf()
 
 
-def machine_stats_for_run(db_path: Path, run_id: str,
-                          models: Sequence[str] | None = None) -> pd.DataFrame:
-    """Per-test telemetry rows for one run."""
-    if "machine_monitor_stats" not in _tables_for_db(db_path):
-        return pd.DataFrame()
-    filters = ["run_id = ?"]
-    params: list = [run_id]
-    if models:
-        filters.append("model IN ({})".format(",".join(["?"] * len(models))))
-        params.extend(models)
-    with _read_only(db_path) as con:
-        return con.execute(f"""
-            SELECT *
-            FROM machine_monitor_stats
-            WHERE {' AND '.join(filters)}
-            ORDER BY model, nodeid
-        """, params).fetchdf()
-
-
-def monitor_samples_for_run(db_path: Path, run_id: str,
-                            label: str | None = None) -> pd.DataFrame:
-    """Raw per-sample telemetry for one run, read straight from Parquet.
-
-    The samples live next to the published artefacts rather than in the
-    database: they are two orders of magnitude larger than the per-test
-    summary in ``machine_monitor_stats`` and are only needed when a specific
-    run is being dissected.
-    """
-    pattern = (db_path.parent / '**' / '*.monitor.parquet').as_posix()
-    filters = ['run_id = ?']
-    params: list = [run_id]
-    if label:
-        filters.append('monitor_label = ?')
-        params.append(label)
-    with _read_only(db_path) as con:
-        try:
-            return con.execute(f"""
-                SELECT *
-                FROM read_parquet('{pattern}', union_by_name=true)
-                WHERE {' AND '.join(filters)}
-                ORDER BY monitor_label, t_monotonic
-            """, params).fetchdf()
-        except duckdb.Error:
-            # No parquet published yet (or only pre-conversion tar.gz runs).
-            return pd.DataFrame()
-
-
 def functional_issues_for_runs(db_path: Path,
                                run_ids: Sequence[str],
                                models: Sequence[str] | None = None) -> pd.DataFrame:
@@ -1403,27 +1146,6 @@ def functional_issues_for_runs(db_path: Path,
             WHERE {' AND '.join(filters)}
             ORDER BY r.ts DESC, fi.nodeid
         """, params).fetchdf()
-
-
-def functional_summary_for_runs(db_path: Path,
-                                run_ids: Sequence[str]) -> pd.DataFrame:
-    """Per-run functional health for an explicit cohort."""
-    if not run_ids or "analysis_results" not in _tables_for_db(db_path):
-        return pd.DataFrame()
-    placeholders = ",".join(["?"] * len(run_ids))
-    with _read_only(db_path) as con:
-        return con.execute(f"""
-            SELECT r.run_id, r.machine,
-                   strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
-                   r.ts, r.ov_version,
-                   ar.overall_status,
-                   ar.functional_fail_count AS functional_issue_count,
-                   ar.regressed_count, ar.compared_count
-            FROM analysis_results ar
-            JOIN runs r USING (run_id)
-            WHERE r.run_id IN ({placeholders})
-            ORDER BY r.ts
-        """, list(run_ids)).fetchdf()
 
 
 # ---------------------------------------------------------------------------
@@ -1597,7 +1319,8 @@ def machines_overview(db_path: Path,
 
     ``latest_failed``, ``last_success_stamp`` and ``last_fail_stamp`` all come
     from one ``is_fail`` definition, so the status icon and the two stamps
-    cannot disagree.
+    cannot disagree. Both edge runs are returned in full (purpose, OV version,
+    case counts, duration), not just dated.
 
     The perf delta is a geomean over latency-unit series only: mixing ms with
     FPS in one geomean would make the direction meaningless. It is further
@@ -1691,7 +1414,17 @@ def machines_overview(db_path: Path,
                            < e.machine_expected_cases) AS is_fail
                 FROM counted c JOIN expected e USING (machine)
             ),
-            l AS (SELECT * FROM scored WHERE rn = 1)
+            l AS (SELECT * FROM scored WHERE rn = 1),
+            -- Newest clean and newest failed run per machine, kept whole so
+            -- the overview can describe each of them, not just date them.
+            edge AS (
+                SELECT s.*,
+                       ROW_NUMBER() OVER (PARTITION BY s.machine, s.is_fail
+                                          ORDER BY s.ts DESC) AS edge_rn
+                FROM scored s
+            ),
+            last_ok  AS (SELECT * FROM edge WHERE NOT is_fail AND edge_rn = 1),
+            last_bad AS (SELECT * FROM edge WHERE     is_fail AND edge_rn = 1)
             SELECT l.machine, l.run_id, l.ts,
                    strftime(l.ts, '%Y%m%d_%H%M') AS stamp,
                    l.ww, l.ov_version, l.purpose, l.report_file,
@@ -1704,21 +1437,25 @@ def machines_overview(db_path: Path,
                    (SELECT sd.device FROM system_devices sd
                      WHERE sd.run_id = l.run_id
                      ORDER BY sd.device_index LIMIT 1) AS gpu_name,
-                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM scored r2
-                     WHERE r2.machine = l.machine AND NOT r2.is_fail
-                     ORDER BY r2.ts DESC LIMIT 1) AS last_success_stamp,
-                   (SELECT r2.build_url FROM scored r2
-                     WHERE r2.machine = l.machine AND NOT r2.is_fail
-                     ORDER BY r2.ts DESC LIMIT 1) AS last_success_build_url,
-                   (SELECT strftime(r2.ts, '%Y%m%d_%H%M') FROM scored r2
-                     WHERE r2.machine = l.machine AND r2.is_fail
-                     ORDER BY r2.ts DESC LIMIT 1) AS last_fail_stamp,
-                   (SELECT r2.build_url FROM scored r2
-                     WHERE r2.machine = l.machine AND r2.is_fail
-                     ORDER BY r2.ts DESC LIMIT 1) AS last_fail_build_url
+                   strftime(ok.ts, '%Y%m%d_%H%M') AS last_success_stamp,
+                   ok.build_url        AS last_success_build_url,
+                   ok.purpose          AS last_success_purpose,
+                   ok.ov_version       AS last_success_ov_version,
+                   ok.skipped_cases    AS last_success_skipped_cases,
+                   ok.success_cases    AS last_success_success_cases,
+                   ok.duration_sec     AS last_success_duration_sec,
+                   strftime(bad.ts, '%Y%m%d_%H%M') AS last_fail_stamp,
+                   bad.build_url       AS last_fail_build_url,
+                   bad.purpose         AS last_fail_purpose,
+                   bad.ov_version      AS last_fail_ov_version,
+                   bad.skipped_cases   AS last_fail_skipped_cases,
+                   bad.success_cases   AS last_fail_success_cases,
+                   bad.duration_sec    AS last_fail_duration_sec
                    {analysis_cols}
                    {issue_col}
             FROM l
+            LEFT JOIN last_ok  ok  ON ok.machine  = l.machine
+            LEFT JOIN last_bad bad ON bad.machine = l.machine
             {analysis_join}
             ORDER BY l.machine
         """, [*params, int(expected_window)]).fetchdf()
@@ -1869,3 +1606,101 @@ def failing_models_overview(db_path: Path,
             HAVING bool_or(i.rn = 1)
             ORDER BY i.machine, i.model
         """, [*params, int(history_runs)]).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# Environment drift: rig details that changed between builds
+# ---------------------------------------------------------------------------
+
+# Fields that describe the rig rather than the code under test. A change here
+# can explain a perf shift on its own, so the viewer surfaces the transition
+# instead of the value.
+ENV_FIELDS: tuple[tuple[str, str], ...] = (
+    ("gpu_driver_version", "GPU driver"),
+    ("gpu_shared_memory_mb", "GPU shared memory (MB)"),
+    ("gpu_dedicated_memory_mb", "GPU dedicated memory (MB)"),
+    ("host_memory_size_gb", "Host memory (GB)"),
+    ("host_memory_speed_mhz", "Host memory speed (MHz)"),
+    ("model_cache", "Model cache"),
+)
+
+
+def _env_text(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def environment_changes(db_path: Path,
+                        machines: Sequence[str] | None = None, *,
+                        run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                        history_runs: int = 10) -> pd.DataFrame:
+    """Rig fields whose value changed inside each machine's recent window.
+
+    Only transitions are returned, newest first: a machine that ran on an
+    unchanged rig for the whole window contributes no rows, so the caller can
+    show a note only when something actually moved.
+    """
+    fields = [(column, label) for column, label in ENV_FIELDS
+              if _has_column(db_path, "runs", column)]
+    if not fields:
+        return pd.DataFrame()
+
+    parts: list[str] = []
+    params: list = []
+    predicate, kind_args = _run_kind_predicate(
+        run_kinds if _has_column(db_path, "runs", "run_kind") else None, "r")
+    if predicate:
+        parts.append(predicate)
+        params.extend(kind_args)
+    excl_predicate = _exclusion_predicate(db_path, "r")
+    if excl_predicate:
+        parts.append(excl_predicate)
+    if machines:
+        parts.append("r.machine IN ({})".format(",".join(["?"] * len(machines))))
+        params.extend(machines)
+    where = ("WHERE " + " AND ".join(parts)) if parts else ""
+
+    columns = ", ".join(f"r.{column}" for column, _ in fields)
+    with _read_only(db_path) as con:
+        frame = con.execute(f"""
+            WITH ranked AS (
+                SELECT r.machine, r.ts, r.ov_version, {columns},
+                       strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                       ROW_NUMBER() OVER (PARTITION BY r.machine
+                                          ORDER BY r.ts DESC) AS rn
+                FROM runs r
+                {where}
+            )
+            SELECT * FROM ranked WHERE rn <= ? ORDER BY machine, ts
+        """, [*params, int(history_runs)]).fetchdf()
+
+    if frame.empty:
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    for machine, group in frame.groupby("machine", sort=False):
+        group = group.sort_values("ts")
+        for column, label in fields:
+            values = group[column].tolist()
+            for i in range(1, len(values)):
+                before, after = values[i - 1], values[i]
+                if _env_text(before) == _env_text(after):
+                    continue
+                rows.append({
+                    "machine": machine,
+                    "field": label,
+                    "previous": _env_text(before),
+                    "current": _env_text(after),
+                    "stamp": group["stamp"].iloc[i],
+                    "ov_version": group["ov_version"].iloc[i],
+                    "ts": group["ts"].iloc[i],
+                })
+
+    if not rows:
+        return pd.DataFrame()
+    return (pd.DataFrame(rows)
+            .sort_values(["machine", "ts"], ascending=[True, False])
+            .reset_index(drop=True))
