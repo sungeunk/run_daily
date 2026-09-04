@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import html
 import io
+import math
 from pathlib import Path
 
 from .types import AnalysisResult
@@ -355,7 +356,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         return "n/a" if v is None else f"{v * 100:+.2f}%"
 
     def _fmt_num(v: float | None, unit: str = "") -> str:
-        if v is None:
+        if v is None or not math.isfinite(v):
             return "n/a"
         s = f"{v:.3f}"
         return f"{s} {unit}".strip() if unit else s
