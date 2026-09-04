@@ -529,13 +529,16 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     p.add_argument('--pip-freeze', action='store_true',
                    help='Also write pip-freeze output alongside the report')
 
-    # --- release comparison (daily_results MCP server) ---
+    # --- reference / release comparison (daily_results MCP server) ---
+    p.add_argument('--mcp-url',
+                   default=os.environ.get('DAILY_MCP_URL', release_defaults.mcp_url),
+                   help='daily_results MCP endpoint holding the reference and release runs')
+    p.add_argument('--reference-purpose-like',
+                   default=os.environ.get('DAILY_REFERENCE_PURPOSE_LIKE',
+                                          release_defaults.reference_purpose_like),
+                   help='SQL LIKE pattern matched against runs.purpose to find reference runs')
     p.add_argument('--no-release', dest='release', action='store_false',
                    help='Skip the release-build column in the analysis report')
-    p.add_argument('--release-mcp-url',
-                   default=os.environ.get('DAILY_RELEASE_MCP_URL',
-                                          release_defaults.release_mcp_url),
-                   help='daily_results MCP endpoint used to fetch the release run')
     p.add_argument('--release-purpose-like',
                    default=os.environ.get('DAILY_RELEASE_PURPOSE_LIKE',
                                           release_defaults.release_purpose_like),
@@ -617,10 +620,29 @@ def _analysis_config(args: argparse.Namespace):
         return None
 
     return AnalysisConfig(
+        mcp_url=args.mcp_url,
+        reference_purpose_like=args.reference_purpose_like,
         release_enabled=args.release,
-        release_mcp_url=args.release_mcp_url,
         release_purpose_like=args.release_purpose_like,
     )
+
+
+def _warn_on_mcp_failure(result) -> None:
+    """Shout when the reference/release lookup failed, instead of degrading quietly."""
+    problems = []
+    if result.baseline.status == 'unavailable':
+        problems.append(f'reference: {result.baseline.detail}')
+    if result.release is not None and result.release.status == 'unavailable':
+        problems.append(f'release: {result.release.detail}')
+    if not problems:
+        return
+    print('[run.py] ' + '=' * 68, file=sys.stderr)
+    print('[run.py] ERROR: daily_results MCP server could not be queried.', file=sys.stderr)
+    for problem in problems:
+        print(f'[run.py]   - {problem}', file=sys.stderr)
+    print('[run.py] The report has NO valid comparison. Fix the MCP server '
+          'and regenerate.', file=sys.stderr)
+    print('[run.py] ' + '=' * 68, file=sys.stderr)
 
 
 def _run_analysis(html_report: Path, summary_json: Path, root: Path,
@@ -650,6 +672,7 @@ def _run_analysis(html_report: Path, summary_json: Path, root: Path,
             print(f'[run.py] ingest skipped: no artefacts found under {root}')
 
         result = analyze_run(summary_json, db_path, analysis_config)
+        _warn_on_mcp_failure(result)
         write_analysis_to_summary(summary_json, result)
 
         summary_data = json.loads(summary_json.read_text(encoding='utf-8'))

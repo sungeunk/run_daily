@@ -34,13 +34,15 @@ class AnalysisConfig:
                              dual-gate mode (default 5).
         min_baseline_points: Minimum number of baseline points required for
                              dual-gate mode (default 7).
-        release_enabled:     When True, fetch the newest release-build run
-                             from the central daily_results MCP server and
-                             show it as a third column next to the reference.
-        release_mcp_url:     Streamable-HTTP endpoint of that MCP server.
-        release_purpose_like: SQL LIKE pattern matched against ``runs.purpose``
-                             to recognise a release-build run.
-        release_timeout_sec: Per-request timeout for the MCP calls.
+        mcp_url:             Streamable-HTTP endpoint of the central
+                             ``daily_results`` MCP server, which is the only
+                             source of reference and release runs.
+        mcp_timeout_sec:     Per-request timeout for the MCP calls.
+        reference_purpose_like: SQL LIKE pattern matched against
+                             ``runs.purpose`` to recognise a scheduled run.
+        release_enabled:     When True, also show the newest release build as
+                             a third column next to the reference.
+        release_purpose_like: SQL LIKE pattern that recognises a release run.
     """
 
     pct_threshold: float = 0.05
@@ -52,11 +54,11 @@ class AnalysisConfig:
     min_baseline_points: int = 7
     history_window: int = 10
     fluctuation_sigma_scale: float = 1.5
-    baseline_purpose: str | None = None
+    mcp_url: str = "http://dg2raptorlake.ikor.intel.com:8090/mcp"
+    mcp_timeout_sec: float = 20.0
+    reference_purpose_like: str = "%timer%"
     release_enabled: bool = True
-    release_mcp_url: str = "http://dg2raptorlake.ikor.intel.com:8090/mcp"
     release_purpose_like: str = "%release%"
-    release_timeout_sec: float = 20.0
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +119,21 @@ class FunctionalIssue:
 
 @dataclass
 class BaselineInfo:
-    """Metadata about the baseline run that was selected for comparison."""
+    """Metadata about the baseline run that was selected for comparison.
 
-    status: Literal["found", "not_found"]
+    ``unavailable`` means the daily_results server could not be reached, which
+    is deliberately kept distinct from ``not_found``: the first is an
+    infrastructure fault that has to be fixed, the second is a legitimate
+    "nothing to compare against yet".
+    """
+
+    status: Literal["found", "not_found", "unavailable"]
     run_id: str | None = None
     stamp: str | None = None
     ov_version: str | None = None
+    machine: str | None = None
+    source_url: str | None = None
+    detail: str | None = None
     selection_reason: str | None = None   # human-readable why this run was picked
 
 

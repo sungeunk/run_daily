@@ -244,6 +244,9 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
             "run_id": b.run_id,
             "stamp": b.stamp,
             "ov_version": b.ov_version,
+            "machine": b.machine,
+            "source_url": b.source_url,
+            "detail": b.detail,
             "selection_reason": b.selection_reason,
         },
         "functional": {

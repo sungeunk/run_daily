@@ -18,9 +18,9 @@ from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
 
-from .baseline import find_last_known_good, reference_purpose_sql, select_baseline
+from .baseline import find_last_known_good
 from .functional import aggregate_functional
-from .release import fetch_release
+from .remote import fetch_reference, fetch_release
 from .types import (
     AnalysisConfig,
     AnalysisResult,
@@ -104,9 +104,17 @@ def analyze_run(
     with connect(db_path) as con:
         ensure_schema(con)
         upsert_run(con, rec)
-        baseline_info = select_baseline(con, rec, config)
+        reference = fetch_reference(config, rec)
+        baseline_info = reference.info
         release_info, release_values = fetch_release(config, getattr(rec, "machine", None))
-        rows = _fetch_comparison_rows(con, rec, baseline_info, config, release_values)
+        rows = _fetch_comparison_rows(
+            con,
+            rec,
+            config,
+            reference_values=reference.values,
+            history_map=reference.history,
+            release_values=release_values,
+        )
 
         # --- aggregate ---
         performance = _aggregate_performance(rows)
@@ -160,95 +168,32 @@ def analyze_run(
 def _fetch_comparison_rows(
     con,
     rec,
-    baseline_info: BaselineInfo,
     config: AnalysisConfig,
+    *,
+    reference_values: dict[tuple, tuple[float, str | None]],
+    history_map: dict[tuple, list[float]],
     release_values: dict[tuple, tuple[float, str | None]] | None = None,
 ) -> list[ComparisonRow]:
-    if isinstance(rec, str):
-        run_id = rec
-        rec_ctx = _fetch_run_context(con, run_id)
-    else:
-        run_id = rec.run_id
-        rec_ctx = rec
-
-    history_map = _load_series_history(con, rec_ctx, config) if rec_ctx is not None else {}
-
-    # If baseline exists, use FULL OUTER JOIN to compare current vs baseline
-    # Otherwise, fetch only current run's performance data
-    has_baseline = baseline_info.status == "found" and baseline_info.run_id
-
-    if has_baseline:
-        db_rows = con.execute(
-            """
-            SELECT
-                COALESCE(c.model, b.model) AS model,
-                COALESCE(c.precision, b.precision) AS precision,
-                COALESCE(c.in_token, b.in_token) AS in_token,
-                COALESCE(c.out_token, b.out_token) AS out_token,
-                COALESCE(c.exec_mode, b.exec_mode) AS exec_mode,
-                c.unit AS current_unit,
-                b.unit AS baseline_unit,
-                c.value AS current_value,
-                b.value AS baseline_value
-            FROM perf c
-            FULL OUTER JOIN perf b
-              ON c.model     = b.model
-             AND c.precision = b.precision
-             AND c.in_token  = b.in_token
-             AND c.out_token = b.out_token
-             AND c.exec_mode = b.exec_mode
-             AND c.run_id = ?
-             AND b.run_id = ?
-            WHERE c.run_id = ? OR b.run_id = ?
-            ORDER BY model, precision, in_token, out_token, exec_mode
-            """,
-            [run_id, baseline_info.run_id, run_id, baseline_info.run_id],
-        ).fetchall()
-    else:
-        # No baseline: fetch only current run's perf data
-        db_rows = con.execute(
-            """
-            SELECT
-                c.model,
-                c.precision,
-                c.in_token,
-                c.out_token,
-                c.exec_mode,
-                c.unit AS current_unit,
-                NULL AS baseline_unit,
-                c.value AS current_value,
-                NULL AS baseline_value
-            FROM perf c
-            WHERE c.run_id = ?
-            ORDER BY model, precision, in_token, out_token, exec_mode
-            """,
-            [run_id],
-        ).fetchall()
+    run_id = rec if isinstance(rec, str) else rec.run_id
+    current_values = _load_current_values(con, run_id)
 
     result: list[ComparisonRow] = []
 
-    def _as_finite_float(value) -> float | None:
-        if value is None:
-            return None
-        try:
-            num = float(value)
-        except (TypeError, ValueError):
-            return None
-        return num if math.isfinite(num) else None
-
-    for model, precision, in_token, out_token, exec_mode, current_unit, baseline_unit, cur, base in db_rows:
+    # A series present only in the reference still deserves a row: it means
+    # today's run stopped producing it.
+    for raw_key in sorted(set(current_values) | set(reference_values)):
+        model, precision, in_token, out_token, exec_mode = raw_key
         key = SeriesKey(
             model=model,
             precision=precision,
-            in_token=int(in_token),
-            out_token=int(out_token),
+            in_token=in_token,
+            out_token=out_token,
             exec_mode=exec_mode,
         )
+        current_value, current_unit = current_values.get(raw_key, (None, None))
+        baseline_value, baseline_unit = reference_values.get(raw_key, (None, None))
         unit = current_unit or baseline_unit
-        current_value = _as_finite_float(cur)
-        baseline_value = _as_finite_float(base)
-        history_values = history_map.get((model, precision, int(in_token), int(out_token), exec_mode), [])
-        history_stats = _history_stats(history_values, unit, config)
+        history_stats = _history_stats(history_map.get(raw_key, []), unit, config)
 
         # Unit mismatch: treat as unavailable to avoid comparing apples to oranges.
         if current_unit is not None and baseline_unit is not None and current_unit != baseline_unit:
@@ -358,58 +303,27 @@ def _attach_release(rows: list[ComparisonRow], release_values: dict[tuple, tuple
             row.release_improvement_pct = improvement_pct(current, value, row.unit or release_unit)
 
 
-def _load_series_history(con, rec, config: AnalysisConfig) -> dict[tuple, list[float]]:
-    purpose_clause, purpose_params = reference_purpose_sql(config)
-    try:
-        rows = con.execute(
-            """
-        WITH ranked AS (
-            SELECT
-                p.model,
-                p.precision,
-                p.in_token,
-                p.out_token,
-                p.exec_mode,
-                p.value,
-                ROW_NUMBER() OVER (
-                    PARTITION BY p.model, p.precision, p.in_token, p.out_token, p.exec_mode
-                    ORDER BY r.ts DESC
-                ) AS rn
-            FROM perf p
-            JOIN runs r USING (run_id)
-            WHERE r.machine = ?
-              AND r.run_id <> ?
-              AND r.ts < ?
-              AND r.short_run IS NOT DISTINCT FROM ?
-              AND {purpose_clause}
-        )
-        SELECT model, precision, in_token, out_token, exec_mode, value
-        FROM ranked
-        WHERE rn <= ?
-        ORDER BY model, precision, in_token, out_token, exec_mode, rn
-            """.format(purpose_clause=purpose_clause),
-            [
-                rec.machine,
-                rec.run_id,
-                rec.ts,
-                rec.short_run,
-                *purpose_params,
-                config.history_window,
-            ],
-        ).fetchall()
-    except Exception:
-        return {}
+def _load_current_values(con, run_id: str) -> dict[tuple, tuple[float, str | None]]:
+    """Per-series values of the run being analysed, read from the local DB."""
+    rows = con.execute(
+        """
+        SELECT model, precision, in_token, out_token, exec_mode,
+               min(unit) AS unit, avg(value) AS value
+        FROM perf
+        WHERE run_id = ?
+        GROUP BY model, precision, in_token, out_token, exec_mode
+        """,
+        [run_id],
+    ).fetchall()
 
-    out: dict[tuple, list[float]] = {}
-    for model, precision, in_token, out_token, exec_mode, value in rows:
+    out: dict[tuple, tuple[float, str | None]] = {}
+    for model, precision, in_token, out_token, exec_mode, unit, value in rows:
         try:
             num = float(value)
         except (TypeError, ValueError):
             continue
-        if not math.isfinite(num):
-            continue
-        key = (model, precision, int(in_token), int(out_token), exec_mode)
-        out.setdefault(key, []).append(num)
+        if math.isfinite(num):
+            out[(model, precision, int(in_token), int(out_token), exec_mode)] = (num, unit)
     return out
 
 

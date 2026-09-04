@@ -234,6 +234,37 @@ def _render_run_summary(result: AnalysisResult, summary: dict | None,
     return "\n".join(rows), changed, has_baseline
 
 
+def _mcp_banner(result: AnalysisResult) -> str:
+    """Loud banner when daily_results could not be queried.
+
+    A missing reference is an infrastructure fault, not a benign "no data":
+    the whole comparison table is meaningless without it, so it is called out
+    at the top of the report instead of being buried in a table cell.
+    """
+    problems: list[str] = []
+    if result.baseline.status == "unavailable":
+        problems.append(f"Reference: {result.baseline.detail or 'query failed'}")
+    release = result.release
+    if release is not None and release.status == "unavailable":
+        problems.append(f"Release: {release.detail or 'query failed'}")
+    if not problems:
+        return ""
+
+    url = result.baseline.source_url or (release.source_url if release else "") or ""
+    items = "".join(f"<li>{html.escape(p)}</li>" for p in problems)
+    return (
+        "<div style='margin-bottom:14px;padding:12px 16px;border:2px solid #b42318;"
+        "border-radius:8px;background:#fef3f2;color:#7a271a'>"
+        "<div style='font-weight:700;font-size:14px'>"
+        "daily_results MCP server unreachable — this report has no valid comparison</div>"
+        f"<ul style='margin:6px 0 0 18px;font-size:12px'>{items}</ul>"
+        f"<div style='margin-top:6px;font-size:12px'>Fix the server at "
+        f"{html.escape(url)} and regenerate the report; the numbers below are "
+        "<b>not</b> compared against a reference.</div>"
+        "</div>"
+    )
+
+
 def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
                          image_assets: dict[str, dict] | None = None,
                          baseline_meta: dict | None = None) -> str:
@@ -271,6 +302,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     baseline_text = "not found"
     if result.baseline.status == "found":
         baseline_text = f"{result.baseline.stamp or ''} / {result.baseline.ov_version or 'unknown'}"
+    elif result.baseline.status == "unavailable":
+        baseline_text = f"UNAVAILABLE — {result.baseline.detail or 'daily_results query failed'}"
 
     summary_rows, changed_fields, has_baseline_meta = _render_run_summary(
         result, summary, baseline_meta)
@@ -289,6 +322,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         else:
             release_text = f"unavailable ({rel.detail or 'query failed'})"
         release_row = f'<tr><td class="k">Release</td><td>{html.escape(release_text)}</td></tr>'
+
+    mcp_banner = _mcp_banner(result)
     if has_baseline_meta:
         baseline_row = ""
         summary_head = (
@@ -500,6 +535,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         </div>
         <span class="badge" style="background:{badge[1]};font-size:16px;padding:6px 18px">{badge[0]}</span>
     </div>
+
+    {mcp_banner}
 
     <!-- Top stat row -->
     <div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">
