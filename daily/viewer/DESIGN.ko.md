@@ -154,7 +154,7 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **Implementation:** `perf_with_buckets` view가 `in_bucket` / `out_bucket`을 파생합니다. Threshold는 SQL에 있으므로 view만 바꾸면 되고 re-ingest는 필요 없습니다.
 
 ### Regression detection method (query layer)
-- **Scope:** 이 항목은 `queries.trend_regressions` / `compare_runs_with_trend`를 설명합니다. 전용 "Regression" tab은 제거되었고, 해당 방식은 Compare tab(각 A/B delta를 그 run 이전 history와 비교)과 mail alert에서 사용됩니다.
+- **Scope:** 이 항목은 `queries.trend_regressions` / `compare_runs_with_trend`를 설명합니다. 전용 "Regression" tab은 제거되었고, 해당 방식은 Compare tab(각 A/B delta를 그 run 이전 history와 비교)과 `daily_results` MCP server에서 사용됩니다.
 - **Choice:** two-window median comparison — recent-window median vs baseline-window median.
 - **Rejected:**
   - Single-point robust z-score — 사용자 피드백: 오늘의 outlier가 아니라 최근 block이 drift 중인지 보고 싶습니다. Single-point test는 작은 blip에도 뒤집히고, data가 noisy하거나 가끔 corrupt될 때 쓸모가 떨어집니다.
@@ -166,7 +166,7 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
   > 이 값들은 `trend_regressions`가 아니라 Streamlit sidebar에서 제어합니다.
 - **Direction normalisation:** `worsening_pct`는 positive가 항상 "worse"가 되도록 sign 처리합니다. ms/s/%는 recent>baseline이면 `+pct`, FPS/tps는 recent<baseline이면 `+pct`입니다. `worsening_z`는 baseline MAD (`sigma ≈ 1.4826 * MAD`)를 사용해서 recent noise가 비교를 숨기거나 부풀리지 않도록 합니다. UI는 threshold-normalised severity = `max(worsening_pct / pct_threshold, worsening_z / z_threshold)` 기준으로 정렬합니다.
 - **Purpose filter:** regression summary와 selected-series history는 tab의 `Purpose` scope control로 filter합니다. 개인 PR run이 baseline/recent window를 오염시키지 않도록 하기 위함입니다. Chart rolling band는 `perf_stats`가 아니라 filtered `perf_flat` rows에서 재계산합니다. `perf_stats`는 all-purpose view이기 때문입니다.
-- **Supersedes:** 이전 rolling z-score point-vs-band helper는 제거했습니다. `trend_regressions`가 mail alert에서 사용하는 단일 regression signal입니다.
+- **Supersedes:** 이전 rolling z-score point-vs-band helper는 제거했습니다. `trend_regressions`가 단일 regression signal이며, 현재 소비자는 `mcp_server/server.py`뿐입니다.
 
 ### One series per trend chart
 - **Choice:** single-series plot을 강제합니다 (Compare tab).
@@ -363,5 +363,5 @@ DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 - **`perf_stats`는 여전히 correlated subquery를 사용합니다. (개념적으로 O(n·m))** 2026-04-27 기준 322k `perf_stats` rows에서 약 0.57초로 측정되어 아직 cached table은 필요 없습니다. query time이 1초를 넘으면 ingest 시점에 Python-side precomputation으로 `perf_stats_cached` table에 쓰는 방식으로 바꾸는 것을 고려합니다.
 - **`run.py`의 email regression alert.** mail delivery 전에 best-effort report section으로 구현했습니다. Future work: 수신자가 더 풍부한 형식을 원하면 threshold tuning이나 전용 HTML table 추가를 고려합니다.
 - **추가 display profile.** profile이 하나뿐이면 sidebar는 profile dropdown을 숨깁니다. 실제로 선택할 두 번째 display layout이 생기면 iGPU-focused profile을 추가합니다.
-- **Dead code 제거 완료 (2026-09).** `_old_viewer.py`, `_old_ingest.py`, `_old_schema.sql`, `perf_rows.py`, `xlsx_update.py`를 삭제했고, Regression/Geomean/Noise/Functional tab 제거로 호출자를 잃은 query 함수도 함께 제거했습니다: `geomean_trend`, `noise_summary`, `list_run_kinds`, `machine_stats_for_run`, `monitor_samples_for_run`, `functional_summary_for_runs`, `fetch_functional_history`, `fetch_functional_summary`, `fetch_analysis_overview`. `trend_regressions`와 `fetch_run_comparison`은 mail alert와 `compare_runs_with_trend`가 여전히 사용해서 유지했습니다.
+- **Dead code 제거 완료 (2026-09).** `_old_viewer.py`, `_old_ingest.py`, `_old_schema.sql`, `perf_rows.py`, `xlsx_update.py`를 삭제했고, Regression/Geomean/Noise/Functional tab 제거로 호출자를 잃은 query 함수도 함께 제거했습니다: `geomean_trend`, `noise_summary`, `list_run_kinds`, `machine_stats_for_run`, `monitor_samples_for_run`, `functional_summary_for_runs`, `fetch_functional_history`, `fetch_functional_summary`, `fetch_analysis_overview`. `trend_regressions`와 `fetch_run_comparison`은 `daily_results` MCP server와 `compare_runs_with_trend`가 여전히 사용해서 유지했습니다.
 - **Colour token을 `config.toml`로.** card와 chart 색이 아직 `app.py`에 literal로 남아 있습니다. `.streamlit/config.toml`로 옮겨 theme을 한 곳에서 지정합니다.

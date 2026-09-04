@@ -199,16 +199,6 @@ def get_wmi_connection(namespace: str = "root\\cimv2") -> object | None:
     return connection
 
 
-def parse_wmic_value(output: str, key: str) -> str | None:
-    for line in output.splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        if text.startswith(f"{key}="):
-            return text.split("=", 1)[1].strip()
-    return None
-
-
 def get_cpu_clock_mhz() -> float | None:
     # psutil reads this via NtPowerInformation; the WMI path below costs ~1s per sample.
     if PSUTIL is not None:
@@ -1266,14 +1256,6 @@ def sample_once(
     # Driver calls occasionally stall; this lets analysis drop samples that took too long.
     record["sample_duration_ms"] = (time.perf_counter() - t_monotonic) * 1000.0
     return record
-
-
-def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=True))
-            handle.write("\n")
 
 
 def write_csv(path: Path, rows: list[dict[str, object]]) -> None:

@@ -64,16 +64,6 @@ class DailyConfig:
             return Path(convert_path(config_path))
         return self.repo_root / 'res' / 'config.enable_PA.json'
 
-    @property
-    def dgfx_tests_dir(self) -> Path:
-        """DGfx_E2E_AI test harness directory.
-
-        Currently lives under ``scripts/DGfx_E2E_AI/tests`` — the old layout.
-        When ``scripts/`` is removed, copy this subtree to
-        ``daily/external/DGfx_E2E_AI/tests`` and update this property.
-        """
-        return self.repo_root / 'scripts' / 'DGfx_E2E_AI' / 'tests'
-
 
 def build_config(
     *,

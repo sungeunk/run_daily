@@ -153,7 +153,7 @@ All of them are gone; the entries stay so the removal is not re-litigated.
 - **Implementation:** `perf_with_buckets` view derives `in_bucket` / `out_bucket`. Threshold lives in SQL — change the view to retune, no re-ingest needed.
 
 ### Regression detection method (query layer)
-- **Scope:** this describes `queries.trend_regressions` / `compare_runs_with_trend`. The dedicated "Regression" tab was removed; the method now surfaces in the Compare tab (each A/B delta is judged against the history preceding each run) and in mail alerts.
+- **Scope:** this describes `queries.trend_regressions` / `compare_runs_with_trend`. The dedicated "Regression" tab was removed; the method now surfaces in the Compare tab (each A/B delta is judged against the history preceding each run) and through the `daily_results` MCP server.
 - **Choice:** two-window median comparison — recent-window median vs baseline-window median.
 - **Rejected:**
   - Single-point robust z-score — user feedback: they want to see whether the recent BLOCK is drifting, not whether today is an outlier. Single-point tests flip on any blip and are useless when data is noisy or occasionally corrupted.
@@ -165,7 +165,7 @@ All of them are gone; the entries stay so the removal is not re-litigated.
   > These are controlled by the Streamlit sidebar, not by `trend_regressions`.
 - **Direction normalisation:** `worsening_pct` is signed so positive always means "worse" — ms/s/%: `+pct` when recent>baseline; FPS/tps: `+pct` when recent<baseline. `worsening_z` uses baseline MAD (`sigma ≈ 1.4826 * MAD`) so recent noise does not hide or inflate the comparison. UI sorts by threshold-normalised severity = `max(worsening_pct / pct_threshold, worsening_z / z_threshold)`.
 - **Purpose filter:** regression summary and selected-series history are filtered by the tab's `Purpose` scope control so personal PR runs do not pollute baseline/recent windows. The chart rolling band is recomputed from filtered `perf_flat` rows, not from `perf_stats`, because `perf_stats` is an all-purpose view.
-- **Supersedes:** the earlier rolling z-score point-vs-band helper was removed; `trend_regressions` is the single regression signal used by mail alerts.
+- **Supersedes:** the earlier rolling z-score point-vs-band helper was removed; `trend_regressions` is the single regression signal, now consumed only by `mcp_server/server.py`.
 
 ### One series per trend chart
 - **Choice:** enforce single-series plots (Compare tab).
@@ -367,5 +367,5 @@ DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
 - **`perf_stats` still uses correlated subqueries (O(n·m) conceptually).** Measured ~0.57s for 322k `perf_stats` rows on 2026-04-27, so no cached table is needed yet. If query time exceeds 1s, rewrite as a Python-side precomputation that writes into a cached `perf_stats_cached` table on ingest.
 - **Email regression alerts from `run.py`.** Implemented as a best-effort report section before mail delivery. Future work: tune thresholds or add a dedicated HTML table if recipients want richer formatting.
 - **Additional display profiles.** The sidebar hides the profile dropdown when only one profile exists. Add an iGPU-focused profile when there is a real second display layout to choose from.
-- **Dead code removed (2026-09).** `_old_viewer.py`, `_old_ingest.py`, `_old_schema.sql`, `perf_rows.py` and `xlsx_update.py` were deleted, along with the query functions orphaned when the Regression/Geomean/Noise/Functional tabs went away: `geomean_trend`, `noise_summary`, `list_run_kinds`, `machine_stats_for_run`, `monitor_samples_for_run`, `functional_summary_for_runs`, `fetch_functional_history`, `fetch_functional_summary`, `fetch_analysis_overview`. `trend_regressions` and `fetch_run_comparison` stayed — mail alerts and `compare_runs_with_trend` still call them.
+- **Dead code removed (2026-09).** `_old_viewer.py`, `_old_ingest.py`, `_old_schema.sql`, `perf_rows.py` and `xlsx_update.py` were deleted, along with the query functions orphaned when the Regression/Geomean/Noise/Functional tabs went away: `geomean_trend`, `noise_summary`, `list_run_kinds`, `machine_stats_for_run`, `monitor_samples_for_run`, `functional_summary_for_runs`, `fetch_functional_history`, `fetch_functional_summary`, `fetch_analysis_overview`. `trend_regressions` and `fetch_run_comparison` stayed — the `daily_results` MCP server and `compare_runs_with_trend` still call them.
 - **Colour tokens in `config.toml`.** Card and chart colours are still literals in `app.py`; move them to `.streamlit/config.toml` so the theme is set in one place.

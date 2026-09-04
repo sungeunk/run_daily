@@ -276,6 +276,5 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
 - [x] benchmark_app           (2 케이스)
 - [x] chat_sample             (1 케이스)
 - [x] stable_diffusion_genai  (5 케이스, whisper + flux 포함)
-- [x] stable_diffusion_dgfx   (2 케이스)
 - [x] 백업 / 메일 (`--backup`, `--mail`)
 - [ ] end-to-end 검증 후 `scripts/` 제거
