@@ -30,7 +30,7 @@ from typing import Iterable
 
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
-from .record import IssueRow, MonitorRow, PerfRow, RunRecord
+from .record import IssueRow, MonitorRow, PerfRow, PhaseStatRow, RunRecord
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +131,48 @@ _TYPE_HANDLERS = {
 }
 
 
+# Phase name -> exec_mode. 'first_token' and 'decode' take the exec_mode of the
+# perf row they explain so they join 1:1 with it; the rest name themselves
+# because they belong to the run, not to a measured series. 'generate' only
+# appears when llm_bench could not verify the first-token split.
+_PHASE_EXEC_MODE = {
+    "compile": "compile",
+    "warmup": "warmup",
+    "idle": "idle",
+    "generate": "generate",
+    "first_token": "1st",
+    "decode": "2nd",
+}
+
+
+def _phase_rows(m: dict) -> Iterable[PhaseStatRow]:
+    """Per-phase machine telemetry, present only on runs new enough to record it."""
+    model = m.get("model", "")
+    precision = m.get("precision", "")
+    for window in m.get("machine_phases", []) or []:
+        exec_mode = _PHASE_EXEC_MODE.get(window.get("phase"))
+        if exec_mode is None:
+            continue
+        yield PhaseStatRow(
+            model=model,
+            precision=precision,
+            in_token=int(window.get("in_token") or 0),
+            out_token=int(window.get("out_token") or 0),
+            exec_mode=exec_mode,
+            window_sec=_float_or_none(window.get("window_sec")),
+            samples=int(window.get("samples") or 0),
+            gpu_clock_mhz_mean=_stat(window, "gpu_clock_mhz", "mean"),
+            gpu_clock_mhz_min=_stat(window, "gpu_clock_mhz", "min"),
+            gpu_utilization_mean=_stat(window, "gpu_utilization_percent", "mean"),
+            gpu_power_watts_mean=_stat(window, "gpu_power_watts", "mean"),
+            gpu_temp_c_max=_stat(window, "lhm_gpu_temp_c", "max"),
+            cpu_clock_mhz_mean=_stat(window, "cpu_clock_mhz", "mean"),
+            cpu_usage_percent_mean=_stat(window, "cpu_usage_percent", "mean"),
+            throttled_sample_ratio=_float_or_none(window.get("gpu_throttled_sample_ratio")),
+            throttle_reasons=_throttle_reasons(window.get("gpu_throttle_reasons_seen")),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
@@ -224,16 +266,20 @@ def _stat(machine: dict, field: str, key: str) -> float | None:
     return _float_or_none(block.get(key))
 
 
+def _throttle_reasons(raw: object) -> str | None:
+    if isinstance(raw, list):
+        return ",".join(str(r) for r in raw) or None
+    if raw is None or isinstance(raw, str):
+        return raw or None
+    return str(raw)
+
+
 def _monitor_row(test: dict, metrics: dict) -> MonitorRow | None:
     machine = metrics.get("machine")
     if not isinstance(machine, dict) or not machine.get("samples"):
         return None
 
-    reasons = machine.get("gpu_throttle_reasons_seen")
-    if isinstance(reasons, list):
-        reasons = ",".join(str(r) for r in reasons) or None
-    elif reasons is not None and not isinstance(reasons, str):
-        reasons = str(reasons)
+    reasons = _throttle_reasons(machine.get("gpu_throttle_reasons_seen"))
 
     return MonitorRow(
         nodeid=test.get("nodeid", ""),
@@ -367,5 +413,7 @@ def load_summary(path: Path) -> RunRecord:
         if handler is None:
             continue
         rec.perf.extend(handler(metrics))
+        if metrics.get("test_type") == "llm_benchmark":
+            rec.phase_stats.extend(_phase_rows(metrics))
 
     return rec

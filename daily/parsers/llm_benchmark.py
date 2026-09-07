@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import geometric_mean
 from typing import TypedDict
@@ -42,6 +43,78 @@ class LlmDataItem(TypedDict, total=False):
     start: str
     end: str
     token_timestamps: dict[str, str]
+
+
+@dataclass(frozen=True)
+class PhaseWindow:
+    """One wall-clock stretch of a benchmark run, named after what ran in it.
+
+    A run is `compile -> warm-up -> (per prompt: idle -> first token -> decode)`,
+    repeated per iteration. Naming the stretches lets machine telemetry be read
+    per phase instead of averaged over the whole test. ``in_token``/``out_token``
+    tie a phase to its series; the run-level phases carry zeros.
+    """
+
+    phase: str
+    in_token: int
+    out_token: int
+    begin: str
+    end: str
+
+
+def _results_in_execution_order(report: dict) -> list[dict]:
+    rows = ((report.get('perfdata') or {}).get('results') or [])
+    return sorted((r for r in rows if r.get('start')), key=lambda r: r['start'])
+
+
+def _warmup_window(rows: list[dict]) -> tuple[str, str] | None:
+    """Warm-up bounds. It is dropped from the perf numbers but not from the
+    machine's history: it is what heats the GPU up before the first measurement."""
+    warmup = [r for r in rows if r.get('iteration') == 0 and r.get('end')]
+    if not warmup:
+        return None
+    return warmup[0]['start'], max(r['end'] for r in warmup)
+
+
+def phase_windows(report: dict, items: list[LlmDataItem]) -> list[PhaseWindow]:
+    """Name every stretch of a run that machine telemetry can be cut by.
+
+    ``items`` are the parsed results, so the per-prompt phases describe the
+    iteration whose numbers are actually reported rather than an average of all
+    of them.
+    """
+    windows: list[PhaseWindow] = []
+
+    compile_window = (report.get('perfdata') or {}).get('compile_window') or {}
+    if compile_window.get('begin') and compile_window.get('end'):
+        windows.append(PhaseWindow('compile', 0, 0,
+                                   compile_window['begin'], compile_window['end']))
+
+    rows = _results_in_execution_order(report)
+    if (warmup := _warmup_window(rows)) is not None:
+        windows.append(PhaseWindow('warmup', 0, 0, *warmup))
+
+    # A prompt's generate is preceded by tokenization and by whatever the
+    # previous prompt was still finishing, during which the GPU can clock down.
+    prev_end = {row['start']: rows[i - 1].get('end')
+                for i, row in enumerate(rows) if i > 0}
+    for item in items:
+        stamps = item.get('token_timestamps') or {}
+        begin, split, end = (stamps.get('generate_begin'),
+                             stamps.get('first_token_end'),
+                             stamps.get('generate_end'))
+        in_tok, out_tok = item.get('in_token', 0), item.get('out_token', 0)
+        if (idle_from := prev_end.get(item.get('start'))) and begin:
+            windows.append(PhaseWindow('idle', in_tok, out_tok, idle_from, begin))
+        if begin and split and end:
+            windows.append(PhaseWindow('first_token', in_tok, out_tok, begin, split))
+            windows.append(PhaseWindow('decode', in_tok, out_tok, split, end))
+        elif begin and end:
+            # llm_bench drops the split when it cannot verify it. The window it
+            # was cutting is still measured, so keep it whole rather than lose
+            # the generate entirely.
+            windows.append(PhaseWindow('generate', in_tok, out_tok, begin, end))
+    return windows
 
 
 _RE_PROMPT_NUMS = re.compile(r'prompt nums: (\d+)')

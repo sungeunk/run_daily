@@ -1103,6 +1103,30 @@ def geomean_matrix(db_path: Path, machines: Sequence[str], *,
             .reset_index(drop=True))
 
 
+def phase_stats_for_runs(db_path: Path,
+                         run_ids: Sequence[str]) -> pd.DataFrame:
+    """Machine state during each phase of a run.
+
+    ``machine_health_for_runs`` averages a whole test, blending the compile, the
+    warm-up, the first token and the decode together. This keeps them apart, so
+    a first token that got slower can be checked against the clock and throttle
+    state of that phase alone. ``exec_mode`` names the phase; 'compile' and
+    'warmup' rows carry no tokens and match no series. Only runs recorded by a
+    llm_bench build that emits token timestamps have rows here.
+    """
+    if not run_ids or "perf_phase_stats" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+    placeholders = ",".join(["?"] * len(run_ids))
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            SELECT s.*, strftime(r.ts, '%Y%m%d_%H%M') AS stamp
+            FROM perf_phase_stats s
+            JOIN runs r USING (run_id)
+            WHERE s.run_id IN ({placeholders})
+            ORDER BY s.model, s.precision, s.in_token, s.exec_mode
+        """, list(run_ids)).fetchdf()
+
+
 def machine_health_for_runs(db_path: Path,
                             run_ids: Sequence[str]) -> pd.DataFrame:
     """Per-run machine telemetry summary for an explicit cohort."""

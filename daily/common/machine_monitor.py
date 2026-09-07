@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -82,14 +83,7 @@ def _numeric(rows: Iterable[dict], field: str) -> list[float]:
     return out
 
 
-def summarize(path: Path) -> dict:
-    """Reduce a monitor JSONL file to a compact, JSON-serialisable summary."""
-    summary: dict = {'file': str(path), 'samples': 0}
-
-    if not path.exists():
-        summary['error'] = 'monitor produced no output'
-        return summary
-
+def _read_samples(path: Path) -> list[dict]:
     rows: list[dict] = []
     with path.open('r', encoding='utf-8', errors='ignore') as handle:
         for line in handle:
@@ -100,11 +94,22 @@ def summarize(path: Path) -> dict:
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
+    return rows
 
-    summary['samples'] = len(rows)
-    if not rows:
-        summary['error'] = 'monitor produced no samples'
-        return summary
+
+def _parse_utc(text: object) -> datetime | None:
+    """Accept both the monitor's trailing-Z stamps and isoformat() offsets."""
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _reduce(rows: list[dict], *, context: bool = True) -> dict:
+    summary: dict = {'samples': len(rows)}
 
     start = rows[0].get('t_monotonic')
     end = rows[-1].get('t_monotonic')
@@ -115,12 +120,13 @@ def summarize(path: Path) -> dict:
     for field in _STAT_FIELDS:
         summary[field] = _stats(_numeric(rows, field))
 
-    for field in _CONTEXT_FIELDS:
-        value = next(
-            (row.get(field) for row in reversed(rows) if row.get(field) is not None),
-            None,
-        )
-        summary[field] = NA if value is None else value
+    if context:
+        for field in _CONTEXT_FIELDS:
+            value = next(
+                (row.get(field) for row in reversed(rows) if row.get(field) is not None),
+                None,
+            )
+            summary[field] = NA if value is None else value
 
     throttled = [
         str(row.get('gpu_throttle_reasons'))
@@ -136,8 +142,49 @@ def summarize(path: Path) -> dict:
 
     # A sample that took unusually long means the probe itself was blocked, so
     # the surrounding values should be read with suspicion.
-    durations = _numeric(rows, 'sample_duration_ms')
-    summary['sample_duration_ms'] = _stats(durations)
+    summary['sample_duration_ms'] = _stats(_numeric(rows, 'sample_duration_ms'))
+    return summary
+
+
+def summarize_window(path: Path, begin: object, end: object) -> dict:
+    """Reduce only the samples inside one wall-clock window.
+
+    Used to attribute a phase of a benchmark — the first token or the decode
+    that follows it — to the machine state while it ran. A window shorter than
+    the sampling interval legitimately yields ``samples: 0``; that is reported
+    rather than hidden so a caller can tell "no data" from "nothing happened".
+    """
+    begin_dt = _parse_utc(begin)
+    end_dt = _parse_utc(end)
+    if begin_dt is None or end_dt is None or end_dt <= begin_dt or not Path(path).exists():
+        return {}
+
+    rows = [
+        row for row in _read_samples(Path(path))
+        if (ts := _parse_utc(row.get('timestamp_utc'))) is not None and begin_dt <= ts <= end_dt
+    ]
+    if not rows:
+        return {'samples': 0, 'window_sec': round((end_dt - begin_dt).total_seconds(), 3)}
+
+    summary = _reduce(rows, context=False)
+    summary['window_sec'] = round((end_dt - begin_dt).total_seconds(), 3)
+    return summary
+
+
+def summarize(path: Path) -> dict:
+    """Reduce a monitor JSONL file to a compact, JSON-serialisable summary."""
+    summary: dict = {'file': str(path), 'samples': 0}
+
+    if not path.exists():
+        summary['error'] = 'monitor produced no output'
+        return summary
+
+    rows = _read_samples(path)
+    if not rows:
+        summary['error'] = 'monitor produced no samples'
+        return summary
+
+    summary.update(_reduce(rows))
 
     return summary
 

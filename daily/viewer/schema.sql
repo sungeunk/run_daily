@@ -187,6 +187,37 @@ CREATE TABLE IF NOT EXISTS machine_monitor_stats (
     PRIMARY KEY (run_id, nodeid)
 );
 
+-- Machine state during one phase of a run, cut from the monitor samples using
+-- the wall-clock windows llm_bench reports. A run is `compile -> warm-up ->
+-- (per prompt: idle -> first token -> decode)`, and the per-test summary above
+-- averages all of it together, which is exactly the distinction a first-token
+-- regression needs. `exec_mode` names the phase: '1st' and '2nd' take the
+-- exec_mode of the perf row they explain and so join 1:1 with `perf`, while
+-- 'compile', 'warmup' and 'idle' belong to the run rather than to a measured
+-- series ('compile' and 'warmup' carry no tokens at all), and 'generate' stands
+-- in for the unsplit pair when llm_bench could not verify the first-token
+-- boundary. Raw samples stay in the run's monitor Parquet for drill-down.
+CREATE TABLE IF NOT EXISTS perf_phase_stats (
+    run_id                  TEXT NOT NULL,
+    model                   TEXT NOT NULL,
+    precision               TEXT NOT NULL,
+    in_token                INTEGER NOT NULL DEFAULT 0,
+    out_token               INTEGER NOT NULL DEFAULT 0,
+    exec_mode               TEXT NOT NULL,
+    window_sec              DOUBLE,
+    samples                 INTEGER,
+    gpu_clock_mhz_mean      DOUBLE,
+    gpu_clock_mhz_min       DOUBLE,
+    gpu_utilization_mean    DOUBLE,
+    gpu_power_watts_mean    DOUBLE,
+    gpu_temp_c_max          DOUBLE,
+    cpu_clock_mhz_mean      DOUBLE,
+    cpu_usage_percent_mean  DOUBLE,
+    throttled_sample_ratio  DOUBLE,
+    throttle_reasons        TEXT,
+    PRIMARY KEY (run_id, model, precision, in_token, out_token, exec_mode)
+);
+
 CREATE TABLE IF NOT EXISTS functional_issues (
     run_id    TEXT NOT NULL,
     nodeid    TEXT NOT NULL,

@@ -271,6 +271,34 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 list(monitor_dedup.values()),
             )
 
+        con.execute("DELETE FROM perf_phase_stats WHERE run_id = ?", [rec.run_id])
+        if rec.phase_stats:
+            phase_dedup: dict[tuple, tuple] = {}
+            for p in rec.phase_stats:
+                key = (p.model, p.precision, p.in_token, p.out_token, p.exec_mode)
+                phase_dedup[key] = (
+                    rec.run_id, *key, p.window_sec, p.samples,
+                    p.gpu_clock_mhz_mean, p.gpu_clock_mhz_min,
+                    p.gpu_utilization_mean, p.gpu_power_watts_mean,
+                    p.gpu_temp_c_max, p.cpu_clock_mhz_mean,
+                    p.cpu_usage_percent_mean, p.throttled_sample_ratio,
+                    p.throttle_reasons,
+                )
+            con.executemany(
+                """
+                INSERT INTO perf_phase_stats (
+                    run_id, model, precision, in_token, out_token, exec_mode,
+                    window_sec, samples,
+                    gpu_clock_mhz_mean, gpu_clock_mhz_min,
+                    gpu_utilization_mean, gpu_power_watts_mean,
+                    gpu_temp_c_max, cpu_clock_mhz_mean,
+                    cpu_usage_percent_mean, throttled_sample_ratio,
+                    throttle_reasons
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                list(phase_dedup.values()),
+            )
+
         con.execute("DELETE FROM functional_issues WHERE run_id = ?", [rec.run_id])
         if rec.issues:
             issue_dedup: dict[tuple, tuple] = {}

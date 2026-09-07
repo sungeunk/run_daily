@@ -63,6 +63,34 @@ class MonitorRow:
 
 
 @dataclass
+class PhaseStatRow:
+    """Machine telemetry for one phase of a benchmark run.
+
+    Keyed like PerfRow so a phase joins 1:1 with the series it explains;
+    ``exec_mode`` names the phase ('1st' = first token, '2nd' = decode,
+    'idle' = the stretch before a prompt's generate, 'warmup' and 'compile'
+    = run-level phases that have no series and no tokens).
+    """
+
+    model: str
+    precision: str
+    in_token: int
+    out_token: int
+    exec_mode: str
+    window_sec: float | None = None
+    samples: int = 0
+    gpu_clock_mhz_mean: float | None = None
+    gpu_clock_mhz_min: float | None = None
+    gpu_utilization_mean: float | None = None
+    gpu_power_watts_mean: float | None = None
+    gpu_temp_c_max: float | None = None
+    cpu_clock_mhz_mean: float | None = None
+    cpu_usage_percent_mean: float | None = None
+    throttled_sample_ratio: float | None = None
+    throttle_reasons: str | None = None
+
+
+@dataclass
 class IssueRow:
     """A test that did not pass, kept so the viewer can name the model."""
 
@@ -115,4 +143,5 @@ class RunRecord:
     devices: list[DeviceRecord] = field(default_factory=list)
     perf: list[PerfRow] = field(default_factory=list)
     monitor: list[MonitorRow] = field(default_factory=list)
+    phase_stats: list[PhaseStatRow] = field(default_factory=list)
     issues: list[IssueRow] = field(default_factory=list)

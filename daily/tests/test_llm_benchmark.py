@@ -27,7 +27,8 @@ import pytest
 from common.config import DailyConfig
 from common.fs_utils import convert_path
 from common.llm_benchmark_skip import get_skip_reason
-from parsers.llm_benchmark import parse_json_report
+from common.machine_monitor import summarize_window
+from parsers.llm_benchmark import parse_json_report, phase_windows
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +121,35 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) ->
     return ' '.join(parts)
 
 
+def _machine_phases(data: list, machine: dict | None,
+                    raw_report: dict | None) -> list[dict]:
+    """Attribute each phase of the run to the machine state while it ran.
+
+    A run repeats `compile -> warm-up -> (per prompt: idle -> first token ->
+    decode)`, and the per-test monitor summary averages all of it together.
+    Cutting the samples with each phase's own window is what lets a first token
+    that got slower be checked against the clock and throttle state of that
+    phase alone. The raw samples stay in the monitor JSONL and in the run's
+    Parquet, so this is a summary plus a pointer, not a replacement.
+    """
+    if not isinstance(machine, dict):
+        return []
+    jsonl = machine.get('file')
+    if not jsonl or not Path(jsonl).exists():
+        return []
+    jsonl = Path(jsonl)
+
+    phases = []
+    for window in phase_windows(raw_report or {}, data):
+        stats = summarize_window(jsonl, window.begin, window.end)
+        if stats:
+            phases.append({'phase': window.phase,
+                           'in_token': window.in_token,
+                           'out_token': window.out_token,
+                           **stats})
+    return phases
+
+
 # ---------------------------------------------------------------------------
 # The parametrized test
 # ---------------------------------------------------------------------------
@@ -188,6 +218,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     # Kept verbatim so the per-test file can be dropped without losing detail.
     raw_report = json.loads(json_report_path.read_text(encoding='utf-8'))
     json_report_path.unlink(missing_ok=True)
+    machine_phases = _machine_phases(data, result.machine, raw_report)
 
     record_metrics({
         'test_type': 'llm_benchmark',
@@ -197,6 +228,7 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'returncode': result.returncode,
         'duration_sec': result.duration_sec,
         'machine': result.machine,
+        'machine_phases': machine_phases,
         'data': data,
         'raw_report': raw_report,
     })

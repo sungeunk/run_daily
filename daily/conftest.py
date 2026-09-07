@@ -45,6 +45,7 @@ from common.profiling import HWResourceTracker, ResourceStats, sizeof_fmt
 
 DEV_ONLY_TEST_FILES = frozenset({
     'test_llm_parser.py',
+    'test_machine_phases.py',
     'test_run_meta.py',
     'test_viewer_charts.py',
     'test_viewer_queries.py',

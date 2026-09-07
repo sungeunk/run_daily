@@ -157,10 +157,9 @@ def test_parse_json_report_carries_timestamps_of_selected_iteration(tmp_path: Pa
                     'start': '2026-08-26T06:05:03.100000+00:00',
                     'end': '2026-08-26T06:05:06.200000+00:00',
                     'token_timestamps': {
-                        'first_token_begin': '2026-08-26T06:05:03.200000+00:00',
+                        'generate_begin': '2026-08-26T06:05:03.200000+00:00',
                         'first_token_end': '2026-08-26T06:05:03.300000+00:00',
-                        'second_token_begin': '2026-08-26T06:05:03.300000+00:00',
-                        'second_token_end': '2026-08-26T06:05:03.310000+00:00',
+                        'generate_end': '2026-08-26T06:05:06.100000+00:00',
                     },
                 },
                 {
@@ -173,7 +172,7 @@ def test_parse_json_report_carries_timestamps_of_selected_iteration(tmp_path: Pa
                     'start': '2026-08-26T06:05:07.000000+00:00',
                     'end': '2026-08-26T06:05:10.000000+00:00',
                     'token_timestamps': {
-                        'first_token_begin': '2026-08-26T06:05:07.100000+00:00',
+                        'generate_begin': '2026-08-26T06:05:07.100000+00:00',
                         'first_token_end': '2026-08-26T06:05:07.300000+00:00',
                     },
                 },

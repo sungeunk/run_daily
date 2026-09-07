@@ -247,6 +247,11 @@ def cached_machine_health(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def cached_phase_stats(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.phase_stats_for_runs(DB, run_ids)
+
+
+@st.cache_data(show_spinner=False)
 def cached_trend_compare(machine: str, run_a: str, run_b: str,
                          history_n: int, run_kinds: tuple[str, ...],
                          models: tuple[str, ...], min_series: int,
@@ -1047,6 +1052,82 @@ def _tab_exclusions(cfg: dict) -> None:
         st.rerun()
 
 
+_PHASE_KEYS = ["model", "precision", "in_token", "out_token", "exec_mode"]
+# Phases with no perf row to compare against, so they carry no verdict.
+_UNMEASURED_PHASES = ("compile", "warmup", "idle", "generate")
+_PHASE_METRICS = ["gpu_clock_mhz_mean", "gpu_utilization_mean",
+                  "gpu_power_watts_mean", "throttled_sample_ratio", "samples"]
+_PHASE_LABELS = {
+    "model": "Model", "precision": "Prec", "in_token": "In", "out_token": "Out",
+    "exec_mode": "Phase", "change": "A vs B", "verdict": "Verdict",
+    "samples_a": "Samples A", "gpu_clock_mhz_mean_a": "GPU MHz A",
+    "gpu_clock_mhz_mean_b": "GPU MHz B", "clock_delta": "MHz Δ",
+    "gpu_utilization_mean_a": "GPU % A", "gpu_power_watts_mean_a": "GPU W A",
+    "throttled_sample_ratio_a": "Throttled A",
+}
+_PHASE_COLUMNS = _PHASE_KEYS + [
+    "change", "verdict", "samples_a", "gpu_clock_mhz_mean_a",
+    "gpu_clock_mhz_mean_b", "clock_delta", "gpu_utilization_mean_a",
+    "gpu_power_watts_mean_a", "throttled_sample_ratio_a",
+]
+
+
+def _phase_ab(phases: pd.DataFrame, keys: pd.DataFrame,
+              run_a: str, run_b: str) -> pd.DataFrame:
+    """Put each phase's A and B telemetry side by side on the rows in ``keys``."""
+    side_a = phases[phases["run_id"] == run_a][_PHASE_KEYS + _PHASE_METRICS]
+    side_b = phases[phases["run_id"] == run_b][_PHASE_KEYS + _PHASE_METRICS]
+    merged = (keys
+              .merge(side_a, on=_PHASE_KEYS, how="inner")
+              .merge(side_b, on=_PHASE_KEYS, how="left", suffixes=("_a", "_b")))
+    if merged.empty:
+        return merged
+    merged["clock_delta"] = merged["gpu_clock_mhz_mean_a"] - merged["gpu_clock_mhz_mean_b"]
+    return merged
+
+
+def _phase_machine_state(view: pd.DataFrame, run_a: str, run_b: str,
+                         cfg: dict) -> None:
+    """Show the machine state measured inside each phase of the run.
+
+    A run is `compile -> warm-up -> (per prompt: idle -> first token ->
+    decode)`. Answering "was the GPU already clocked down while this first token
+    was produced, or had it just come off an idle stretch" needs those phases
+    kept apart, which the whole-test summary cannot do.
+    """
+    phases = cached_phase_stats((run_a, run_b), cfg["v"])
+    if phases.empty:
+        return
+
+    # 'idle' shares a series' key but has no perf row of its own, so it is
+    # picked up alongside the run-level phases rather than from the compare view.
+    unmeasured = phases[phases["exec_mode"].isin(_UNMEASURED_PHASES)]
+    rows = pd.concat(
+        [df for df in (
+            _phase_ab(phases,
+                      unmeasured[_PHASE_KEYS].drop_duplicates()
+                      .assign(change="—", verdict="n/a"), run_a, run_b),
+            _phase_ab(phases, view[_PHASE_KEYS + ["change", "verdict"]],
+                      run_a, run_b),
+        ) if not df.empty],
+        ignore_index=True)
+    if rows.empty:
+        return
+
+    with st.expander(f"Machine state during each phase ({len(rows)} rows)"):
+        st.caption(
+            "Summarised over the monitor samples inside each phase's own window "
+            "— `compile` and `warmup` precede all measurement, `idle` is the "
+            "stretch before a prompt's generate, `1st` is that prompt's first "
+            "token and `2nd` the decode after it. `Samples A` of 0 means the "
+            "phase was shorter than the monitor's sampling interval, so its "
+            "numbers are absent rather than flat.")
+        st.dataframe(
+            rows[_PHASE_COLUMNS].rename(columns=_PHASE_LABELS),
+            width="stretch", hide_index=True,
+        )
+
+
 def _tab_compare(cfg: dict) -> None:
     st.caption("A raw A-vs-B delta cannot separate a real change from ordinary "
                "run-to-run scatter, so each series is also compared against the "
@@ -1159,6 +1240,8 @@ def _tab_compare(cfg: dict) -> None:
         }),
         width="stretch", hide_index=True,
     )
+
+    _phase_machine_state(view, run_a, run_b, cfg)
 
     st.markdown("### Series trend")
     if view.empty:
