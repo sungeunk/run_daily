@@ -198,11 +198,13 @@ class MachineMonitor:
         *,
         interval_sec: float = 0.5,
         max_duration_sec: float = 3600.0,
+        target_device: str | None = None,
         log_sink: Callable[[str], None] | None = None,
     ):
         self.out_path = Path(out_path)
         self._interval_sec = interval_sec
         self._max_duration_sec = max_duration_sec
+        self._target_device = target_device
         self._log = log_sink or (lambda _text: None)
         self._proc: subprocess.Popen | None = None
         self.summary: dict | None = None
@@ -220,6 +222,10 @@ class MachineMonitor:
             '--out', str(self.out_path),
             '--top-processes', '5',
         ]
+        # Without this the monitor samples GPU.0, which on a machine with both
+        # an iGPU and a dGPU is not the device the benchmark ran on.
+        if self._target_device:
+            cmd += ['--target-device', self._target_device]
 
         try:
             self._proc = subprocess.Popen(

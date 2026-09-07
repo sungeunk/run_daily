@@ -213,6 +213,7 @@ def machine_monitor(request: pytest.FixtureRequest, daily_config: DailyConfig,
             interval_sec=interval_sec,
             # Outlive the benchmark timeout so the monitor never stops early.
             max_duration_sec=daily_config.timeout_sec + 300,
+            target_device=daily_config.device,
             log_sink=raw_log.write,
         )
         created.append(monitor)

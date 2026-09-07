@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -167,20 +168,24 @@ def run_powershell(command: str, timeout_sec: float = 4.0) -> str | None:
     return run_command(["powershell", "-NoProfile", "-Command", command], timeout_sec)
 
 
-def ensure_required_modules() -> tuple[object, object]:
-    missing: list[str] = []
-    for module_name in ("psutil", "wmi"):
-        if find_spec(module_name) is None:
-            missing.append(module_name)
+def ensure_required_modules() -> tuple[object, object | None]:
+    # wmi is a Windows-only binding; every probe that uses it already degrades
+    # to None elsewhere, so requiring it here would kill the monitor on Linux.
+    required = ["psutil"] + (["wmi"] if sys.platform == "win32" else [])
+    missing = [name for name in required if find_spec(name) is None]
 
     if missing:
         missing_csv = ", ".join(missing)
         raise ModuleNotFoundError(
             "Required Python modules are missing: "
-            f"{missing_csv}. Install with: uv pip install psutil wmi"
+            f"{missing_csv}. Install with: uv pip install {' '.join(missing)}"
         )
 
     import psutil  # type: ignore
+
+    if sys.platform != "win32":
+        return psutil, None
+
     import wmi  # type: ignore
 
     return psutil, wmi
@@ -593,6 +598,8 @@ def get_memory_usage() -> tuple[float | None, int | None]:
 
 
 def query_timer_resolution() -> TimerResolution | None:
+    if sys.platform != "win32":
+        return None
     ntdll = ctypes.WinDLL("ntdll")
     min_units = ctypes.c_ulong()
     max_units = ctypes.c_ulong()
@@ -632,6 +639,9 @@ def get_process_priority(pid: int) -> ProcessPriority | None:
 
 
 def get_process_session_id(pid: int) -> int | None:
+    # Windows session isolation has no Linux counterpart worth reporting.
+    if sys.platform != "win32":
+        return None
     kernel32 = ctypes.WinDLL("kernel32")
     session_id = ctypes.c_ulong()
     if kernel32.ProcessIdToSessionId(ctypes.c_ulong(pid), ctypes.byref(session_id)) == 0:
@@ -693,6 +703,8 @@ def is_process_alive(pid: int) -> bool:
 
 
 def get_foreground_pid() -> int | None:
+    if sys.platform != "win32":
+        return None
     user32 = ctypes.WinDLL("user32")
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
@@ -712,6 +724,8 @@ class _ProcessPowerThrottlingState(ctypes.Structure):
 
 def get_process_power_throttling(pid: int) -> str | None:
     """Return EcoQoS execution-speed state: throttled, unthrottled, or system-managed."""
+    if sys.platform != "win32":
+        return None
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
@@ -756,6 +770,8 @@ class _MemoryStatusEx(ctypes.Structure):
 
 def get_commit_charge_mb() -> tuple[int | None, int | None]:
     """Return (commit_used_mb, commit_limit_mb) from the system commit charge."""
+    if sys.platform != "win32":
+        return None, None
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     status = _MemoryStatusEx()
     status.dwLength = ctypes.sizeof(status)
@@ -959,9 +975,14 @@ def _enumerate_sysman(lib: object, func_name: str, device: int) -> list[int]:
 
 def init_sysman(device_index: int = 0) -> SysmanHandles | None:
     """Intel GPU telemetry via Level Zero Sysman; needs no external tooling or elevation."""
-    try:
-        lib = ctypes.CDLL("ze_loader.dll")
-    except OSError:
+    lib = None
+    for name in ("ze_loader.dll",) if sys.platform == "win32" else ("libze_loader.so.1", "libze_loader.so"):
+        try:
+            lib = ctypes.CDLL(name)
+            break
+        except OSError:
+            continue
+    if lib is None:
         return None
     if lib.zesInit(0) != 0:
         return None
