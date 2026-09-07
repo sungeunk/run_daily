@@ -5,91 +5,48 @@ Improvement backlog for the daily benchmark pipeline, DuckDB store, and the
 
 All findings below were verified against the central DB
 (`/var/www/html/daily2/daily_llm_benchmark.duckdb`) and against the working
-tree at `9c18c84` on 2026-09-07 unless the item is explicitly marked
-*(assumption)*.
+tree at `17bbd73` on 2026-09-07 unless the item is explicitly marked
+*(assumption)*. Completed items are not kept here — see the git history.
 
-Dependency order:
+Dependency order for what is left:
 
 ```
-T1 · T3  →  T4 · T5  →  T2  →  T6  →  T7 · T8  →  T9–T14 · T17 · T18
-  DONE      DONE(-ish)         mostly              T15 · T16 · T19 (independent)
+T2 · T19  →  T4 · T5  →  T6(MCP)  →  T7 · T8  →  T9–T14 · T17 · T18
+                                                  T15 · T16 (independent)
 ```
-
-**Status (2026-09-07):** T1, T3 and the query-layer half of T6 have landed —
-101 dev_only tests pass, and the new schema was validated against a copy of
-the central DB. Next up is T4/T5 (declared `run_kind` + `trigger`), then T2's
-backfill, then T6's remaining MCP-side plumbing.
 
 `T2`'s backfill sits after `T4`/`T5` on purpose: backfilling 239 runs before
 the baseline cohort is redefined (`run_kind × trigger × partial`) means doing
 it twice. `T18` blocks on `T2` (it can only stop warning once the tables are
 populated); `T17` blocks on `T12` (it needs the health columns exposed).
 
+## Landed
+
+**T1** (remove `short_run`), **T3** (cut off baseline contamination sources)
+and the query-layer half of **T6** shipped in `17bbd73` — see that commit
+message for the reasoning and the measured before/after. In short: the
+measurement shape is now fixed (`OUT_TOKEN_LENGTH` / `BENCHMARK_ITER_NUM`),
+`runs_with_flags` is the single definition of `is_partial` / `excluded`,
+`perf_stats` and the two trend queries no longer see excluded or non-daily
+runs, and the dead `runs.short_run` column is gone from the live DBs.
+
+One constraint that came out of it and still shapes T19/T5: **`is_partial`
+rests on `runs.test_filter` alone.** `selected_cases < expected_cases` cannot
+detect a narrowed run, because `_cases(summary)` sums only the tests pytest
+*collected* — a `-k llama` run reports the same figure for both. And
+`selected_cases` deliberately does not subtract `skipped_cases`: 117 of 208
+daily runs skip at least one case, so treating a skip as a narrowing would
+mark most of the fleet partial and empty the baseline cohort.
+
 ---
 
 ## P0 — Data integrity (prerequisite for everything else)
 
-### T1. Remove `short_run`, replace it with model filtering — **DONE**
-
-**Why:** `short_run=true` changed `out_token 256 → 32` and `benchmark_iter_num
-3 → 1`, so the resulting numbers were not comparable with a full run — yet
-`short_run` was part of the baseline selection key, which turned it into a
-contamination path.
-
-Measured: **0 runs** had `short_run = TRUE`, so removal was low risk.
-
-- [x] Dropped the CLI flag from `daily/run.py` and `daily/conftest.py`,
-      including the metadata producer and the module-docstring example
-- [x] Replaced the branching in `daily/common/config.py` with the
-      `OUT_TOKEN_LENGTH` / `BENCHMARK_ITER_NUM` module constants — the
-      measurement shape is now not configurable at all
-- [x] Dropped it from the baseline/comparison keys in
-      `daily/analysis/{baseline,engine,remote}.py` and
-      `scripts/generate_analysis_report.py`, which now read `is_partial` from
-      `runs_with_flags`
-- [x] Dropped from schema and ingest; added `runs.test_filter` and
-      `runs.selected_cases` with `writer.py` migrations so existing DBs pick
-      them up
-- [x] **Dropped the `runs.short_run` column from the live DBs**, not just
-      from `schema.sql` — a dead all-FALSE column means a stale query
-      filtering on it silently returns everything instead of failing. Applied
-      to the central DB (239 runs), `daily/LNL-03.duckdb` (24) and
-      `daily/viewer/bench.duckdb` (0); every value was FALSE, so no
-      information was lost. Backup at
-      `/var/www/html/daily2/daily_llm_benchmark.duckdb.bak.pre-short_run-drop`.
-      `writer._drop_short_run_column()` makes this self-healing for any other
-      DB on its next ingest. DuckDB refuses `DROP COLUMN` while *any* view or
-      index references the table, so the step tears both down and lets
-      `schema.sql` rebuild them — it is guarded on the column still existing
-      so the `runs` indexes are not rebuilt on every ingest.
-- [x] Added the `runs_with_flags` view (`daily/viewer/schema.sql`) as the one
-      definition of `is_partial` / `excluded`, so the analysis layer, the
-      viewer queries and `perf_flat` cannot drift apart
-- [x] Added `TestPartialRuns` to `daily/tests/test_viewer_queries.py`
-- [x] Updated `DESIGN.md` and `DESIGN_REPORT.md`
-
-Two corrections to what this item originally claimed:
-
-1. `test_viewer_queries.py::TestCohort::test_short_runs_can_be_excluded`
-   **did not exist** — no test in `daily/tests/` referenced `short_run` at
-   all. New coverage was written from scratch instead.
-2. Deriving `partial` from `selected_cases < expected_cases` **cannot work**:
-   `_cases(summary)` sums over `summary["tests"]`, which only lists tests
-   pytest *collected*, so a `-k llama` run reports the same figure for both.
-   `runs.test_filter` is therefore the authoritative signal and
-   `selected_cases` is informational. Getting a real suite size needs a
-   collect-only pass — see T19.
-   Relatedly, `selected_cases` deliberately does **not** subtract
-   `skipped_cases`: measured, 117 of 208 daily runs skip at least one case,
-   so treating a skip as a narrowing would mark most of the fleet partial and
-   empty the baseline cohort.
-
 ### T19. Record the true suite size, so `is_partial` covers more than `-k`
 
-**Why:** T1 landed `is_partial`, but it only fires when `test_filter` is set.
-A run narrowed by `--tests`, or one where collection itself dropped cases,
-still looks full. Historical rows (all 239) have no `test_filter` and cannot
-be reclassified.
+**Why:** `is_partial` only fires when `test_filter` is set. A run narrowed by
+`--tests`, or one where collection itself dropped cases, still looks full.
+Historical rows (all 239) have no `test_filter` and cannot be reclassified.
 
 - [ ] Run a `--collect-only` pass (or keep a static case registry) and store
       the full-suite case count on the run, so `selected_cases` has something
@@ -118,32 +75,6 @@ Consequence: every already-designed column is unusable — `verdict`,
       backfill bakes in whatever baseline cohort is current, so running it
       before `trigger` / `partial` exist means redoing it.
 
-### T3. Cut off baseline contamination sources — **DONE**
-
-- [x] `perf_flat` now selects from `runs_with_flags` and exposes `excluded`
-      as a **column** rather than filtering it away, because the Excel tab's
-      manual run picker must still be able to select an excluded run
-      (`perf_for_runs` takes explicit run_ids and is the picker's path).
-      `perf_stats` filters `WHERE NOT excluded`, so the rolling median no
-      longer includes excluded runs — measured, 107 of 16014 perf rows drop.
-      Cohort queries opt in via the new `_perf_flat_exclusion_clause()`.
-- [x] `run_exclusions.reason` is now mandatory — enforced in
-      `add_exclusion()` rather than as a `NOT NULL` column, because the DDL
-      is `IF NOT EXISTS` and would not migrate the 9 existing NULL rows.
-- [x] Added `model_cache`, `genai_version`, `genai_commit`,
-      `gpu_driver_version` to `perf_flat`, plus `description` (the Run-kinds
-      selector matches free text against `purpose`/`description`, so
-      filtering `perf_flat` by keyword needs both).
-- [x] `latest_run_per_machine` now requires
-      `run_kind = 'daily' AND NOT excluded AND NOT is_partial`. Verified
-      against a copy of the central DB: still 9 machines, no regression.
-
-Correction to what this item originally claimed: `_exclusion_predicate()`
-already existed (`daily/viewer/queries.py:184`) and *was* applied by 6 call
-sites, so "not applied by any view" was true only of the SQL views. The real
-gap was exactly `series_history` + `trend_regressions` — the same pair as T6,
-fixed there.
-
 ---
 
 ## P1 — `run_kind` classification
@@ -168,33 +99,20 @@ resolve to `run_kind = 'daily'`. Current distribution: `daily` 208, `test` 17,
 `pr` 7, `manual` 7.
 
 - [ ] Add `runs.trigger` — `timer` | `manual` | `ci` — orthogonal to `run_kind`
-- [ ] Final classification = `run_kind` × `trigger` × `partial` (the last one
-      from T1's `test_filter` / `selected_cases`)
+- [ ] Final classification = `run_kind` × `trigger` × `is_partial` (the last
+      one already exists in `runs_with_flags`, driven by `test_filter`)
 - [ ] Define the default baseline cohort as
       `run_kind = 'daily' AND trigger = 'timer' AND NOT partial`
 
-### T6. Fix `series_history` and `trend_regressions` (the two unguarded queries)
+### T6. Thread `run_kinds` through the MCP layer
 
-**Why:** `queries.py` already has a `run_kinds` parameter and
-`DEFAULT_RUN_KINDS = ("daily",)` (`daily/viewer/queries.py:144`), and
-`_exclusion_predicate()` at `:184`. Both are threaded through the rest of the
-module — but `series_history` and `trend_regressions` accepted only
-`purpose_filter` and applied neither guard. These are the same two functions
-T3 identifies, so both fixes landed together.
+**Why:** the query layer takes `run_kinds` everywhere now (`17bbd73`), but
+`daily/mcp_server/server.py` never passes it, so every MCP tool still answers
+from whatever cohort its own SQL happens to select. Measured contamination in
+the last 10 days: `run_kind='pr'` 547 perf rows and `run_kind='test'` 112
+against `daily`'s 9393.
 
-- [x] Added `run_kinds` (default `("daily",)`) to both, via the new
-      `_perf_flat_kind_clause()`. `_run_kind_predicate()` now accepts
-      `alias=None` for a single-table select straight from `perf_flat`.
-- [x] Applied the exclusion filter in both (this was T3's first bullet)
-- [x] Added `TestTrendGuards` / `TestExclusionsReachTheBaseline` coverage.
-      Verified against a copy of the central DB: one LNL-03 series goes from
-      93 points to 80 once the daily-only filter applies.
-- [ ] **Still open:** expose `run_kinds` on every MCP tool, defaulting to
-      `("daily",)`. The queries accept it now, but
-      `daily/mcp_server/server.py` does not pass it, so the MCP path still
-      sees the unfiltered default of whatever the tool hardcodes.
-      Measured contamination in the last 10 days: `run_kind='pr'` 547 perf
-      rows and `run_kind='test'` 112 perf rows against `daily`'s 9393.
+- [ ] Expose `run_kinds` on every MCP tool, defaulting to `("daily",)`
 
 ---
 

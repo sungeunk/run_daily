@@ -412,6 +412,7 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 - [~] 성능 메트릭 단위 표준화 고도화
 - [~] regression threshold 운영 정책 확정
 - [ ] baseline 대상 필터 정책 확정: machine, purpose, run_kind, is_partial, excluded, success-only 여부
+      — 메커니즘은 `runs_with_flags` 로 구현됨. 남은 것은 정책 확정이며 TODO.md T5 에서 다룬다
 - [ ] functional 이슈 분류 체계 확정: fail, timeout, infra, model, OpenVINO
 
 ### 데이터/DB
@@ -419,10 +420,11 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 - [x] DuckDB schema와 ingest 경로 구현
 - [x] run/file_hash 기반 중복 처리 구현
 - [x] new/old 포맷 ingestion CLI 구현
-- [x] `analysis_results` 테이블 추가
-- [x] `analysis_comparisons` 테이블 추가
-- [x] `functional_issues` 테이블 추가
-- [ ] backfill 운영 스크립트 추가
+- [~] `analysis_results` 테이블 추가 — 스키마만 존재. 중앙 DB 실측 0행:
+      ingest 경로가 `analyze_run`을 호출하지 않는다 (TODO.md T2)
+- [~] `analysis_comparisons` 테이블 추가 — 동일하게 0행 (TODO.md T2)
+- [x] `functional_issues` 테이블 추가 — ingest writer가 직접 채운다 (167행)
+- [ ] backfill 운영 스크립트 추가 — TODO.md T2 와 동일 항목
 
 ### 분석 엔진
 
