@@ -11,6 +11,8 @@ the configured daily DB by running the local ingestion script.
 Tabs
 ----
 1. Dashboard    — fleet status, failing models and per-machine geomean trend.
+                  ``Current build`` anchors the view to an older build so
+                  "current" stops meaning "newest run".
 2. Excel Paste  — wide matrix for a fixed display profile, selected runs
                   become columns.
 3. Compare      — run-to-run direct comparison at the series level.
@@ -232,10 +234,11 @@ def cached_series_runs(machine: str, model: str, precision: str,
 @st.cache_data(show_spinner=False)
 def cached_geomean_matrix(machines: tuple[str, ...], limit: int,
                           run_kinds: tuple[str, ...], min_series: int,
-                          models: tuple[str, ...], _v: float) -> pd.DataFrame:
+                          models: tuple[str, ...], _v: float,
+                          as_of_ts=None) -> pd.DataFrame:
     return q.geomean_matrix(DB, machines, limit=limit, run_kinds=run_kinds,
                             min_success_series=min_series,
-                            models=models or None)
+                            models=models or None, as_of_ts=as_of_ts)
 
 
 @st.cache_data(show_spinner=False)
@@ -472,24 +475,32 @@ REPORT_BASE_URL = os.environ.get(
 @st.cache_data(show_spinner=False)
 def cached_machines_overview(machines: tuple[str, ...],
                              run_kinds: tuple[str, ...], history_runs: int,
-                             _v: float) -> pd.DataFrame:
+                             _v: float, as_of_ts=None) -> pd.DataFrame:
     return q.machines_overview(DB, machines or None, run_kinds=run_kinds,
-                               history_runs=history_runs)
+                               history_runs=history_runs, as_of_ts=as_of_ts)
 
 
 @st.cache_data(show_spinner=False)
 def cached_failing_models(machines: tuple[str, ...],
                           run_kinds: tuple[str, ...], history_runs: int,
-                          _v: float) -> pd.DataFrame:
+                          _v: float, as_of_ts=None) -> pd.DataFrame:
     return q.failing_models_overview(DB, machines or None, run_kinds=run_kinds,
-                                     history_runs=history_runs)
+                                     history_runs=history_runs,
+                                     as_of_ts=as_of_ts)
 
 
 @st.cache_data(show_spinner=False)
 def cached_env_changes(machines: tuple[str, ...], run_kinds: tuple[str, ...],
-                       history_runs: int, _v: float) -> pd.DataFrame:
+                       history_runs: int, _v: float,
+                       as_of_ts=None) -> pd.DataFrame:
     return q.environment_changes(DB, machines or None, run_kinds=run_kinds,
-                                 history_runs=history_runs)
+                                 history_runs=history_runs, as_of_ts=as_of_ts)
+
+
+@st.cache_data(show_spinner=False)
+def cached_build_points(machines: tuple[str, ...],
+                        run_kinds: tuple[str, ...], _v: float) -> pd.DataFrame:
+    return q.build_points(DB, machines or None, run_kinds=run_kinds)
 
 
 def _report_url(machine: str, stamp: str, suffix: str) -> str:
@@ -768,16 +779,41 @@ def _machine_card(machine: str, records: pd.DataFrame,
                             width="stretch", key=f"geomean_{machine}")
 
 
+def _anchor_controls(cfg: dict, container, scope: tuple[str, ...]) -> dict:
+    """Let the dashboard treat an older build as the current one.
+
+    Anchoring is a timestamp cutoff rather than a per-machine run: rigs run at
+    different times, so every machine resolves its own newest run at or before
+    the picked build.
+    """
+    points = cached_build_points(scope, cfg["run_kinds"], cfg["v"])
+    labels = ["Latest"] + [f"{r.run_date} · {r.stamp} · {r.purpose or '—'}"
+                           for r in points.itertuples()]
+    choice = container.selectbox(
+        "Current build", labels, key="dashboard_anchor",
+        help="Treat the picked build as the newest run; anything after it is "
+             "dropped from every panel below. Builds are listed as "
+             "date · stamp · purpose, so a one-off build is easy to tell "
+             "apart from the nightly ones.")
+    if choice == "Latest" or points.empty:
+        return cfg
+    row = points.iloc[labels.index(choice) - 1]
+    return {**cfg, "as_of_ts": pd.Timestamp(row["ts"]).to_pydatetime(),
+            "as_of_label": choice, "as_of_machines": str(row["machines"])}
+
+
 def _tab_dashboard(cfg: dict) -> None:
-    cols = st.columns([2, 1, 1.5, 1.5], vertical_alignment="bottom")
+    cols = st.columns([2, 2.2, 1, 1.5, 1.5], vertical_alignment="bottom")
     query = cols[0].text_input(
         "Machine filter", key="dashboard_machine_filter",
         placeholder="Type part of a machine name, e.g. LNL")
-    cfg = _scope_controls(cfg, "dashboard", cols[1:])
+    cfg = _scope_controls(cfg, "dashboard", cols[2:])
+    cfg = _anchor_controls(cfg, cols[1], _machines_in_scope(cfg))
+    as_of = cfg.get("as_of_ts")
 
     scope = _machines_in_scope(cfg)
     overview = cached_machines_overview(scope, cfg["run_kinds"],
-                                        cfg["history_runs"], cfg["v"])
+                                        cfg["history_runs"], cfg["v"], as_of)
     if overview.empty:
         st.info("No runs match the current filters.")
         return
@@ -787,6 +823,12 @@ def _tab_dashboard(cfg: dict) -> None:
     if not names:
         st.info(f"No machine matches '{query}'.")
         return
+    if as_of is not None:
+        st.warning(
+            f"Anchored to **{cfg['as_of_label']}** "
+            f"(ran on: {cfg['as_of_machines']}). Runs after "
+            f"`{as_of:%Y-%m-%d %H:%M}` are hidden; each machine shows its own "
+            "newest run at or before that build.")
     st.caption(
         f"{len(names)} of {len(overview)} machines. Counts are benchmark "
         "cases, not pytest tests: one LLM test contributes 2 prompts x "
@@ -799,11 +841,11 @@ def _tab_dashboard(cfg: dict) -> None:
     records = _fleet_records(overview)
     matrix = cached_geomean_matrix(
         _machines_in_scope(cfg), cfg["history_runs"],
-        cfg["run_kinds"], cfg["min_series"], (), cfg["v"])
+        cfg["run_kinds"], cfg["min_series"], (), cfg["v"], as_of)
     failing = cached_failing_models(scope, cfg["run_kinds"],
-                                    cfg["history_runs"], cfg["v"])
+                                    cfg["history_runs"], cfg["v"], as_of)
     env = cached_env_changes(scope, cfg["run_kinds"], cfg["history_runs"],
-                             cfg["v"])
+                             cfg["v"], as_of)
 
     for machine in names:
         _machine_card(machine, records, matrix, failing, env, cfg)

@@ -99,7 +99,7 @@ Streamlit entry. 4 tabs.
 
 | Tab | Purpose |
 |---|---|
-| Dashboard | One bordered card per machine, narrowed by a machine-name substring box. Each card holds, in order: failing models in the latest run, a rig-change note, the machine's newest clean run and newest failed run as two side-by-side run cards, and the per-metric geomean trend. |
+| Dashboard | One bordered card per machine, narrowed by a machine-name substring box. Each card holds, in order: failing models in the latest run, a rig-change note, the machine's newest clean run and newest failed run as two side-by-side run cards, and the per-metric geomean trend. A `Current build` picker can move "latest" back to an older build. |
 | Excel | Select runs → wide matrix (profile rows × run stamps) + tab-separated paste block + "extra rows" expander |
 | Compare | Run A vs run B at series level; every A/B delta is also compared against the history preceding each run so scatter is told apart from a real change |
 | Exclusions | Manually hide a machine+run from every cohort-based view |
@@ -111,6 +111,10 @@ Analysis scope is per tab (`_scope_controls`): history depth in runs (3–20),
 `Purpose` filter, and the minimum successful series a run must have. Each view
 owns its own window instead of sharing one sidebar state; the machine is also
 chosen per tab (`_machine_picker`).
+
+The Dashboard adds a `Current build` picker (`_anchor_controls`) that anchors
+the view to an older build; see [Current build anchor](#current-build-anchor)
+below.
 
 Other:
 - **Unit display:** every user-visible numeric carries its unit — trend heading shows `[s]`, captions print `Recent median = 8.060 s`. Prevents SD pipeline seconds from being mis-read as ms.
@@ -187,6 +191,13 @@ All of them are gone; the entries stay so the removal is not re-litigated.
 - **Choice:** each machine card carries a geomean trend per metric, restricted to the series every run of that machine measured (`geomean_matrix`).
 - **Why:** a run that lost models to failures must move the success count, not the geomean — otherwise a failure reads as a performance change.
 - **History:** the standalone "Geomean" tab (bucket geomean + ±2σ band + latest-point banner, backed by `geomean_trend`) was removed. `geomean_trend` is now unused by the UI.
+
+### Current build anchor
+- **Problem:** the dashboard always reported the newest run. Reviewing what the fleet looked like at a specific build — a release candidate, or the build a bug was filed against — meant reading each machine's report by hand.
+- **Choice:** a `Current build` selectbox on the Dashboard sets one fleet-wide timestamp cutoff (`as_of_ts`), threaded into `machines_overview`, `failing_models_overview`, `environment_changes` and `geomean_matrix`. Every machine then resolves its *own* newest run at or before that instant.
+- **Rejected:** a per-machine run picker. Rigs run at different times of night, so pinning one machine's `run_id` says nothing about the others; a cutoff lines the whole fleet up on one build without pretending the runs were simultaneous.
+- **Build point label:** `date · stamp · purpose`, listed by `build_points` and grouped by `(stamp, purpose)`. `purpose` is the field that tells a hand-made build apart from the nightly one, which is what makes the list scannable; the date is spelled out separately because the stamp alone (`20260903_0136`) is hard to read at a glance.
+- **Detail:** `age_hours` is measured from the anchor rather than from now, otherwise every machine would show as 🟡 stale in a historical view. Only the Dashboard is anchored — Excel and Compare already take explicit runs.
 
 ### Daily machines filter
 - **Choice:** hardcoded `DAILY_MACHINES` tuple in `app.py`, applied unconditionally by `_machines_in_scope()`.

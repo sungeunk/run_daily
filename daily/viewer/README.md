@@ -56,7 +56,9 @@ Tabs:
 | Regressions | MAD-based z-score + pct-diff flags for the latest run                |
 | Geomean     | Geometric-mean trend across a bucket (machine-wide health)           |
 | Noise       | CV (σ/median) table — useful for iGPU fluctuation diagnostics        |
-
+The Dashboard's `Current build` picker moves what counts as "current": pick a
+build (listed as `date · stamp · purpose`) and every panel hides the runs after
+it, so each machine reports its own newest run at or before that build.
 ## Schema notes
 
 * `perf` holds raw numbers (raw `in_token` / `out_token`). Bucketing into

@@ -1034,7 +1034,8 @@ def geomean_matrix(db_path: Path, machines: Sequence[str], *,
                    limit: int = 10,
                    run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
                    min_success_series: int = 0,
-                   models: Sequence[str] | None = None) -> pd.DataFrame:
+                   models: Sequence[str] | None = None,
+                   as_of_ts=None) -> pd.DataFrame:
     """Per-machine, per-metric geomean trend, each over that machine's cohort.
 
     Every metric is reduced to the series that all of the machine's runs
@@ -1042,6 +1043,9 @@ def geomean_matrix(db_path: Path, machines: Sequence[str], *,
     failures moves the success count instead of the geomean. The intersection
     is per machine and per metric — mixing machines would compare rigs whose
     model sets differ.
+
+    ``as_of_ts`` moves the trend's right edge back in time: each machine's
+    cohort ends at its newest run at or before that instant.
 
     Returns one row per (machine, run, metric) with the run's success count
     attached for context.
@@ -1054,7 +1058,8 @@ def geomean_matrix(db_path: Path, machines: Sequence[str], *,
     for machine in machines:
         cohort = recent_runs(db_path, machine, limit=limit,
                              run_kinds=run_kinds,
-                             min_success_series=min_success_series)
+                             min_success_series=min_success_series,
+                             before_ts=as_of_ts)
         if cohort.empty:
             continue
 
@@ -1310,11 +1315,59 @@ def short_device_name(full_name: object) -> str:
 # Fleet overview: one row per machine, newest run first
 # ---------------------------------------------------------------------------
 
+def build_points(db_path: Path,
+                 machines: Sequence[str] | None = None, *,
+                 run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                 limit: int = 60) -> pd.DataFrame:
+    """Selectable "current build" anchors for the dashboard, newest first.
+
+    One row per (stamp, purpose): the purpose is what tells a hand-made build
+    apart from the nightly one at a glance, and runs of the same purpose that
+    started in the same minute across the fleet are the same build point.
+    ``ts`` is the cutoff a caller passes back as ``as_of_ts``.
+    """
+    parts: list[str] = []
+    params: list = []
+    predicate, kind_args = _run_kind_predicate(
+        run_kinds if _has_column(db_path, "runs", "run_kind") else None, "r")
+    if predicate:
+        parts.append(predicate)
+        params.extend(kind_args)
+    excl_predicate = _exclusion_predicate(db_path, "r")
+    if excl_predicate:
+        parts.append(excl_predicate)
+    if machines:
+        parts.append("r.machine IN ({})".format(",".join(["?"] * len(machines))))
+        params.extend(machines)
+    where = ("WHERE " + " AND ".join(parts)) if parts else ""
+
+    with _read_only(db_path) as con:
+        return con.execute(f"""
+            WITH scoped AS (
+                SELECT r.machine, r.ts, r.ov_version,
+                       strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
+                       strftime(r.ts, '%Y-%m-%d')    AS run_date,
+                       COALESCE(NULLIF(r.purpose, ''), '') AS purpose
+                FROM runs r
+                {where}
+            )
+            SELECT stamp, run_date, purpose,
+                   max(ts)                     AS ts,
+                   string_agg(machine, ', ')   AS machines,
+                   any_value(ov_version)       AS ov_version
+            FROM scoped
+            GROUP BY stamp, run_date, purpose
+            ORDER BY ts DESC
+            LIMIT ?
+        """, [*params, int(limit)]).fetchdf()
+
+
 def machines_overview(db_path: Path,
                       machines: Sequence[str] | None = None, *,
                       run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
                       history_runs: int = 10,
-                      expected_window: int = 30) -> pd.DataFrame:
+                      expected_window: int = 30,
+                      as_of_ts=None) -> pd.DataFrame:
     """Latest run per machine with its health counters and perf delta.
 
     ``latest_failed``, ``last_success_stamp`` and ``last_fail_stamp`` all come
@@ -1326,6 +1379,10 @@ def machines_overview(db_path: Path,
     FPS in one geomean would make the direction meaningless. It is further
     restricted to series measured in every scoped run of that machine, so a
     run that skipped a model does not masquerade as a performance change.
+
+    ``as_of_ts`` redefines "latest": runs newer than that instant are dropped
+    before ranking, and ``age_hours`` is measured from it rather than from
+    now, so a historical view does not report the whole fleet as stale.
     """
     def _filters(alias: str) -> tuple[str, list]:
         parts: list[str] = []
@@ -1342,6 +1399,9 @@ def machines_overview(db_path: Path,
             parts.append("{}.machine IN ({})".format(
                 alias, ",".join(["?"] * len(machines))))
             args.extend(machines)
+        if as_of_ts is not None:
+            parts.append(f"{alias}.ts <= ?")
+            args.append(as_of_ts)
         return (" AND ".join(parts), args)
 
     filter_sql, params = _filters("r")
@@ -1510,7 +1570,9 @@ def machines_overview(db_path: Path,
     # Latency is lower-is-better, so a rise is a worsening.
     out["perf_pct"] = ((out["latest_geomean"] - out["history_geomean"])
                        / out["history_geomean"])
-    out["age_hours"] = ((pd.Timestamp.now() - pd.to_datetime(out["ts"]))
+    reference = (pd.Timestamp(as_of_ts) if as_of_ts is not None
+                 else pd.Timestamp.now())
+    out["age_hours"] = ((reference - pd.to_datetime(out["ts"]))
                         .dt.total_seconds() / 3600.0)
     return out.sort_values("machine").reset_index(drop=True)
 
@@ -1518,7 +1580,8 @@ def machines_overview(db_path: Path,
 def failing_models_overview(db_path: Path,
                             machines: Sequence[str] | None = None, *,
                             run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
-                            history_runs: int = 10) -> pd.DataFrame:
+                            history_runs: int = 10,
+                            as_of_ts=None) -> pd.DataFrame:
     """Models failing in each machine's newest run, with their history.
 
     ``first_seen`` is the oldest run in the window where the model already
@@ -1526,6 +1589,9 @@ def failing_models_overview(db_path: Path,
     one that has been failing for days. ``model_cache_changed`` compares the
     newest run's model cache with the one in use when the model last passed —
     a cache swap is the other thing that can turn a passing model red.
+
+    ``as_of_ts`` treats the newest run at or before that instant as the
+    latest one.
     """
     if "functional_issues" not in _tables_for_db(db_path):
         return pd.DataFrame()
@@ -1543,6 +1609,9 @@ def failing_models_overview(db_path: Path,
     if machines:
         parts.append("r.machine IN ({})".format(",".join(["?"] * len(machines))))
         params.extend(machines)
+    if as_of_ts is not None:
+        parts.append("r.ts <= ?")
+        params.append(as_of_ts)
     where = ("WHERE " + " AND ".join(parts)) if parts else ""
 
     cache_col = ("r.model_cache"
@@ -1636,12 +1705,14 @@ def _env_text(value: object) -> str:
 def environment_changes(db_path: Path,
                         machines: Sequence[str] | None = None, *,
                         run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
-                        history_runs: int = 10) -> pd.DataFrame:
+                        history_runs: int = 10,
+                        as_of_ts=None) -> pd.DataFrame:
     """Rig fields whose value changed inside each machine's recent window.
 
     Only transitions are returned, newest first: a machine that ran on an
     unchanged rig for the whole window contributes no rows, so the caller can
-    show a note only when something actually moved.
+    show a note only when something actually moved. ``as_of_ts`` ends the
+    window at that instant instead of at the newest run.
     """
     fields = [(column, label) for column, label in ENV_FIELDS
               if _has_column(db_path, "runs", column)]
@@ -1661,6 +1732,9 @@ def environment_changes(db_path: Path,
     if machines:
         parts.append("r.machine IN ({})".format(",".join(["?"] * len(machines))))
         params.extend(machines)
+    if as_of_ts is not None:
+        parts.append("r.ts <= ?")
+        params.append(as_of_ts)
     where = ("WHERE " + " AND ".join(parts)) if parts else ""
 
     columns = ", ".join(f"r.{column}" for column, _ in fields)

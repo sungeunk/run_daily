@@ -422,6 +422,60 @@ class TestFleetStatus:
         assert row["model_cache_changed"]
 
 
+class TestCurrentBuildAnchor:
+    def _full(self, idx: int, purpose: str = "daily") -> RunRecord:
+        rec = _record(idx, value=100.0)
+        rec.purpose = purpose
+        rec.perf.append(PerfRow("qwen", "INT4", 32, 128, "2nd", 50.0, "ms"))
+        rec.total_tests, rec.passed_tests = 2, 2
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        rec.expected_cases = 2
+        return rec
+
+    def test_anchor_moves_the_current_run(self, db: Path):
+        _write(db, [self._full(i) for i in range(3)])
+        anchor = BASE_TS + timedelta(days=1)
+
+        assert q.machines_overview(db, [MACHINE]).iloc[0]["stamp"] \
+            == "20260103_1200"
+        row = q.machines_overview(db, [MACHINE], as_of_ts=anchor).iloc[0]
+        assert row["stamp"] == "20260102_1200"
+        # Age is measured from the anchor, not from now, or a historical view
+        # would report the whole fleet as stale.
+        assert row["age_hours"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_anchor_trims_the_geomean_trend(self, db: Path):
+        _write(db, [self._full(i) for i in range(3)])
+        anchor = BASE_TS + timedelta(days=1)
+
+        matrix = q.geomean_matrix(db, [MACHINE], as_of_ts=anchor)
+        assert set(matrix["stamp"]) == {"20260101_1200", "20260102_1200"}
+
+    def test_anchored_run_keeps_its_failures(self, db: Path):
+        broken = self._full(1)
+        broken.failed_tests, broken.passed_tests = 1, 1
+        broken.perf.pop()
+        broken.issues.append(IssueRow(
+            nodeid="tests/test_llm_benchmark.py::test_llm_benchmark[qwen]",
+            outcome="failed", model="qwen", precision="INT4"))
+        _write(db, [self._full(0), broken, self._full(2)])
+        anchor = BASE_TS + timedelta(days=1)
+
+        assert q.failing_models_overview(db, [MACHINE]).empty
+        row = q.failing_models_overview(db, [MACHINE],
+                                        as_of_ts=anchor).iloc[0]
+        assert row["model"] == "qwen"
+
+    def test_build_points_are_labelled_by_date_stamp_and_purpose(self, db: Path):
+        _write(db, [self._full(0), self._full(1, purpose="PR-1234 sdpa fix")])
+
+        points = q.build_points(db, [MACHINE], run_kinds=None)
+        assert list(points["stamp"]) == ["20260102_1200", "20260101_1200"]
+        assert points.iloc[0]["run_date"] == "2026-01-02"
+        assert points.iloc[0]["purpose"] == "PR-1234 sdpa fix"
+        assert points.iloc[0]["machines"] == MACHINE
+
+
 class TestShortDeviceName:
     @pytest.mark.parametrize("full,expected", [
         ("Intel(R) Arc(TM) 140T GPU (16GB) (iGPU)", "140T"),

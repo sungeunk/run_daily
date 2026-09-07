@@ -101,7 +101,7 @@ Streamlit entry입니다. 4개 tab이 있습니다.
 
 | Tab | 목적 |
 |---|---|
-| Dashboard | machine 이름 부분 문자열 filter로 좁힌 뒤, machine마다 bordered card 하나를 보여줍니다. card 구성 순서는 latest run의 failing models -> rig 변경 note -> newest clean run과 newest failed run을 좌우 두 run card로 -> metric별 geomean trend입니다. |
+| Dashboard | machine 이름 부분 문자열 filter로 좁힌 뒤, machine마다 bordered card 하나를 보여줍니다. card 구성 순서는 latest run의 failing models -> rig 변경 note -> newest clean run과 newest failed run을 좌우 두 run card로 -> metric별 geomean trend입니다. `Current build` picker로 "latest" 기준을 과거 build로 옮길 수 있습니다. |
 | Excel | run 선택 -> wide matrix (profile rows x run stamps) + tab-separated paste block + "extra rows" expander |
 | Compare | run A와 run B를 series 단위로 비교합니다. 모든 A/B delta는 각 run 이전 history와도 비교해서 단순 scatter인지 실제 변화인지 구분합니다. |
 | Exclusions | 특정 machine+run을 모든 cohort 기반 view에서 수동으로 제외합니다. |
@@ -112,6 +112,9 @@ chart y-axis range.
 Analysis scope는 tab별입니다 (`_scope_controls`): history depth (run 단위, 3-20),
 `Purpose` filter, run당 최소 successful series 수. sidebar state를 공유하지 않고
 각 view가 자기 window를 소유합니다. machine 선택도 tab별입니다 (`_machine_picker`).
+
+Dashboard에는 `Current build` picker (`_anchor_controls`)가 추가로 있습니다.
+아래 [Current build anchor](#current-build-anchor)를 참고하세요.
 
 Other:
 - **Unit display:** 사용자에게 보이는 모든 numeric에는 unit을 붙입니다. trend heading은 `[s]`, caption은 `Recent median = 8.060 s`처럼 표시합니다. SD pipeline seconds가 ms로 오해되는 것을 막습니다.
@@ -188,6 +191,13 @@ Daily suite entry입니다. pytest를 실행하고 report를 만들고 mail/xlsx
 - **Choice:** machine card마다 metric별 geomean trend를 둘고, 해당 machine의 모든 run이 측정한 series로만 제한합니다 (`geomean_matrix`).
 - **Why:** failure로 model을 잃은 run은 geomean이 아니라 success count가 움직여야 합니다. 그렇지 않으면 failure가 performance 변화처럼 읽힙니다.
 - **History:** 단독 "Geomean" tab(bucket geomean + ±2σ band + latest-point banner, `geomean_trend` 기반)은 제거되었습니다. `geomean_trend`는 현재 UI에서 사용되지 않습니다.
+
+### Current build anchor
+- **Problem:** dashboard는 항상 newest run만 보여줬습니다. 특정 build 시점 (release candidate, 버그가 접수된 build 등)의 fleet 상태를 보려면 machine마다 report를 직접 열어야 했습니다.
+- **Choice:** Dashboard의 `Current build` selectbox가 fleet 공통 timestamp cutoff (`as_of_ts`) 하나를 정하고, 이를 `machines_overview`, `failing_models_overview`, `environment_changes`, `geomean_matrix`에 전달합니다. 각 machine은 그 시점 이하의 *자기* newest run을 current로 잡습니다.
+- **Rejected:** machine별 run picker. rig마다 실행 시각이 달라서 한 machine의 `run_id`를 고정해도 나머지 machine에 대해서는 아무 의미가 없습니다. cutoff 방식은 run이 동시에 돌았다고 가정하지 않으면서도 fleet 전체를 한 build에 정렬합니다.
+- **Build point label:** `date · stamp · purpose`이며 `build_points`가 `(stamp, purpose)` 단위로 묶어 반환합니다. `purpose`는 사람이 특정 목적으로 만든 build를 nightly build와 구분해 주는 field라서 목록을 훑기 쉽게 만듭니다. stamp (`20260903_0136`)만으로는 날짜를 읽기 어려워 date를 따로 표시합니다.
+- **Detail:** `age_hours`는 현재 시각이 아니라 anchor 기준으로 계산합니다. 그렇지 않으면 과거 시점 조회에서 모든 machine이 🟡 stale로 표시됩니다. anchor는 Dashboard에만 적용합니다. Excel과 Compare는 이미 run을 직접 선택합니다.
 
 ### Daily machines filter
 - **Choice:** `app.py`의 hardcoded `DAILY_MACHINES` tuple을 `_machines_in_scope()`에서 무조건 적용합니다.
