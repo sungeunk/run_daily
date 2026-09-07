@@ -117,17 +117,17 @@ rows:
   - {model: phi-4-multimodal-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: '3', out_spec: '256', exec_mode: '1st'}
   - {model: phi-4-multimodal-instruct, precision: OV_FP16-4BIT_DEFAULT, in_spec: '3', out_spec: '256', exec_mode: '2nd'}
 
-  # qwen3-8b
-  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '1st'}
-  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '2nd'}
-  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '1st'}
-  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '2nd'}
-
   # qwen3-vl-4b-instruct
   - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '1st'}
   - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '2nd'}
   - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '1st'}
   - {model: qwen3-vl-4b-instruct,    precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '2nd'}
+
+  # qwen3-8b
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '2nd'}
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '1st'}
+  - {model: qwen3-8b,                precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '2nd'}
 
   # qwen3.5-9b
   - {model: qwen3.5-9b,              precision: OV_FP16-4BIT_DEFAULT, in_spec: '0', out_spec: '256', exec_mode: '1st'}
@@ -141,7 +141,9 @@ rows:
   - {model: qwen3.6-35b-a3b,         precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '1st'}
   - {model: qwen3.6-35b-a3b,         precision: OV_FP16-4BIT_DEFAULT, in_spec: '1', out_spec: '256', exec_mode: '2nd'}
 
-  # Stable Diffusion family (token-agnostic; '*' matches any in/out)
-  - {model: flux.1-schnell,                   precision: OV_FP16-INT4_SYM_CW,  in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
+  # Stable Diffusion family (out_spec is token-agnostic). flux emits two
+  # prompts per run but the sheet keeps one row, so it is pinned to prompt 0
+  # rather than left as '*', which would median the two into one cell.
+  - {model: flux.1-schnell,                   precision: OV_FP16-INT4_SYM_CW,  in_spec: '0',   out_spec: '*',   exec_mode: pipeline}
   - {model: stable-diffusion-v1-5,            precision: FP16,                 in_spec: '*',   out_spec: '*',   exec_mode: pipeline}
   - {model: stable-diffusion-3.5-large-turbo, precision: OV_FP16-4BIT_DEFAULT, in_spec: '*',   out_spec: '*',   exec_mode: pipeline}

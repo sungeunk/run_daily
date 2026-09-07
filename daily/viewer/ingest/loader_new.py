@@ -93,6 +93,10 @@ def _sd_genai_rows(m: dict) -> Iterable[PerfRow]:
     model = m.get("model", "")
     precision = m.get("precision", "")
     is_whisper = model.startswith("whisper")
+    # Image-generation results carry no prompt_idx field, so it is derived
+    # from the data order: models such as flux emit several prompts and a
+    # shared index would collapse them into one display row.
+    prompt_idx = 0
     for d in m.get("data", []) or []:
         gen_sec = d.get("generation_time_sec")
         if gen_sec is None:
@@ -104,7 +108,8 @@ def _sd_genai_rows(m: dict) -> Iterable[PerfRow]:
             in_tok = int(d.get("input_token_size") or 0)
             out_tok = int(d.get("output_token_size") or 0)
         yield PerfRow(model, precision, in_tok, out_tok, "pipeline",
-                      float(gen_sec), "s")
+                      float(gen_sec), "s", prompt_idx=prompt_idx)
+        prompt_idx += 1
 
 
 def _sd_dgfx_rows(m: dict) -> Iterable[PerfRow]:
