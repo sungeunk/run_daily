@@ -53,7 +53,14 @@ CREATE TABLE IF NOT EXISTS runs (
     -- Model cache directory the run benchmarked against, e.g.
     -- 'WW35_llm-optimum_2026.4.0-22930-RC1'.
     model_cache    TEXT,
-    short_run      BOOLEAN DEFAULT FALSE,
+    -- Raw pytest -k expression the run was launched with; NULL for a full
+    -- run. A narrowed run still measures full-length cases, so its numbers
+    -- stay comparable — it just covers fewer series. Drives is_partial in
+    -- runs_with_flags.
+    test_filter    TEXT,
+    -- Cases the run actually attempted, i.e. expected_cases minus whatever
+    -- -k / --tests deselected. Equal to expected_cases on a full run.
+    selected_cases INTEGER,
     -- pytest outcome counts and wall time for the whole run, taken from
     -- summary.json so the fleet view does not have to re-read every file.
     total_tests    INTEGER,
@@ -273,6 +280,31 @@ CREATE INDEX IF NOT EXISTS idx_monitor_run       ON machine_monitor_stats(run_id
 -- Views
 -- ---------------------------------------------------------------------------
 
+-- `runs` plus the two derived cohort flags, defined once here so the analysis
+-- layer, the viewer queries and perf_flat cannot drift apart.
+--
+--   is_partial — the run did not attempt every case it was meant to, either
+--     because it was launched with -k / --tests or because selection dropped
+--     cases. A partial run's own numbers are still comparable (full token
+--     lengths, full iteration count), it simply covers fewer series — so it
+--     is safe in a trend for the series it does have, but unsafe as a
+--     baseline for a cohort-wide comparison.
+--   excluded — manually excluded via the viewer's Exclusions tab. Exposed as
+--     a column rather than filtered away here on purpose: the Excel tab's
+--     manual run picker must still be able to select an excluded run.
+CREATE OR REPLACE VIEW runs_with_flags AS
+SELECT
+    r.*,
+    COALESCE(
+        r.test_filter IS NOT NULL
+        OR (r.selected_cases IS NOT NULL
+            AND r.expected_cases IS NOT NULL
+            AND r.selected_cases < r.expected_cases),
+        FALSE
+    ) AS is_partial,
+    EXISTS (SELECT 1 FROM run_exclusions e WHERE e.run_id = r.run_id) AS excluded
+FROM runs r;
+
 -- Adds 'short' / 'long' / '0' buckets as derived columns. Threshold is
 -- hard-coded (100) to match the historical viewer; change in-place to retune.
 -- These image-generation models emit seconds, but the viewer displays their
@@ -321,8 +353,19 @@ SELECT
     r.ov_build,
     r.ov_sha,
     r.purpose,
+    -- Needed alongside purpose because the Run-kinds selector accepts free
+    -- text and matches it against both columns (_run_kind_predicate).
+    r.description,
     r.run_kind,
-    r.short_run,
+    -- Cohort-separating columns. Without these a caller cannot tell a
+    -- model-cache or GenAI change apart from an OV regression without
+    -- joining `runs` again.
+    r.model_cache,
+    r.genai_version,
+    r.genai_commit,
+    r.gpu_driver_version,
+    r.is_partial,
+    r.excluded,
     r.source_format,
     p.run_id,
     p.model,
@@ -334,7 +377,7 @@ SELECT
     p.exec_mode,
     p.viewer_value AS value,
     p.viewer_unit AS unit
-FROM runs r
+FROM runs_with_flags r
 JOIN perf_with_buckets p USING (run_id);
 
 -- Rolling statistics per series. Baseline = median of previous N points
@@ -348,11 +391,15 @@ CREATE OR REPLACE VIEW perf_stats AS
 WITH base AS (
     SELECT
         machine, device, ts, date, ww,
-        ov_version, ov_build, ov_sha, purpose, short_run,
+        ov_version, ov_build, ov_sha, purpose,
+        model_cache, genai_commit, gpu_driver_version, is_partial,
         run_id, model, precision,
         in_token, out_token, in_bucket, out_bucket,
         exec_mode, value, unit
+    -- Manually excluded runs must not contribute to a rolling median: one
+    -- bad build would otherwise shift the baseline for the whole window.
     FROM perf_flat
+    WHERE NOT excluded
 ),
 with_baseline AS (
     SELECT
@@ -418,9 +465,16 @@ SELECT
 FROM with_mad;
 
 -- Latest run per machine, useful for the Regressions tab's default selection.
+-- Latest *daily* run per machine. The run-kind condition matters: a PR or
+-- ad-hoc test run that happens to be the newest row would otherwise be
+-- reported as the machine's latest daily on the dashboard. Excluded and
+-- partial runs are skipped for the same reason.
 CREATE OR REPLACE VIEW latest_run_per_machine AS
 SELECT machine, arg_max(run_id, ts) AS run_id, max(ts) AS ts
-FROM runs
+FROM runs_with_flags
+WHERE COALESCE(run_kind, 'daily') = 'daily'
+  AND NOT excluded
+  AND NOT is_partial
 GROUP BY machine;
 
 -- One machine-health row per run. `gpu_clock_ratio` is the headline signal:

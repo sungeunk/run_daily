@@ -365,8 +365,8 @@ def _analyze_run_id_from_db(con, run_id: str, cfg):
 
     rec_row = con.execute(
         """
-        SELECT run_id, machine, ts, short_run, purpose
-        FROM runs
+        SELECT run_id, machine, ts, is_partial, purpose
+        FROM runs_with_flags
         WHERE run_id = ?
         """,
         [run_id],
@@ -378,7 +378,7 @@ def _analyze_run_id_from_db(con, run_id: str, cfg):
         run_id=rec_row[0],
         machine=rec_row[1],
         ts=rec_row[2],
-        short_run=bool(rec_row[3]) if rec_row[3] is not None else False,
+        is_partial=bool(rec_row[3]) if rec_row[3] is not None else False,
         purpose=rec_row[4],
     )
 

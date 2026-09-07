@@ -241,6 +241,25 @@ def _skipped_cases(summary: dict) -> int:
     return _cases(summary, {"skipped"})
 
 
+def _selected_cases(summary: dict) -> int:
+    """Benchmark cases the run was selected to attempt.
+
+    Deliberately *not* ``expected_cases - skipped_cases``: a skipped test is a
+    functional failure (already carried by ``skipped_cases`` and
+    ``functional_issues``), not a narrowed run. Measured on the central DB,
+    117 of 208 daily runs skip at least one case, so subtracting them here
+    would mark most of the fleet partial and empty the baseline cohort.
+
+    Note this cannot detect a narrowed run on its own either:
+    ``summary["tests"]`` only lists tests pytest collected, so a ``-k llama``
+    run reports the same figure for selected and expected. ``runs.test_filter``
+    is the authoritative partial signal. This column is here so a cohort
+    comparison can weigh coverage, and so a future collect-only pass can
+    supply a true suite size without another schema change.
+    """
+    return _cases(summary)
+
+
 _MODEL_CACHE_RE = re.compile(r"WW\d+[^\\/'\"\s]*")
 
 
@@ -376,7 +395,7 @@ def load_summary(path: Path) -> RunRecord:
         genai_commit=meta.get("genai_commit") or None,
         tok_commit=meta.get("tok_commit") or None,
         model_cache=_model_cache(summary),
-        short_run=bool(meta.get("short_run", False)),
+        test_filter=(meta.get("test_filter") or None),
         total_tests=_int_or_none(totals.get("total")),
         passed_tests=_int_or_none(totals.get("passed")),
         failed_tests=_int_or_none(totals.get("failed")),
@@ -384,6 +403,7 @@ def load_summary(path: Path) -> RunRecord:
         skipped_tests=_int_or_none(totals.get("skipped")),
         skipped_cases=_skipped_cases(summary),
         expected_cases=_cases(summary),
+        selected_cases=_selected_cases(summary),
         duration_sec=_float_or_none(summary.get("duration_sec")),
         build_url=(meta.get("build_url") or None),
         source_path=str(path),

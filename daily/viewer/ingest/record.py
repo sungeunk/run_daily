@@ -127,7 +127,8 @@ class RunRecord:
     genai_commit: str | None = None
     tok_commit: str | None = None
     model_cache: str | None = None
-    short_run: bool = False
+    # Raw pytest -k expression; None on a full run. See runs.test_filter.
+    test_filter: str | None = None
     total_tests: int | None = None
     passed_tests: int | None = None
     failed_tests: int | None = None
@@ -135,6 +136,9 @@ class RunRecord:
     skipped_tests: int | None = None
     skipped_cases: int | None = None
     expected_cases: int | None = None
+    # Cases the run attempted after -k / --tests selection. Equal to
+    # expected_cases on a full run; less on a narrowed one.
+    selected_cases: int | None = None
     duration_sec: float | None = None
     source_path: str | None = None
     build_url: str | None = None

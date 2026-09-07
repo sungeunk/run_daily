@@ -110,7 +110,7 @@ daily/
    - z threshold
    - noisy CV threshold
    - baseline selection policy
-   - purpose/short_run 필터 정책
+   - purpose/run_kind/partial 필터 정책
    - top regression 표시 개수
 
 ### 출력
@@ -127,7 +127,7 @@ daily/
     "run_id": "LNL-03:20260508_1200:summary",
     "stamp": "20260508_1200",
     "ov_version": "2026.2.0-21664-ad5d8e0f99b",
-    "selection_reason": "same machine, short_run, purpose"
+    "selection_reason": "same machine, not partial, not excluded, purpose"
   },
   "functional": {
     "total": 120,
@@ -182,8 +182,8 @@ MVP baseline은 동일 머신의 가장 최근 비교 가능한 run을 사용한
 
 우선순위는 다음과 같다.
 
-1. same machine + same short_run + same purpose + older timestamp
-2. same machine + same short_run + older timestamp
+1. same machine + not partial + not excluded + same purpose + older timestamp
+2. same machine + not partial + not excluded + older timestamp
 3. same machine + older timestamp
 
 비교 가능한 성능 항목은 아래 key가 모두 같은 경우로 제한한다.
@@ -411,7 +411,7 @@ last known good 탐색은 같은 머신과 같은 run profile 안에서 `overall
 - [x] Jenkins LLM daily 산출물 포맷 1차 확보
 - [~] 성능 메트릭 단위 표준화 고도화
 - [~] regression threshold 운영 정책 확정
-- [ ] baseline 대상 필터 정책 확정: machine, purpose, short_run, success-only 여부
+- [ ] baseline 대상 필터 정책 확정: machine, purpose, run_kind, is_partial, excluded, success-only 여부
 - [ ] functional 이슈 분류 체계 확정: fail, timeout, infra, model, OpenVINO
 
 ### 데이터/DB
@@ -541,7 +541,7 @@ P2 bisect와 noisy dual gate를 추가하기 전에, 이미 구현된 분석/조
   현재 LKG hint는 `run.py`가 `summary.json.analysis.last_known_good`에 후처리로 덧붙인다. `AnalysisResult`에 optional `last_known_good` block을 추가해 summary, report, mail, dashboard가 같은 contract를 읽도록 정리한다.
 
 13. **baseline/LKG candidate query 정책 공통화**
-  baseline 선택과 last-known-good 탐색은 모두 machine, short_run, purpose, older timestamp, green-only, comparable-series 조건을 조합한다. 중복 SQL이 늘어나지 않도록 작은 policy/helper를 만들고, `same profile`, `require overlap`, `green only` 조건을 명시적으로 조합하게 한다.
+  baseline 선택과 last-known-good 탐색은 모두 machine, is_partial, excluded, purpose, older timestamp, green-only, comparable-series 조건을 조합한다. `runs_with_flags` 뷰가 is_partial/excluded를 한 곳에서 정의하므로 각 쿼리는 이 뷰를 쓴다. 중복 SQL이 늘어나지 않도록 작은 policy/helper를 만들고, `same profile`, `require overlap`, `green only` 조건을 명시적으로 조합하게 한다.
 
 14. **functional issue count 명칭 정리** (완료)
   timeout까지 포함한 실제 의미는 `functional issue count`다. 기존 DB column `functional_fail_count`는 호환성 때문에 유지하되, UI label과 DESIGN 설명은 `Functional issues`로 맞추고, summary JSON에는 `issue_count`를 canonical field로 유지한다.

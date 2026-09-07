@@ -556,8 +556,8 @@ def _fetch_run_context(con, run_id: str):
     try:
         row = con.execute(
             """
-            SELECT run_id, machine, ts, short_run, purpose
-            FROM runs
+            SELECT run_id, machine, ts, is_partial, purpose
+            FROM runs_with_flags
             WHERE run_id = ?
             LIMIT 1
             """,
@@ -571,7 +571,7 @@ def _fetch_run_context(con, run_id: str):
         run_id=row[0],
         machine=row[1],
         ts=row[2],
-        short_run=row[3],
+        is_partial=bool(row[3]),
         purpose=row[4],
     )
 

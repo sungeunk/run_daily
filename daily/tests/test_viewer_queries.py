@@ -476,6 +476,180 @@ class TestCurrentBuildAnchor:
         assert points.iloc[0]["machines"] == MACHINE
 
 
+class TestPartialRuns:
+    """``runs.test_filter`` is the authoritative partial-run signal.
+
+    A narrowed run still measures full token lengths and the full iteration
+    count, so its numbers stay comparable — it just covers fewer series. That
+    makes it usable in a trend but unsafe as a cohort-wide baseline.
+    """
+
+    def test_full_run_is_not_partial(self, db: Path):
+        _write(db, [_record(0, value=100.0)])
+        with q._read_only(db) as con:
+            assert con.execute(
+                "SELECT is_partial FROM runs_with_flags").fetchone()[0] is False
+
+    def test_test_filter_marks_a_run_partial(self, db: Path):
+        rec = _record(0, value=100.0)
+        rec.test_filter = "llama"
+        _write(db, [rec])
+        with q._read_only(db) as con:
+            assert con.execute(
+                "SELECT is_partial FROM runs_with_flags").fetchone()[0] is True
+
+    def test_skipped_cases_alone_do_not_mark_a_run_partial(self, db: Path):
+        # Measured on the central DB, 117 of 208 daily runs skip at least one
+        # case. Treating a skip as a narrowing would empty the baseline
+        # cohort, so selected_cases deliberately does not subtract them.
+        rec = _record(0, value=100.0)
+        rec.expected_cases = 10
+        rec.selected_cases = 10
+        rec.skipped_cases = 4
+        _write(db, [rec])
+        with q._read_only(db) as con:
+            assert con.execute(
+                "SELECT is_partial FROM runs_with_flags").fetchone()[0] is False
+
+    def test_partial_run_is_not_the_machines_latest(self, db: Path):
+        full = _record(0, value=100.0)
+        narrowed = _record(1, value=100.0)
+        narrowed.test_filter = "llama"
+        _write(db, [full, narrowed])
+        with q._read_only(db) as con:
+            latest = con.execute(
+                "SELECT run_id FROM latest_run_per_machine").fetchone()[0]
+        assert latest == "run-000"
+
+
+class TestShortRunColumnIsGone:
+    def test_a_legacy_short_run_column_is_dropped_on_next_ingest(self, db: Path):
+        con = writer.connect(db)
+        con.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS short_run BOOLEAN DEFAULT FALSE")
+        con.close()
+
+        _write(db, [_record(0, value=100.0)])
+
+        con = writer.connect(db)
+        cols = {r[0] for r in con.execute("DESCRIBE runs").fetchall()}
+        # The teardown that DuckDB forces (views + indexes) must be rebuilt.
+        views = {r[0] for r in con.execute(
+            "SELECT view_name FROM duckdb_views() WHERE NOT internal").fetchall()}
+        indexes = {r[0] for r in con.execute(
+            "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'runs'").fetchall()}
+        rows = con.execute("SELECT count(*) FROM runs").fetchone()[0]
+        con.close()
+
+        assert "short_run" not in cols
+        assert {"runs_with_flags", "perf_flat", "perf_stats",
+                "latest_run_per_machine"} <= views
+        assert {"idx_runs_ts_machine", "idx_runs_machine_ts"} <= indexes
+        assert rows == 1
+
+    def test_drop_is_a_noop_once_the_column_is_gone(self, db: Path):
+        _write(db, [_record(0, value=100.0)])
+        con = writer.connect(db)
+        writer.ensure_schema(con)  # second pass must not disturb anything
+        indexes = {r[0] for r in con.execute(
+            "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'runs'").fetchall()}
+        con.close()
+        assert {"idx_runs_ts_machine", "idx_runs_machine_ts"} <= indexes
+
+
+class TestExclusionsReachTheBaseline:
+    def test_excluded_run_is_dropped_from_perf_stats(self, db: Path):
+        _write(db, [_record(i, value=100.0) for i in range(3)])
+        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        with q._read_only(db) as con:
+            ids = {r[0] for r in con.execute(
+                "SELECT run_id FROM perf_stats").fetchall()}
+        assert ids == {"run-000", "run-002"}
+
+    def test_excluded_run_is_not_the_machines_latest(self, db: Path):
+        _write(db, [_record(i, value=100.0) for i in range(2)])
+        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        with q._read_only(db) as con:
+            latest = con.execute(
+                "SELECT run_id FROM latest_run_per_machine").fetchone()[0]
+        assert latest == "run-000"
+
+    def test_excluded_run_is_dropped_from_series_history(self, db: Path):
+        _write(db, [_record(i, value=100.0) for i in range(3)])
+        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        hist = q.series_history(db, MACHINE, "llama", "INT4", 32, 128, "2nd",
+                                days=100_000)
+        assert len(hist) == 2
+
+    def test_a_reason_is_required(self, db: Path):
+        _write(db, [_record(0, value=100.0)])
+        with pytest.raises(ValueError, match="reason is required"):
+            q.add_exclusion(db, "run-000", MACHINE, "20260101_1200", "   ")
+
+    def test_explicit_run_picker_still_sees_an_excluded_run(self, db: Path):
+        # perf_flat exposes `excluded` as a column instead of filtering it, so
+        # the Excel tab can still select an excluded run on purpose.
+        _write(db, [_record(i, value=100.0) for i in range(2)])
+        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        rows = q.perf_for_runs(db, ["run-001"])
+        assert len(rows) == 1
+
+
+class TestTrendGuards:
+    """``series_history`` / ``trend_regressions`` were the only two query
+    paths applying neither the run-kind nor the exclusion filter."""
+
+    def test_series_history_excludes_pr_runs_by_default(self, db: Path):
+        records = [_record(i, value=100.0) for i in range(3)]
+        records.append(_record(3, value=999.0, run_kind="pr"))
+        _write(db, records)
+
+        default = q.series_history(db, MACHINE, "llama", "INT4", 32, 128,
+                                   "2nd", days=100_000)
+        assert len(default) == 3
+        assert 999.0 not in set(default["value"])
+
+        both = q.series_history(db, MACHINE, "llama", "INT4", 32, 128, "2nd",
+                                days=100_000, run_kinds=("daily", "pr"))
+        assert len(both) == 4
+
+    def test_series_history_accepts_free_text_run_kind(self, db: Path):
+        # The Run-kinds selector accepts free-typed text, matched against
+        # purpose/description — so perf_flat must expose both columns.
+        _write(db, [_record(0, value=100.0)])
+        assert len(q.series_history(db, MACHINE, "llama", "INT4", 32, 128,
+                                    "2nd", days=100_000,
+                                    run_kinds=("daily",))) == 1
+        assert len(q.series_history(db, MACHINE, "llama", "INT4", 32, 128,
+                                    "2nd", days=100_000,
+                                    run_kinds=("nonesuch",))) == 0
+
+    def test_trend_regressions_excludes_pr_runs_by_default(self, db: Path):
+        records = [_record(i, value=100.0) for i in range(10)]
+        # A burst of slow PR runs in the recent window must not read as a
+        # regression of the daily build.
+        records += [_record(i, value=400.0, run_kind="pr")
+                    for i in range(10, 16)]
+        _write(db, records)
+
+        default = q.trend_regressions(db, MACHINE, recent_days=100_000,
+                                      baseline_days=100_000)
+        assert default.iloc[0]["recent_n"] == 10
+        assert default.iloc[0]["recent_median"] == 100.0
+
+        both = q.trend_regressions(db, MACHINE, recent_days=100_000,
+                                   baseline_days=100_000,
+                                   run_kinds=("daily", "pr"))
+        assert both.iloc[0]["recent_n"] == 16
+
+    def test_trend_regressions_excludes_excluded_runs(self, db: Path):
+        _write(db, [_record(i, value=100.0) for i in range(5)])
+        q.add_exclusion(db, "run-002", MACHINE, "20260103_1200", "bad build")
+
+        trend = q.trend_regressions(db, MACHINE, recent_days=100_000,
+                                    baseline_days=100_000)
+        assert trend.iloc[0]["recent_n"] == 4
+
+
 class TestShortDeviceName:
     @pytest.mark.parametrize("full,expected", [
         ("Intel(R) Arc(TM) 140T GPU (16GB) (iGPU)", "140T"),

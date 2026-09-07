@@ -37,17 +37,18 @@ def find_last_known_good(
             SELECT r.run_id,
                    strftime(r.ts, '%Y%m%d_%H%M') AS stamp,
                    COALESCE(r.ov_version, '') AS ov_version
-            FROM runs r
+            FROM runs_with_flags r
             JOIN analysis_results ar USING (run_id)
             WHERE r.machine = ?
               AND r.run_id <> ?
               AND r.ts < ?
-              AND r.short_run IS NOT DISTINCT FROM ?
+              AND NOT r.is_partial
+              AND NOT r.excluded
               AND ar.overall_status = 'green'
             ORDER BY r.ts DESC
             LIMIT 1
             """,
-            [rec.machine, rec.run_id, rec.ts, rec.short_run],
+            [rec.machine, rec.run_id, rec.ts],
         ).fetchone()
     except Exception:  # noqa: BLE001 — table may not exist yet
         return BaselineInfo(status="not_found")

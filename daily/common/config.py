@@ -26,6 +26,13 @@ except ImportError:
 # Repo layout: <repo>/daily/common/config.py -> <repo> is parents[2]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Measurement shape is deliberately not configurable: both values are part of
+# the baseline identity, so changing either one makes a run incomparable with
+# its own history. Narrow a run by selecting fewer cases (`-k` / `--tests`),
+# never by shortening them.
+OUT_TOKEN_LENGTH = 256
+BENCHMARK_ITER_NUM = 3
+
 
 @dataclass(frozen=True)
 class DailyConfig:
@@ -36,7 +43,6 @@ class DailyConfig:
     model_date: str
     device: str
     timeout_sec: int
-    short_run: bool           # replaces --test: shorten tokens/iters
     tee_raw_log: bool
     out_token_length: int
     benchmark_iter_num: int
@@ -73,7 +79,6 @@ def build_config(
     model_date: str,
     device: str = 'GPU',
     timeout_sec: int = 1800,
-    short_run: bool = False,
     tee_raw_log: bool = False,
     now: str | None = None,
 ) -> DailyConfig:
@@ -83,8 +88,11 @@ def build_config(
     ov_version = _ov_get_version()
     stem = f'daily.{now}'
 
-    out_token_length = 32 if short_run else 256
-    benchmark_iter_num = 1 if short_run else 3
+    # Fixed for every run: a run that measures fewer tokens or fewer
+    # iterations is not comparable with the baseline, and narrowing a run is
+    # done by selecting fewer cases (`-k` / `--tests`), not by shortening them.
+    out_token_length = OUT_TOKEN_LENGTH
+    benchmark_iter_num = BENCHMARK_ITER_NUM
 
     output_dir = Path(convert_path(output_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -97,7 +105,6 @@ def build_config(
         model_date=model_date,
         device=device,
         timeout_sec=timeout_sec,
-        short_run=short_run,
         tee_raw_log=tee_raw_log,
         out_token_length=out_token_length,
         benchmark_iter_num=benchmark_iter_num,

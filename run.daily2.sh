@@ -2,5 +2,5 @@
 
 . $1
 
-# python -m pytest daily/tests/ -vv --device=GPU.1 --short-run
+# python -m pytest daily/tests/ -vv --device=GPU.1
 python daily/run.py --device GPU.1 -k minicpm4-0.5b --output-dir regression_out --verbose

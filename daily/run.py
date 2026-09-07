@@ -11,8 +11,8 @@ Typical use::
     # run everything
     python daily/run.py
 
-    # smoke-run a subset
-    python daily/run.py --short-run -k llama
+    # run a subset (still full-length measurements, so results stay comparable)
+    python daily/run.py -k llama
 
     # any flag after ``--`` is passed straight to pytest
     python daily/run.py -- --collect-only -q
@@ -484,7 +484,9 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         'genai_version':  genai_version,
         'genai_commit':   _genai_commit(),
         'tok_commit':     tok_version,
-        'short_run':      bool(args.short_run),
+        # Raw -k expression, so the DB can tell a deliberately narrowed run
+        # apart from a full one that happened to lose cases. NULL = full run.
+        'test_filter':    (args.keyword or '').strip() or None,
         # Jenkins keeps the console only until log rotation, so the URL is
         # recorded per run rather than re-derived later.
         'build_url':      os.environ.get('BUILD_URL', '').strip(),
@@ -508,8 +510,6 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     p.add_argument('--cache-dir', default=str(REPO_ROOT / 'llm-cache'))
     p.add_argument('--output-dir', default=str(REPO_ROOT / 'daily_output'))
     p.add_argument('--daily-timeout', type=int, default=1800)
-    p.add_argument('--short-run', action='store_true',
-                   help='Use reduced token counts / iterations')
     p.add_argument('--monitor-keep-days', type=float, default=7.0,
                    help='Keep monitor JSONL this long after Parquet conversion (0 = forever)')
     p.add_argument('--verbose', action='store_true',
@@ -747,8 +747,6 @@ def main() -> int:
         '--json-report-omit=collectors',
         '-m', 'not dev_only',
     ]
-    if args.short_run:
-        pytest_cmd.append('--short-run')
     if args.verbose:
         pytest_cmd.extend(['--tee-raw-log', '-s'])
     if args.keyword:

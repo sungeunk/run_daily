@@ -160,16 +160,15 @@ def _quote(value: str) -> str:
 
 
 def _reference_runs_sql(config: AnalysisConfig, rec: "RunRecord") -> str:
-    short_run = "TRUE" if getattr(rec, "short_run", False) else "FALSE"
     ts = getattr(rec, "ts", None)
     ts_clause = f"AND ts < TIMESTAMP {_quote(ts.strftime('%Y-%m-%d %H:%M:%S'))} " if ts else ""
     return (
         "SELECT run_id, strftime(ts, '%Y%m%d_%H%M') AS stamp, "
         "COALESCE(ov_version, '') AS ov_version, machine "
-        "FROM runs "
+        "FROM runs_with_flags "
         f"WHERE machine = {_quote(rec.machine)} "
         f"AND lower(COALESCE(purpose, '')) LIKE lower({_quote(config.reference_purpose_like)}) "
-        f"AND COALESCE(short_run, FALSE) = {short_run} "
+        "AND NOT is_partial AND NOT excluded "
         f"{ts_clause}"
         f"ORDER BY ts DESC LIMIT {int(config.history_window)}"
     )

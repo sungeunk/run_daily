@@ -145,7 +145,7 @@ DEFAULT_RUN_KINDS = ("daily",)
 
 
 def _run_kind_predicate(run_kinds: Sequence[str] | None,
-                        alias: str = "r") -> tuple[str, list]:
+                        alias: str | None = "r") -> tuple[str, list]:
     """Boolean predicate (no leading ``AND``) for the sidebar's Run kinds
     selector.
 
@@ -155,22 +155,26 @@ def _run_kind_predicate(run_kinds: Sequence[str] | None,
     substring of ``purpose``/``description`` — the same free text the
     canonical kinds were classified from — so a user can narrow to e.g. a PR
     number or username the fixed categories don't capture.
+
+    ``alias=None`` emits unqualified column names, for a single-table select
+    straight from ``perf_flat`` where there is nothing to qualify against.
     """
     if not run_kinds:
         return "", []
     kinds = [k for k in run_kinds if k in RUN_KINDS]
     keywords = [k.strip() for k in run_kinds if k not in RUN_KINDS and k.strip()]
+    col = f"{alias}." if alias else ""
 
     parts: list[str] = []
     params: list = []
     if kinds:
         placeholders = ",".join(["?"] * len(kinds))
-        parts.append(f"COALESCE({alias}.run_kind, 'daily') IN ({placeholders})")
+        parts.append(f"COALESCE({col}run_kind, 'daily') IN ({placeholders})")
         params.extend(kinds)
     for kw in keywords:
         parts.append(
-            f"(LOWER(COALESCE({alias}.purpose, '')) LIKE ? "
-            f"OR LOWER(COALESCE({alias}.description, '')) LIKE ?)"
+            f"(LOWER(COALESCE({col}purpose, '')) LIKE ? "
+            f"OR LOWER(COALESCE({col}description, '')) LIKE ?)"
         )
         like = f"%{kw.lower()}%"
         params.extend([like, like])
@@ -195,6 +199,32 @@ def _exclusion_predicate(db_path: Path, alias: str = "r") -> str:
         return ""
     return (f"NOT EXISTS (SELECT 1 FROM run_exclusions e "
             f"WHERE e.run_id = {alias}.run_id)")
+
+
+def _perf_flat_kind_clause(db_path: Path,
+                           run_kinds: Sequence[str] | None,
+                           ) -> tuple[str, list]:
+    """``AND``-prefixed run-kind filter for a query selecting from perf_flat.
+
+    Returns ``("", [])`` on a DB predating the ``run_kind`` column so an old
+    file degrades to "no filter" rather than failing.
+    """
+    if not _has_column(db_path, "perf_flat", "run_kind"):
+        return "", []
+    predicate, params = _run_kind_predicate(run_kinds, alias=None)
+    return (f"AND {predicate}" if predicate else ""), list(params)
+
+
+def _perf_flat_exclusion_clause(db_path: Path) -> str:
+    """``AND``-prefixed filter dropping manually-excluded runs from perf_flat.
+
+    ``perf_flat`` exposes ``excluded`` as a column rather than filtering it
+    away, so that the Excel tab's explicit run picker can still reach an
+    excluded run. Cohort queries opt in here.
+    """
+    if not _has_column(db_path, "perf_flat", "excluded"):
+        return ""
+    return "AND NOT excluded"
 
 
 def _run_kind_clause(run_kinds: Sequence[str] | None,
@@ -363,8 +393,21 @@ def list_exclusions(db_path: Path) -> pd.DataFrame:
 
 
 def add_exclusion(db_path: Path, run_id: str, machine: str, stamp: str,
-                  reason: str = "") -> None:
-    """Hide ``run_id`` from every cohort-based analysis until restored."""
+                  reason: str) -> None:
+    """Hide ``run_id`` from every cohort-based analysis until restored.
+
+    ``reason`` is mandatory. Exclusions now feed the rolling baseline
+    (``perf_stats``) and the dashboard's latest-run pick, so an exclusion
+    without a recorded reason leaves a silently shifted baseline that nobody
+    can audit later. Enforced here rather than as a NOT NULL column because
+    the DDL is ``IF NOT EXISTS`` and would not migrate existing rows.
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError(
+            f"a reason is required to exclude run {run_id!r} "
+            "(it is the only audit trail for a shifted baseline)"
+        )
     with duckdb.connect(str(db_path), read_only=False) as con:
         con.execute(_RUN_EXCLUSIONS_DDL)
         con.execute("""
@@ -372,7 +415,7 @@ def add_exclusion(db_path: Path, run_id: str, machine: str, stamp: str,
             VALUES (?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 reason = excluded.reason, excluded_at = now()
-        """, [run_id, machine, stamp, reason or None])
+        """, [run_id, machine, stamp, reason])
 
 
 def remove_exclusion(db_path: Path, run_id: str) -> None:
@@ -594,12 +637,23 @@ def extra_rows(db_path: Path, run_ids: list[str],
 def series_history(db_path: Path, machine: str, model: str, precision: str,
                    in_token: int, out_token: int, exec_mode: str,
                    days: int = 60,
-                   purpose_filter: str | None = None) -> pd.DataFrame:
-    """Time-series of one perf point with rolling baseline stats."""
+                   purpose_filter: str | None = None,
+                   run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                   ) -> pd.DataFrame:
+    """Time-series of one perf point with rolling baseline stats.
+
+    ``run_kinds`` defaults to daily-only: PR and ad-hoc test runs sit in the
+    same table and would otherwise feed the rolling baseline (measured, 547
+    ``pr`` and 112 ``test`` perf rows in a 10-day window). Manually excluded
+    runs are dropped too — this and ``trend_regressions`` were the only two
+    query paths that applied neither guard.
+    """
     start = time.time()
     purpose_like = f"%{purpose_filter}%" if purpose_filter else None
+    kind_clause, kind_params = _perf_flat_kind_clause(db_path, run_kinds)
+    excl_clause = _perf_flat_exclusion_clause(db_path)
     with _read_only(db_path) as con:
-        result = con.execute("""
+        result = con.execute(f"""
             WITH base AS (
                 SELECT ts, date, ov_version, ov_build, ww,
                        value, unit
@@ -609,6 +663,8 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
                   AND in_token = ? AND out_token = ?
                   AND exec_mode = ?
                   AND (? IS NULL OR COALESCE(purpose, '') ILIKE ?)
+                  {kind_clause}
+                  {excl_clause}
                   AND ts >= current_date - (? || ' DAY')::INTERVAL
             ),
             with_baseline AS (
@@ -658,7 +714,7 @@ def series_history(db_path: Path, machine: str, model: str, precision: str,
             FROM with_mad
             ORDER BY ts
         """, [machine, model, precision, in_token, out_token, exec_mode,
-               purpose_filter, purpose_like, days]
+               purpose_filter, purpose_like, *kind_params, days]
                            ).fetchdf()
         elapsed = time.time() - start
         log.debug(f"series_history({model}, {precision}, {in_token}, {out_token}) took {elapsed:.2f}s")
@@ -674,7 +730,9 @@ def trend_regressions(db_path: Path, machine: str,
                       baseline_days: int = 21,
                       min_recent_points: int = 5,
                       min_baseline_points: int = 7,
-                      purpose_filter: str | None = None) -> pd.DataFrame:
+                      purpose_filter: str | None = None,
+                      run_kinds: Sequence[str] | None = DEFAULT_RUN_KINDS,
+                      ) -> pd.DataFrame:
     """Per-series regression signal based on median comparison between two
     time windows.
 
@@ -691,10 +749,17 @@ def trend_regressions(db_path: Path, machine: str,
     Direction handling: for 'ms', 's', '%', higher is worse; for 'FPS'/'tps',
     lower is worse. ``pct_change`` is signed so that positive means "worse"
     regardless of unit, making sort-by-worst trivial.
+
+    ``run_kinds`` defaults to daily-only, and manually excluded runs are
+    dropped: both windows are medians over whatever rows land in them, so a
+    burst of PR runs in the recent window is otherwise reported as a
+    regression of the daily build.
     """
     start = time.time()
     purpose_like = f"%{purpose_filter}%" if purpose_filter else None
-    sql = """
+    kind_clause, kind_params = _perf_flat_kind_clause(db_path, run_kinds)
+    excl_clause = _perf_flat_exclusion_clause(db_path)
+    sql = f"""
     WITH base AS (
         SELECT machine, model, precision, in_token, out_token, exec_mode, unit,
                ts, value
@@ -702,6 +767,8 @@ def trend_regressions(db_path: Path, machine: str,
         WHERE machine = ?
           AND ts >= current_date - ((? + ?) || ' DAY')::INTERVAL
           AND (? IS NULL OR COALESCE(purpose, '') ILIKE ?)
+          {kind_clause}
+          {excl_clause}
           AND value > 0
     ),
     tagged AS (
@@ -772,7 +839,7 @@ def trend_regressions(db_path: Path, machine: str,
     FROM agg
     """
     params = [machine, recent_days, baseline_days,
-              purpose_filter, purpose_like, recent_days]
+              purpose_filter, purpose_like, *kind_params, recent_days]
     with _read_only(db_path) as con:
         df = con.execute(sql, params).fetchdf()
 

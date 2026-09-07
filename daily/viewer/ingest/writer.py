@@ -31,7 +31,53 @@ def ensure_schema(con: duckdb.DuckDBPyConnection,
     # Migrations run first: schema.sql recreates views that reference columns
     # added below, which would fail on a pre-existing DB.
     _apply_schema_migrations(con)
+    _drop_short_run_column(con)
     con.execute(schema_path.read_text(encoding="utf-8"))
+
+
+def _drop_short_run_column(con: duckdb.DuckDBPyConnection) -> None:
+    """Drop the retired ``runs.short_run`` column from a long-lived DB.
+
+    ``short_run`` set ``out_token`` to 32 and ``benchmark_iter_num`` to 1,
+    which made a run incomparable with its own history while still sitting in
+    the baseline selection key. The column is dropped rather than left dead so
+    a stale query referencing it fails loudly instead of silently filtering on
+    an all-FALSE column. Measured before removal: every row in the central and
+    per-machine DBs was FALSE, so no information is lost.
+
+    Guarded on the column still existing, because DuckDB refuses
+    ``DROP COLUMN`` while *any* view or index references the table — so the
+    drop has to tear those down first, and doing that on every ingest would
+    rebuild the ``runs`` indexes for nothing. ``schema.sql`` runs straight
+    after and recreates both.
+    """
+    exists = con.execute(
+        "SELECT count(*) FROM information_schema.columns "
+        "WHERE table_name = 'runs' AND column_name = 'short_run'"
+    ).fetchone()[0]
+    if not exists:
+        return
+    try:
+        for view in con.execute(
+            "SELECT view_name FROM duckdb_views() WHERE NOT internal"
+        ).fetchall():
+            con.execute(f"DROP VIEW IF EXISTS {view[0]}")
+        for index in con.execute(
+            "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'runs'"
+        ).fetchall():
+            con.execute(f"DROP INDEX IF EXISTS {index[0]}")
+        con.execute("ALTER TABLE runs DROP COLUMN IF EXISTS short_run")
+        log.info("dropped retired runs.short_run column")
+    except Exception:  # noqa: BLE001
+        try:
+            con.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        # Best-effort, like the rest of schema setup: schema.sql below still
+        # recreates every view and index, so a DB that keeps the dead column
+        # stays fully usable.
+        log.warning("could not drop runs.short_run; leaving it in place",
+                    exc_info=True)
 
 
 def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
@@ -79,6 +125,8 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS skipped_tests INTEGER",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS skipped_cases INTEGER",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS expected_cases INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS selected_cases INTEGER",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS test_filter TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS model_cache TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_sec DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS build_url TEXT",
@@ -142,11 +190,11 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 gpu_info, gpu_driver_version,
                 gpu_dedicated_memory_mb, gpu_shared_memory_mb,
                 genai_version, genai_commit, tok_commit, model_cache,
-                short_run, source_path, rawlog_path, file_hash,
+                test_filter, source_path, rawlog_path, file_hash,
                 total_tests, passed_tests, failed_tests, error_tests,
-                skipped_tests, skipped_cases, expected_cases,
+                skipped_tests, skipped_cases, expected_cases, selected_cases,
                 duration_sec, build_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
@@ -171,7 +219,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 genai_commit  = excluded.genai_commit,
                 tok_commit    = excluded.tok_commit,
                 model_cache   = excluded.model_cache,
-                short_run     = excluded.short_run,
+                test_filter   = excluded.test_filter,
                 source_path   = excluded.source_path,
                 rawlog_path   = excluded.rawlog_path,
                 file_hash     = excluded.file_hash,
@@ -182,6 +230,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 skipped_tests = excluded.skipped_tests,
                 skipped_cases = excluded.skipped_cases,
                 expected_cases = excluded.expected_cases,
+                selected_cases = excluded.selected_cases,
                 duration_sec  = excluded.duration_sec,
                 build_url     = excluded.build_url
             """,
@@ -194,10 +243,11 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 rec.gpu_dedicated_memory_mb, rec.gpu_shared_memory_mb,
                 rec.genai_version, rec.genai_commit, rec.tok_commit,
                 rec.model_cache,
-                rec.short_run, rec.source_path, rec.rawlog_path, rec.file_hash,
+                rec.test_filter, rec.source_path, rec.rawlog_path, rec.file_hash,
                 rec.total_tests, rec.passed_tests, rec.failed_tests,
                 rec.error_tests, rec.skipped_tests, rec.skipped_cases,
-                rec.expected_cases, rec.duration_sec, rec.build_url,
+                rec.expected_cases, rec.selected_cases,
+                rec.duration_sec, rec.build_url,
             ],
         )
 

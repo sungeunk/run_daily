@@ -90,8 +90,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='Output directory (defaults to <repo>/output)')
     group.addoption('--daily-timeout', default=1800, type=int,
                     help='Per-subprocess timeout in seconds')
-    group.addoption('--short-run', action='store_true',
-                    help='Reduced token/iter counts for quick smoke runs')
     group.addoption('--tee-raw-log', action='store_true',
                     help='Also stream the session raw log to stdout')
     group.addoption('--run-stamp', default=None,
@@ -124,7 +122,6 @@ def daily_config(request: pytest.FixtureRequest) -> DailyConfig:
         model_date=opt('--model-date'),
         device=opt('--device'),
         timeout_sec=opt('--daily-timeout'),
-        short_run=opt('--short-run'),
         tee_raw_log=opt('--tee-raw-log'),
         now=opt('--run-stamp'),
     )

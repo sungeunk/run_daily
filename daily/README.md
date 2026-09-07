@@ -46,14 +46,16 @@ echo 'export DAILY_DEVICE=GPU.1' >> ~/.bashrc
 # 전체 실행
 python daily/run.py
 
-# 스모크 런 (llama 만, 짧은 토큰)
-python daily/run.py --short-run -k llama
+# 일부만 실행 (llama 만). 토큰 길이/반복 횟수는 항상 고정이므로
+# 결과는 full run 과 그대로 비교 가능하다 — 커버리지만 줄어든다.
+# 이 경우 runs.test_filter 에 기록되어 is_partial = TRUE 로 표시된다.
+python daily/run.py -k llama
 
 # 실행될 테스트 목록만 확인
 python daily/run.py -- --collect-only -q
 
 # pytest 직접 실행 (run.py 의 파일 네이밍 + 리포트 단계 건너뜀)
-cd daily && pytest tests/test_llm_benchmark.py -v --short-run
+cd daily && pytest tests/test_llm_benchmark.py -v
 ```
 
 ### 백업 & 메일 (cron 용)

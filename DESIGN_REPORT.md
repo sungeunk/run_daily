@@ -15,7 +15,7 @@
 기존 `daily/analysis` 엔진 구조를 유지하면서, 판정 기준을 아래처럼 확장했다.
 
 1. 시리즈별 히스토리 수집
-- 동일 머신 + 동일 run profile(short_run/purpose) 기준
+- 동일 머신 + 동일 run profile(run_kind/purpose, 부분 실행·제외 run 배제) 기준
 - 최근 `N=10`개(`history_window`) 시리즈 값 수집
 
 2. 비교 기준(reference) 변경
@@ -93,7 +93,7 @@
 ### 3.3 baseline 선택 정책 정리
 - 파일: `daily/analysis/baseline.py`
 - baseline 선택 우선순위:
-  1. 같은 machine + 같은 short_run + `purpose=daily_CB timer` + older run
+  1. 같은 machine + not partial + not excluded + `purpose=daily_CB timer` + older run
   2. 같은 machine + `purpose=daily_CB timer` + older run
 - 공통 후보 조건:
   - 현재 run 제외
