@@ -19,7 +19,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
-import platform
 import time
 
 import pytest
@@ -47,7 +46,6 @@ class BenchmarkCase:
     apply_chat_template: bool = True
     prompt_type: str = PROMPT_TYPE_32_1K
     task: str | None = None
-    ptl_only: bool = False
 
     @property
     def test_id(self) -> str:
@@ -73,12 +71,8 @@ CASES: list[BenchmarkCase] = [
     BenchmarkCase('qwen3-8b',               OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('qwen3-vl-4b-instruct',   OV_FP16_4BIT_DEFAULT, prompt_type=PROMPT_TYPE_MULTIMODAL),
     BenchmarkCase('qwen3.5-9b',             OV_FP16_4BIT_DEFAULT, task='visual_text_gen'),
-    BenchmarkCase('qwen3.6-35b-a3b',        OV_FP16_4BIT_DEFAULT, task='visual_text_gen', ptl_only=True),
+    BenchmarkCase('qwen3.6-35b-a3b',        OV_FP16_4BIT_DEFAULT, task='visual_text_gen'),
 ]
-
-
-def _is_ptl_machine() -> bool:
-    return 'PTL' in platform.node().upper()
 
 
 def _prompt_path(cfg: DailyConfig, case: BenchmarkCase) -> str:
@@ -156,7 +150,7 @@ def _machine_phases(data: list, machine: dict | None,
 
 @pytest.mark.parametrize('case', CASES, ids=lambda c: c.test_id)
 def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
-                       run_subprocess, record_metrics):
+                       run_subprocess, record_metrics, raw_log):
     # Recorded before any skip so the report can still tell what was skipped
     # and how many series it would have contributed.
     record_metrics({
@@ -167,11 +161,14 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'data': [],
     })
 
-    if case.ptl_only and not _is_ptl_machine():
-        pytest.skip(f'{case.model} runs only on PTL machines')
-
     skip_reason = get_skip_reason(case.model, daily_config.device)
     if skip_reason:
+        # pytest only echoes a skip reason in the short summary at the end of
+        # the session, and pytest-json-report buries it in longrepr. Put it in
+        # the raw log and in the metrics too, so a case that disappears from
+        # the report can be explained from either artifact.
+        raw_log.write(f'[SKIP] {case.test_id}: {skip_reason}\n')
+        record_metrics({'skip_reason': skip_reason})
         pytest.skip(skip_reason)
 
     # Generate JSON report filename with timestamp to avoid overwrites

@@ -15,12 +15,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
-try:
-    from daily.common.llm_benchmark_skip import get_skip_reason as get_llm_benchmark_skip_reason
-except Exception:
-    # Fallback for environments where daily package is unavailable.
-    def get_llm_benchmark_skip_reason(model: str, device: str) -> str | None:
-        return None
+from daily.common.llm_benchmark_skip import get_skip_reason as get_llm_benchmark_skip_reason
 
 
 class TestBenchmark(TestTemplate):
