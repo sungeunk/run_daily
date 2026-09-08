@@ -489,7 +489,14 @@ def _build_bisect_delta(
             sha_changed=None,
         )
 
-    lkg_rows = _fetch_comparison_rows(con, rec, lkg, config)
+    lkg_reference_values = _load_current_values(con, lkg.run_id)
+    lkg_rows = _fetch_comparison_rows(
+        con,
+        current_run_id,
+        config,
+        reference_values=lkg_reference_values,
+        history_map={},
+    )
     comparable_rows = [
         row for row in lkg_rows
         if row.improvement_pct is not None and row.verdict != "unavailable"

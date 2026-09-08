@@ -518,6 +518,10 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help='pytest -k expression. Use "|" to separate multiple keywords (e.g. "qwen3|phi-4") — converted to "or" for pytest')
     p.add_argument('--tests', default=None,
                    help='Test path(s) to run (defaults to daily/tests)')
+    p.add_argument('--from-run', dest='from_run', default=None,
+                   help='Reuse an existing stamp\'s pytest/summary json instead of running '
+                        'pytest again (e.g. daily.<stamp>.pytest.json already exists but report '
+                        'generation failed). Value is the stamp, e.g. 20260908_2357.')
 
     # --- post-run delivery ---
     p.add_argument('--backup', action='store_true',
@@ -718,7 +722,7 @@ def main() -> int:
     args, passthrough = _parse_args()
 
     root = Path(args.output_dir).resolve()
-    stamp = _now_stamp(root)
+    stamp = args.from_run or _now_stamp(root)
     # Artefacts are bucketed exactly like the relay backup, so a run's files
     # sit at the same relative path locally and on the server.
     output_dir = run_dir(root, stamp)
@@ -732,42 +736,54 @@ def main() -> int:
 
     tests_target = args.tests or str(DAILY_DIR / 'tests')
 
-    pytest_cmd = [
-        sys.executable, '-m', 'pytest', tests_target,
-        '-v',
-        f'--device={args.device}',
-        f'--model-dir={args.model_dir}',
-        f'--model-date={args.model_date}',
-        f'--cache-dir={args.cache_dir}',
-        f'--output-dir={output_dir}',
-        f'--daily-timeout={args.daily_timeout}',
-        f'--run-stamp={stamp}',
-        '--json-report',
-        f'--json-report-file={pytest_json}',
-        '--json-report-omit=collectors',
-        '-m', 'not dev_only',
-    ]
-    if args.verbose:
-        pytest_cmd.extend(['--tee-raw-log', '-s'])
-    if args.keyword:
-        keyword_expr = ' or '.join(k.strip() for k in args.keyword.split('|') if k.strip())
-        pytest_cmd.extend(['-k', keyword_expr])
-    pytest_cmd.extend(passthrough)
+    if args.from_run:
+        # Report-only reprocessing: the test run already happened, only the
+        # analysis/mail/backup tail needs to run again (e.g. after a report
+        # generation bug fix), so skip pytest and reuse its json as-is.
+        if not pytest_json.exists():
+            print(f'[run.py] --from-run {stamp}: no pytest json at {pytest_json}',
+                  file=sys.stderr)
+            return 2
+        print(f'[run.py] --from-run {stamp}: reusing existing pytest json, skipping pytest',
+              flush=True)
+        rc = 0
+    else:
+        pytest_cmd = [
+            sys.executable, '-m', 'pytest', tests_target,
+            '-v',
+            f'--device={args.device}',
+            f'--model-dir={args.model_dir}',
+            f'--model-date={args.model_date}',
+            f'--cache-dir={args.cache_dir}',
+            f'--output-dir={output_dir}',
+            f'--daily-timeout={args.daily_timeout}',
+            f'--run-stamp={stamp}',
+            '--json-report',
+            f'--json-report-file={pytest_json}',
+            '--json-report-omit=collectors',
+            '-m', 'not dev_only',
+        ]
+        if args.verbose:
+            pytest_cmd.extend(['--tee-raw-log', '-s'])
+        if args.keyword:
+            keyword_expr = ' or '.join(k.strip() for k in args.keyword.split('|') if k.strip())
+            pytest_cmd.extend(['-k', keyword_expr])
+        pytest_cmd.extend(passthrough)
 
-    print(f'[run.py] pytest: {" ".join(pytest_cmd)}', flush=True)
-    # pytest exit code: 0 = all pass, 1 = failures, 5 = no tests collected.
-    # Individual test failures do not fail this script — callers (Jenkins,
-    # cron) treat a non-zero exit as "the run itself broke" and should not
-    # page on routine test regressions. Only infra issues (no pytest output
-    # at all) propagate below.
-    rc = subprocess.call(pytest_cmd, cwd=str(DAILY_DIR))
+        print(f'[run.py] pytest: {" ".join(pytest_cmd)}', flush=True)
+        # pytest exit code: 0 = all pass, 1 = failures, 5 = no tests collected.
+        # Individual test failures do not fail this script — callers (Jenkins,
+        # cron) treat a non-zero exit as "the run itself broke" and should not
+        # page on routine test regressions. Only infra issues (no pytest output
+        # at all) propagate below.
+        rc = subprocess.call(pytest_cmd, cwd=str(DAILY_DIR))
 
-    if not pytest_json.exists():
-        # No JSON means pytest never produced a result (config error, crash,
-        # etc.). That IS an infra failure worth surfacing.
-        print(f'[run.py] no pytest json at {pytest_json} (rc={rc})',
-              file=sys.stderr)
-        return rc or 2
+        if not pytest_json.exists():
+            # No JSON means pytest never produced a result (config error, crash,
+            # etc.). That IS an infra failure worth surfacing.
+            print(f'[run.py] no pytest json at {pytest_json} (rc={rc})',
+                  file=sys.stderr)
+            return rc or 2
 
     # Import lazily so `python run.py --help` works without the report deps installed.
     sys.path.insert(0, str(DAILY_DIR))
