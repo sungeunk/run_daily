@@ -826,7 +826,7 @@ def main() -> int:
     if not raw_logs:
         raw_logs = sorted(output_dir.glob(f'daily.{stamp}.*.raw'))
     monitor_parquet = _convert_monitor_parquet(
-        output_dir, root, stamp, extra_meta, summary_json, args.monitor_keep_days)
+        output_dir, root, stamp, summary.get('meta') or {}, summary_json, args.monitor_keep_days)
 
     if args.pip_freeze or args.backup or args.mail:
         write_pip_freeze(pip_freeze_file)
