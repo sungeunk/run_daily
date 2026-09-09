@@ -54,7 +54,7 @@ class BenchmarkCase:
 
 CASES: list[BenchmarkCase] = [
     BenchmarkCase('gemma-2-9b-it',          OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('gemma-3-4b-it',          OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('gemma-3-4b-it',          OV_FP16_4BIT_DEFAULT, task='visual_text_gen'),
     BenchmarkCase('gemma-4-26b-a4b-it',     OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('gemma-4-e2b-it',         OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('gpt-oss-20b',            OV_FP16_4BIT_DEFAULT),
@@ -67,7 +67,7 @@ CASES: list[BenchmarkCase] = [
     BenchmarkCase('phi-3.5-mini-instruct',  OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('phi-3.5-vision-instruct', OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('phi-4-mini-instruct',    OV_FP16_4BIT_DEFAULT),
-    BenchmarkCase('phi-4-multimodal-instruct', OV_FP16_4BIT_DEFAULT),
+    BenchmarkCase('phi-4-multimodal-instruct', OV_FP16_4BIT_DEFAULT, task='visual_text_gen'),
     BenchmarkCase('qwen3-8b',               OV_FP16_4BIT_DEFAULT),
     BenchmarkCase('qwen3-vl-4b-instruct',   OV_FP16_4BIT_DEFAULT, prompt_type=PROMPT_TYPE_MULTIMODAL),
     BenchmarkCase('qwen3.5-9b',             OV_FP16_4BIT_DEFAULT, task='visual_text_gen'),
