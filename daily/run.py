@@ -793,10 +793,17 @@ def main() -> int:
                                  render_links_block, scp_backup, send_mail,
                                  stage_report_images, write_pip_freeze)
 
-    extra_meta = _collect_meta(stamp, args)
-    summary = build_reports(pytest_json,
-                            summary_out=summary_json,
-                            extra_meta=extra_meta)
+    if args.from_run and summary_json.exists():
+        # Reprocessing an existing run: summary_json already carries the
+        # original run's meta (ov_version, purpose, ...). Re-collecting it
+        # from *this* shell would silently overwrite good history with
+        # whatever environment the reprocessing happens to run in.
+        summary = json.loads(summary_json.read_text(encoding='utf-8'))
+    else:
+        extra_meta = _collect_meta(stamp, args)
+        summary = build_reports(pytest_json,
+                                summary_out=summary_json,
+                                extra_meta=extra_meta)
 
     totals = summary['totals']
     print(f'[run.py] passed={totals["passed"]} failed={totals["failed"]} '
