@@ -294,6 +294,11 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     )[:10]
     # Keep original engine order so this table matches the main report table order.
     all_rows = list(result.rows)
+    show_release = any(
+        row.release_value is not None and math.isfinite(row.release_value)
+        for row in all_rows
+    )
+    column_count = 13 if show_release else 11
     fluctuation_same = sum(1 for r in result.rows if r.within_fluctuation)
     # Top table counts one benchmark series as one unit, including the series
     # skipped tests would have produced.
@@ -406,6 +411,10 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         cv_style = f"text-align:right;{cv_s};white-space:nowrap" if cv_s else "text-align:right;white-space:nowrap"
         rel_s = _release_delta_style(row.release_improvement_pct)
         rel_style = f"text-align:right;{rel_s};white-space:nowrap" if rel_s else "text-align:right;white-space:nowrap"
+        release_cells = (
+            f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.release_value, unit)}</td>\n"
+            f"<td class='num' style='{rel_style}'>{_fmt_pct(row.release_improvement_pct)}</td>\n"
+        ) if show_release else ""
         return (
             "<tr>\n"
             f"<td>{html.escape(k.model)}</td>\n"
@@ -415,8 +424,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.current_value, unit)}</td>\n"
             f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.baseline_value, unit)}</td>\n"
             f"<td class='num' style='{delta_style}'>{_fmt_pct(row.improvement_pct)}{fluct}</td>\n"
-            f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.release_value, unit)}</td>\n"
-            f"<td class='num' style='{rel_style}'>{_fmt_pct(row.release_improvement_pct)}</td>\n"
+            f"{release_cells}"
             f"<td class='num' style='text-align:right'>{row.history_count}</td>\n"
             f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.history_sigma, unit)}</td>\n"
             f"<td class='num' style='{cv_style}'>{_fmt_cv(row.history_cv)}</td>\n"
@@ -424,8 +432,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             "</tr>"
         )
 
-    improved_table  = "\n".join(_row_html(r) for r in improved_rows)  or "<tr><td colspan='13' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
-    regressed_table = "\n".join(_row_html(r) for r in regressed_rows) or "<tr><td colspan='13' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
+    improved_table  = "\n".join(_row_html(r) for r in improved_rows)  or f"<tr><td colspan='{column_count}' style='color:#6b7280;text-align:center'>No improved rows</td></tr>"
+    regressed_table = "\n".join(_row_html(r) for r in regressed_rows) or f"<tr><td colspan='{column_count}' style='color:#6b7280;text-align:center'>No regressed rows</td></tr>"
     all_table       = "\n".join(_row_html(r, show_fluct=True) for r in all_rows)
     failed_rows = ""
     if result.functional.issues:
@@ -465,6 +473,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
                        "'baseline' = latest timer-scheduled run, "
                        "'no_baseline' / 'unit_mismatch' = nothing comparable was found"),
     ]
+    if not show_release:
+        COL_DEFS = [(label, tip) for label, tip in COL_DEFS if label not in {"Release", "Δ Release"}]
 
     def _th(label: str, tip: str) -> str:
         numeric_headers = {"Current", "Reference", "Delta", "Release", "Δ Release", "N", "Sigma (σ)", "CV"}
@@ -628,7 +638,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     <div class="card" style="margin-bottom:14px">
         <h2>Analysis Methodology</h2>
         <div style="font-size:13px;line-height:1.65;color:#374151">
-            <b>Reference</b> = mean of the best <b>top-5</b> runs from a <b>10-run history window</b> (same machine · model · precision · mode).<br>
+            <b>Reference</b> = the latest earlier timer-scheduled run on the same machine, matched by model, precision, input/output tokens, and mode. Historical runs provide noise statistics; they do not replace a missing reference.<br>
             <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
             <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
         </div>

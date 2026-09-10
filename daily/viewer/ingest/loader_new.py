@@ -58,6 +58,36 @@ def classify_run_kind(purpose: str | None, description: str | None = None) -> st
     return "manual"
 
 
+_GENERIC_TRIGGERED_BY = {
+    "daily", "nightly", "weekly", "timer", "pipeline",
+    "llm", "cb", "test", "validation", "manual", "scheduler",
+    "unknown", "jenkins", "build", "report"
+}
+
+
+def parse_triggered_by(purpose: str | None, description: str | None = None) -> str | None:
+    """Recover the execution identity from free-form purpose text.
+
+    Older summary files often omit the dedicated ``triggered_by`` metadata, but
+    the run description still ends with the launcher's identity, e.g.
+    ``daily pipeline sungeunk`` or ``daily_CB jenkins-user``.
+    """
+    text = " ".join(part for part in (purpose, description) if part).strip()
+    if not text:
+        return None
+    tail = text.rsplit(maxsplit=1)[-1].strip(" \t\r\n.,;:()[]{}")
+    if not tail:
+        return None
+    # Ignore descriptive keywords and keep a meaningful creator name when the
+    # metadata is missing.
+    candidate = tail.strip("_-")
+    if not candidate or candidate.lower() in _GENERIC_TRIGGERED_BY:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", candidate):
+        return candidate
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Per-test-type perf extractors (raw tokens preserved — no bucketing)
 # ---------------------------------------------------------------------------
@@ -370,6 +400,10 @@ def load_summary(path: Path) -> RunRecord:
     gpu_shared_memory_mb = _float_or_none(meta.get("gpu_shared_memory_mb"))
     devices = []
 
+    triggered_by = meta.get("triggered_by") or parse_triggered_by(
+        purpose, meta.get("description")
+    )
+
     rec = RunRecord(
         run_id=run_id_of(machine, ts, path.name),
         source_format="new",
@@ -378,6 +412,7 @@ def load_summary(path: Path) -> RunRecord:
         ts=ts,
         device=meta.get("device"),
         purpose=purpose,
+        triggered_by=triggered_by,
         run_kind=classify_run_kind(purpose, meta.get("description")),
         description=purpose,
         ww=ww,

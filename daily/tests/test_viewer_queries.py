@@ -26,7 +26,8 @@ BASE_TS = datetime(2026, 1, 1, 12, 0)
 
 def _record(idx: int, *, value: float, run_kind: str = "daily",
             model: str = "llama",
-            monitor: MonitorRow | None = None) -> RunRecord:
+            monitor: MonitorRow | None = None,
+            triggered_by: str | None = None) -> RunRecord:
     ts = BASE_TS + timedelta(days=idx)
     rec = RunRecord(
         run_id=f"run-{idx:03d}",
@@ -35,6 +36,7 @@ def _record(idx: int, *, value: float, run_kind: str = "daily",
         machine=MACHINE,
         ts=ts,
         purpose=run_kind,
+        triggered_by=triggered_by,
         run_kind=run_kind,
     )
     rec.perf.append(PerfRow(model, "INT4", 32, 128, "2nd", value, "ms"))
@@ -61,6 +63,22 @@ def _write(db_path: Path, records: list[RunRecord]) -> None:
 
 
 class TestRunKind:
+    def test_triggered_by_is_persisted(self, db: Path):
+        _write(db, [_record(0, value=100.0, triggered_by="scheduler")])
+        con = writer.connect(db)
+        try:
+            row = con.execute(
+                "SELECT triggered_by FROM runs WHERE run_id = 'run-000'"
+            ).fetchone()
+        finally:
+            con.close()
+        assert row == ("scheduler",)
+
+    def test_triggered_by_is_inferred_from_purpose_suffix(self):
+        assert q.parse_triggered_by("daily pipeline sungeunk") == "sungeunk"
+        assert q.parse_triggered_by("daily_pipeline timer") is None
+        assert q.parse_triggered_by("daily_CB jenkins-user") == "jenkins-user"
+
     def test_pr_and_test_runs_are_not_daily(self):
         assert classify_run_kind("PR-1234 validation") == "pr"
         assert classify_run_kind("jenkins test build") == "test"
@@ -79,6 +97,72 @@ class TestRunKind:
         # 'ci' must not match 'precision', 'pr' must not match 'preview'.
         assert classify_run_kind("precision sweep") == "manual"
         assert classify_run_kind("preview build") == "manual"
+
+
+class TestDailyDigest:
+    def test_selects_latest_matching_run_per_machine_even_with_different_versions(
+            self, db: Path):
+        older = _record(0, value=100.0, triggered_by="scheduler")
+        older.purpose = "daily_pipeline timer"
+        older.ov_version = "2026.4"
+        newer = _record(0, value=101.0, triggered_by="scheduler")
+        newer.run_id = "run-newer"
+        newer.ts += timedelta(hours=1)
+        newer.purpose = "daily_pipeline timer"
+        newer.ov_version = "2026.5"
+        other = _record(0, value=102.0, triggered_by="scheduler")
+        other.run_id = "run-other"
+        other.machine = "TEST-02"
+        other.ts += timedelta(days=1, hours=-11)
+        other.purpose = "daily_pipeline timer"
+        other.ov_version = "2026.6"
+        ignored = _record(0, value=999.0, triggered_by="someone-else")
+        ignored.run_id = "run-ignored"
+        ignored.ts += timedelta(hours=2)
+        ignored.purpose = "daily_pipeline timer"
+        for rec in (older, newer, other, ignored):
+            rec.total_tests = rec.passed_tests = 1
+            rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        _write(db, [older, newer, other, ignored])
+
+        digest = q.daily_digest(
+            db,
+            report_date="2026-01-01",
+            purpose="daily_pipeline timer",
+            triggered_by="scheduler",
+            expected_machines=[MACHINE, "TEST-02", "MISSING"],
+            day_start_hour=6,
+        )
+
+        assert digest["summary"]["status"] == "incomplete"
+        assert digest["summary"]["completed_machines"] == 2
+        rows = {row["machine"]: row for row in digest["machines"]}
+        assert rows[MACHINE]["run_id"] == "run-newer"
+        assert rows[MACHINE]["ov_version"] == "2026.5"
+        assert rows["TEST-02"]["ov_version"] == "2026.6"
+        assert rows["MISSING"]["status"] == "missing"
+        assert rows[MACHINE]["viewer_query"] == "?run_id=run-newer"
+        assert any("different OpenVINO" in warning for warning in digest["warnings"])
+
+    def test_run_detail_returns_exact_run_and_issues(self, db: Path):
+        rec = _record(0, value=100.0, triggered_by="scheduler")
+        rec.total_tests, rec.passed_tests, rec.failed_tests = 1, 0, 1
+        rec.error_tests = rec.skipped_tests = 0
+        rec.issues.append(IssueRow(
+            nodeid="tests/test_llm.py::test_model",
+            outcome="failed",
+            message="boom",
+            model="llama",
+            precision="INT4",
+        ))
+        _write(db, [rec])
+
+        detail = q.run_detail(db, rec.run_id).iloc[0]
+        issues = q.functional_issues_for_runs(db, (rec.run_id,))
+
+        assert detail["triggered_by"] == "scheduler"
+        assert detail["failed_tests"] == 1
+        assert issues.iloc[0]["message"] == "boom"
 
 
 class TestCohort:

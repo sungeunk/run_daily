@@ -220,7 +220,7 @@ def _fetch_comparison_rows(
                     current_value=float("nan") if current_value is None else current_value,
                     baseline_value=float("nan"),
                     improvement_pct=None,
-                    verdict="same",  # no baseline to compare against
+                    verdict="unavailable",
                     history_count=history_stats["count"],
                     reference_source="no_baseline",
                 )
@@ -389,7 +389,10 @@ def _aggregate_performance(rows: list[ComparisonRow]) -> PerformanceResult:
     for row in rows:
         counts[row.verdict] = counts.get(row.verdict, 0) + 1
     return PerformanceResult(
-        compared=len(rows),
+        compared=sum(
+            math.isfinite(row.current_value) and math.isfinite(row.baseline_value)
+            for row in rows
+        ),
         improved=counts["improved"],
         same=counts["same"],
         regressed=counts["regressed"],

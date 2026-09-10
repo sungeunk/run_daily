@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "mcp_url": "http://dg2raptorlake.ikor.intel.com:8090/mcp",
+  "viewer_base_url": "http://dg2raptorlake.ikor.intel.com:8501",
+  "timezone": "Asia/Seoul",
+  "day_start_hour": 6,
+  "purpose": "daily_pipeline timer",
+  "triggered_by": "scheduler",
+  "expected_machines": [
+    "ARLH-01",
+    "BMG-02",
+    "LNL-03",
+    "LNL-04",
+    "MTL-01",
+    "PTLH-01",
+    "PTLH-02",
+    "RAPTOR-ELLY",
+    "dg2alderlake"
+  ],
+  "output_dir": "../output/fleet",
+  "mail": {
+    "recipients": ["you@example.com"],
+    "subject_prefix": "Daily GPU",
+    "relay_server": "dg2raptorlake.ikor.intel.com"
+  },
+  "schedule": {
+    "max_wait_minutes": 60,
+    "poll_interval_seconds": 300
+  },
+  "report": {
+    "max_functional_issues": 20,
+    "top_regressions": 10,
+    "top_improvements": 5
+  }
+}

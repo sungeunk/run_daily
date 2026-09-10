@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 SeriesKeyTuple = tuple[str, str, int, int, str]
 SeriesValues = dict[SeriesKeyTuple, tuple[float, str | None]]
 SeriesHistory = dict[SeriesKeyTuple, list[float]]
+_PERF_PAGE_SIZE = 200
+_PERF_KEY_COLUMNS = ("run_id", "model", "precision", "in_token", "out_token", "exec_mode")
 
 
 class ReferenceResult:
@@ -43,7 +45,7 @@ class ReferenceResult:
 def fetch_reference(config: AnalysisConfig, rec: "RunRecord") -> ReferenceResult:
     """Return the newest scheduled run older than *rec*, plus its history.
 
-    One round trip pulls the last ``config.history_window`` scheduled runs;
+    Paged queries pull the last ``config.history_window`` scheduled runs;
     the newest of them is the reference and all of them feed the sigma/CV
     statistics.
     """
@@ -78,7 +80,7 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord") -> ReferenceResult
     newest = runs[0]
     run_ids = [str(row.get("run_id") or "") for row in runs if row.get("run_id")]
     try:
-        perf_rows = run_sql(url, _perf_sql(run_ids), timeout=config.mcp_timeout_sec)
+        perf_rows = _fetch_perf_rows(config, run_ids)
     except McpError as exc:
         return ReferenceResult(
             BaselineInfo(status="unavailable", machine=machine, source_url=url, detail=str(exc))
@@ -131,7 +133,7 @@ def fetch_release(config: AnalysisConfig, machine: str | None) -> tuple[ReleaseI
     run = runs[0]
     run_id = str(run.get("run_id") or "")
     try:
-        perf_rows = run_sql(url, _perf_sql([run_id]), timeout=config.mcp_timeout_sec)
+        perf_rows = _fetch_perf_rows(config, [run_id])
     except McpError as exc:
         return ReleaseInfo(status="unavailable", machine=machine,
                            source_url=url, detail=str(exc)), {}
@@ -183,6 +185,49 @@ def _latest_release_sql(machine: str, purpose_like: str) -> str:
         f"AND lower(COALESCE(purpose, '')) LIKE lower({_quote(purpose_like)}) "
         "ORDER BY ts DESC LIMIT 1"
     )
+
+
+def _fetch_perf_rows(config: AnalysisConfig, run_ids: list[str]) -> list[dict]:
+    """Fetch complete grouped performance data within the MCP response limit."""
+    from common.mcp_client import McpError, run_sql
+
+    if not run_ids:
+        return []
+    sql = _perf_sql(run_ids)
+    count_sql = f"SELECT count(*) AS total FROM ({sql}) AS series"
+
+    def row_count() -> int:
+        counts = run_sql(config.mcp_url, count_sql, timeout=config.mcp_timeout_sec)
+        if len(counts) != 1 or type(counts[0].get("total")) is not int or counts[0]["total"] < 0:
+            raise McpError("Incomplete performance lookup: invalid row count")
+        return counts[0]["total"]
+
+    expected = row_count()
+    rows: list[dict] = []
+    keys: set[tuple] = set()
+    order = ", ".join(_PERF_KEY_COLUMNS)
+    for offset in range(0, expected, _PERF_PAGE_SIZE):
+        limit = min(_PERF_PAGE_SIZE, expected - offset)
+        page = run_sql(
+            config.mcp_url,
+            f"{sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}",
+            timeout=config.mcp_timeout_sec,
+        )
+        if len(page) != limit:
+            raise McpError(
+                f"Incomplete performance lookup: expected {limit} rows at offset {offset}, "
+                f"received {len(page)}"
+            )
+        for row in page:
+            key = tuple(row.get(column) for column in _PERF_KEY_COLUMNS)
+            if None in key or key in keys:
+                raise McpError("Incomplete performance lookup: missing or duplicate series key")
+            keys.add(key)
+        rows.extend(page)
+
+    if len(keys) != expected or row_count() != expected:
+        raise McpError("Incomplete performance lookup: row count changed during pagination")
+    return rows
 
 
 def _perf_sql(run_ids: list[str]) -> str:

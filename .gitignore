@@ -8,4 +8,5 @@ logs/
 *.duckdb
 *.duckdb.wal
 daily_output/
+daily/fleet_report.json
 .workspace/

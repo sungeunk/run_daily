@@ -89,6 +89,7 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_size_gb DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_speed_mhz DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS run_kind TEXT",
+        "ALTER TABLE runs ADD COLUMN IF NOT EXISTS triggered_by TEXT",
         # Backfill only rows never classified: an ADD COLUMN default would
         # label historical PR/CI runs as 'daily' and quietly pull them into
         # every trend comparison.
@@ -184,7 +185,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
             """
             INSERT INTO runs (
                 run_id, source_format, report_file, machine, device,
-                purpose, description, run_kind, ts, ww,
+                purpose, triggered_by, description, run_kind, ts, ww,
                 ov_version, ov_build, ov_sha,
                 host_info, host_memory_size_gb, host_memory_speed_mhz,
                 gpu_info, gpu_driver_version,
@@ -194,13 +195,14 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 total_tests, passed_tests, failed_tests, error_tests,
                 skipped_tests, skipped_cases, expected_cases, selected_cases,
                 duration_sec, build_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 source_format = excluded.source_format,
                 report_file   = excluded.report_file,
                 machine       = excluded.machine,
                 device        = excluded.device,
                 purpose       = excluded.purpose,
+                triggered_by  = excluded.triggered_by,
                 description   = excluded.description,
                 run_kind      = excluded.run_kind,
                 ts            = excluded.ts,
@@ -236,7 +238,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
             """,
             [
                 rec.run_id, rec.source_format, rec.report_file, rec.machine, rec.device,
-                rec.purpose, rec.description, rec.run_kind, rec.ts, rec.ww,
+                rec.purpose, rec.triggered_by, rec.description, rec.run_kind, rec.ts, rec.ww,
                 rec.ov_version, rec.ov_build, rec.ov_sha,
                 rec.host_info, rec.host_memory_size_gb, rec.host_memory_speed_mhz,
                 rec.gpu_info, rec.gpu_driver_version,

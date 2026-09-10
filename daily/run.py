@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import getpass
 import json
 import os
 import re
@@ -477,6 +478,7 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         'device':         args.device,
         'description':    args.description,
         'purpose':        args.description,
+        'triggered_by':   _triggered_by(),
         'workweek':       workweek,
         'ov_version':     ov_version,
         'ov_build':       build,
@@ -492,6 +494,17 @@ def _collect_meta(stamp: str, args: argparse.Namespace) -> dict:
         'build_url':      os.environ.get('BUILD_URL', '').strip(),
         **_collect_runtime_meta(args.device),
     }
+
+
+def _triggered_by() -> str:
+    """Return the explicit scheduler/Jenkins identity or the local user."""
+    for name in ('DAILY_TRIGGERED_BY', 'BUILD_USER_ID', 'BUILD_USER'):
+        if value := os.environ.get(name, '').strip():
+            return value
+    try:
+        return getpass.getuser().strip() or 'unknown'
+    except (ImportError, KeyError, OSError):
+        return 'unknown'
 
 
 def _parse_args() -> tuple[argparse.Namespace, list[str]]:

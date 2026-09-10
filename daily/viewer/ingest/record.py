@@ -110,6 +110,7 @@ class RunRecord:
     ts: datetime
     device: str | None = None
     purpose: str | None = None
+    triggered_by: str | None = None
     run_kind: str = "daily"             # 'daily' | 'pr' | 'test' | 'manual'
     description: str | None = None
     ww: str | None = None

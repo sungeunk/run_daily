@@ -252,6 +252,21 @@ def cached_phase_stats(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def cached_run_detail(run_id: str, _v: float) -> pd.DataFrame:
+    return q.run_detail(DB, run_id)
+
+
+@st.cache_data(show_spinner=False)
+def cached_run_issues(run_id: str, _v: float) -> pd.DataFrame:
+    return q.functional_issues_for_runs(DB, (run_id,))
+
+
+@st.cache_data(show_spinner=False)
+def cached_run_analysis(run_id: str, _v: float) -> pd.DataFrame:
+    return q.analysis_for_run(DB, run_id)
+
+
+@st.cache_data(show_spinner=False)
 def cached_trend_compare(machine: str, run_a: str, run_b: str,
                          history_n: int, run_kinds: tuple[str, ...],
                          models: tuple[str, ...], min_series: int,
@@ -1290,6 +1305,50 @@ def _tab_compare(cfg: dict) -> None:
     st.plotly_chart(fig, width="stretch")
 
 
+def _deep_link_detail(cfg: dict, run_id: str) -> None:
+    """Render the exact run requested by a fleet-report deep link."""
+    detail = cached_run_detail(run_id, cfg["v"])
+    if detail.empty:
+        st.error(f"Run not found: {run_id}")
+        return
+
+    row = detail.iloc[0]
+    st.subheader(f"Run detail · {row['machine']} · {row['stamp']}")
+    columns = st.columns(5)
+    columns[0].metric("Passed", int(row["passed_tests"] or 0))
+    columns[1].metric("Failed", int(row["failed_tests"] or 0))
+    columns[2].metric("Error", int(row["error_tests"] or 0))
+    columns[3].metric("Skipped", int(row["skipped_tests"] or 0))
+    columns[4].metric("OpenVINO", str(row["ov_version"] or "n/a"))
+    st.caption(
+        f"Purpose: {row['purpose'] or 'n/a'} · "
+        f"Triggered by: {row['triggered_by'] or 'unknown'} · Run ID: {run_id}"
+    )
+
+    issues = cached_run_issues(run_id, cfg["v"])
+    if issues.empty:
+        st.success("No functional issues recorded for this run.")
+    else:
+        st.error(f"Functional issues: {len(issues)}")
+        st.dataframe(
+            issues[["outcome", "nodeid", "model", "precision", "message"]],
+            width="stretch", hide_index=True,
+        )
+
+    comparisons = cached_run_analysis(run_id, cfg["v"])
+    if not comparisons.empty:
+        st.markdown("#### Performance changes")
+        shown = comparisons.copy()
+        shown["change"] = shown["improvement_pct"].apply(
+            lambda value: f"{value * 100:+.1f}%" if pd.notna(value) else "—"
+        )
+        st.dataframe(
+            shown[["verdict", "model", "precision", "in_token", "out_token",
+                   "exec_mode", "current_value", "baseline_value", "change"]],
+            width="stretch", hide_index=True,
+        )
+
+
 def main() -> None:
     st.set_page_config(layout="wide", page_title="Daily LLM Viewer")
     pd.set_option("display.float_format", "{:.2f}".format)
@@ -1303,6 +1362,11 @@ def main() -> None:
     )
 
     cfg = _sidebar()
+
+    requested_run = st.query_params.get("run_id")
+    if requested_run:
+        _deep_link_detail(cfg, str(requested_run))
+        st.divider()
 
     tabs = st.tabs(["Dashboard", "Excel", "Compare", "Exclusions"])
     with tabs[0]:

@@ -213,6 +213,40 @@ def daily_results_trend_regressions(
     return _dump(df.to_dict(orient="records"))
 
 
+@mcp.tool()
+def daily_results_daily_digest(
+    report_date: str,
+    purpose: str,
+    triggered_by: str,
+    expected_machines: list[str],
+    day_start_hour: int = 6,
+    max_functional_issues: int = 20,
+    top_regressions: int = 10,
+    top_improvements: int = 5,
+) -> str:
+    """Return one bounded cross-machine summary for a scheduled daily cycle.
+
+    The selected run is the newest complete, non-excluded run for each
+    expected machine on report_date with the exact purpose and triggered_by.
+    OpenVINO versions may differ between machines.
+    """
+    try:
+        digest = queries.daily_digest(
+            _db_path,
+            report_date=report_date,
+            purpose=purpose,
+            triggered_by=triggered_by,
+            expected_machines=expected_machines,
+            day_start_hour=day_start_hour,
+            max_functional_issues=max_functional_issues,
+            top_regressions=top_regressions,
+            top_improvements=top_improvements,
+        )
+        return _dump(digest)
+    except (ValueError, duckdb.Error) as exc:
+        return _dump({"error": str(exc)})
+
+
 _BLOCKED_KEYWORDS = (
     "ATTACH", "DETACH", "COPY", "PRAGMA", "INSTALL", "LOAD",
     "CALL", "EXPORT", "IMPORT", "SET", "CREATE", "INSERT",

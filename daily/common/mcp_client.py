@@ -12,6 +12,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class McpHttpClient:
     def __init__(self, url: str, *, timeout: float = 15.0) -> None:
         self.url = url
         self.timeout = timeout
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({})
+        )
         self._session_id: str | None = None
         self._next_id = 0
 
@@ -82,7 +86,7 @@ class McpHttpClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with self._opener.open(req, timeout=self.timeout) as resp:
                 session_id = resp.headers.get("mcp-session-id")
                 if session_id:
                     self._session_id = session_id
@@ -121,16 +125,25 @@ def _parse_response(body: str) -> dict:
     raise McpError(f"no JSON-RPC message in response: {text[:200]}")
 
 
-def run_sql(url: str, sql: str, *, timeout: float = 15.0) -> list[dict]:
-    """Run a read-only query through the `daily_results_run_sql` tool."""
+def call_json_tool(url: str, name: str, arguments: dict,
+                   *, timeout: float = 15.0) -> Any:
+    """Call an MCP tool and decode its JSON text payload."""
     with McpHttpClient(url, timeout=timeout) as client:
-        payload = client.call_tool("daily_results_run_sql", {"sql": sql})
+        payload = client.call_tool(name, arguments)
     try:
-        rows = json.loads(payload)
+        result = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise McpError(f"unparsable tool output: {payload[:200]}") from exc
-    if isinstance(rows, dict) and "error" in rows:
-        raise McpError(f"query rejected: {rows['error']}")
+    if isinstance(result, dict) and "error" in result:
+        raise McpError(f"tool {name} failed: {result['error']}")
+    return result
+
+
+def run_sql(url: str, sql: str, *, timeout: float = 15.0) -> list[dict]:
+    """Run a read-only query through the `daily_results_run_sql` tool."""
+    rows = call_json_tool(
+        url, "daily_results_run_sql", {"sql": sql}, timeout=timeout
+    )
     if not isinstance(rows, list):
-        raise McpError(f"unexpected tool output: {payload[:200]}")
+        raise McpError(f"unexpected tool output type: {type(rows).__name__}")
     return rows

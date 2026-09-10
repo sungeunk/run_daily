@@ -3,9 +3,15 @@ from __future__ import annotations
 import pytest
 
 from analysis.report import _gpu_memory_text
-from run import _adapter_name_matches
+from run import _adapter_name_matches, _triggered_by
 
 pytestmark = pytest.mark.dev_only
+
+
+def test_triggered_by_prefers_explicit_daily_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('DAILY_TRIGGERED_BY', 'scheduler')
+    monkeypatch.setenv('BUILD_USER_ID', 'jenkins-user')
+    assert _triggered_by() == 'scheduler'
 
 
 def test_adapter_name_matches_ignores_punctuation_and_suffix() -> None:

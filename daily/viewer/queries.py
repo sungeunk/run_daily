@@ -8,6 +8,7 @@ per-call connection cost is paid once per cache bucket.
 from __future__ import annotations
 
 from collections.abc import Sequence
+import datetime as dt
 from functools import lru_cache
 from pathlib import Path
 import logging
@@ -19,6 +20,7 @@ import pandas as pd
 
 from analysis.types import AnalysisConfig
 from analysis.verdict import improvement_pct, verdict_from_pct
+from viewer.ingest.loader_new import parse_triggered_by
 
 log = logging.getLogger(__name__)
 
@@ -1242,6 +1244,246 @@ def functional_issues_for_runs(db_path: Path,
             WHERE {' AND '.join(filters)}
             ORDER BY r.ts DESC, fi.nodeid
         """, params).fetchdf()
+
+
+def run_detail(db_path: Path, run_id: str) -> pd.DataFrame:
+    """Return the metadata and outcome counters for one exact run."""
+    with _read_only(db_path) as con:
+        return con.execute("""
+            SELECT run_id, machine, ts, strftime(ts, '%Y%m%d_%H%M') AS stamp,
+                   purpose, triggered_by, ov_version, device,
+                   total_tests, passed_tests, failed_tests,
+                   error_tests, skipped_tests, build_url
+            FROM runs
+            WHERE run_id = ?
+        """, [run_id]).fetchdf()
+
+
+def analysis_for_run(db_path: Path, run_id: str) -> pd.DataFrame:
+    """Return noteworthy persisted performance comparisons for one run."""
+    if "analysis_comparisons" not in _tables_for_db(db_path):
+        return pd.DataFrame()
+    with _read_only(db_path) as con:
+        return con.execute("""
+            SELECT model, precision, in_token, out_token, exec_mode, unit,
+                   current_value, baseline_value, improvement_pct,
+                   verdict, worsening_z
+            FROM analysis_comparisons
+            WHERE run_id = ? AND verdict IN ('regressed', 'improved')
+            ORDER BY CASE WHEN verdict = 'regressed' THEN 0 ELSE 1 END,
+                     improvement_pct
+        """, [run_id]).fetchdf()
+
+
+def _effective_triggered_by(row: dict, *, fallback: str) -> str:
+    """Resolve the trigger identity for a legacy row with missing metadata."""
+    value = row.get("triggered_by")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    purpose = str(row.get("purpose") or "")
+    description = str(row.get("description") or "")
+    parsed = parse_triggered_by(purpose, description)
+    if parsed:
+        return parsed
+    text = f"{purpose} {description}".strip().lower()
+    if "timer" in text and fallback == "scheduler":
+        return "scheduler"
+    return fallback if fallback else "unknown"
+
+
+def daily_digest(db_path: Path, *, report_date: str, purpose: str,
+                 triggered_by: str, expected_machines: Sequence[str],
+                 day_start_hour: int = 6,
+                 max_functional_issues: int = 20,
+                 top_regressions: int = 10,
+                 top_improvements: int = 5) -> dict:
+    """Build a bounded fleet summary for one scheduled daily cycle."""
+    selected_date = dt.date.fromisoformat(report_date)
+    if not 0 <= day_start_hour <= 23:
+        raise ValueError("day_start_hour must be between 0 and 23")
+    machines = list(dict.fromkeys(expected_machines))
+    if not machines:
+        raise ValueError("expected_machines must not be empty")
+
+    placeholders = ",".join(["?"] * len(machines))
+    with _read_only(db_path) as con:
+        selected = con.execute(f"""
+            WITH candidates AS (
+                SELECT r.*,
+                       count(*) OVER (PARTITION BY r.machine) AS candidate_count,
+                       row_number() OVER (
+                           PARTITION BY r.machine
+                           ORDER BY r.ts DESC, r.ingested_at DESC
+                       ) AS rn
+                FROM runs_with_flags r
+                WHERE CAST(r.ts - (? * INTERVAL '1 hour') AS DATE) = ?
+                  AND r.machine IN ({placeholders})
+                  AND COALESCE(r.purpose, '') = ?
+                  AND NOT r.is_partial
+                  AND NOT r.excluded
+            )
+            SELECT machine, run_id, ts, strftime(ts, '%Y%m%d_%H%M') AS stamp,
+                   ov_version, ov_build, ov_sha, purpose, triggered_by,
+                   device, total_tests, passed_tests, failed_tests,
+                   error_tests, skipped_tests, skipped_cases, expected_cases,
+                   duration_sec, report_file, rawlog_path, build_url,
+                   candidate_count
+            FROM candidates
+            WHERE rn = 1
+            ORDER BY machine
+        """, [day_start_hour, selected_date, *machines, purpose]).fetchdf()
+
+        selected_rows = selected.to_dict(orient="records")
+        selected_rows = [
+            {
+                **row,
+                "effective_triggered_by": _effective_triggered_by(row, fallback=triggered_by),
+            }
+            for row in selected_rows
+        ]
+        if selected_rows:
+            run_placeholders = ",".join("?" for _ in selected_rows)
+            series_counts = con.execute(
+                f"""
+                SELECT run_id, count(*) AS series_count
+                FROM (
+                    SELECT DISTINCT run_id, model, precision, in_token,
+                                    out_token, exec_mode, prompt_idx
+                    FROM perf
+                    WHERE run_id IN ({run_placeholders})
+                )
+                GROUP BY run_id
+                """,
+                [str(row["run_id"]) for row in selected_rows],
+            ).fetchall()
+            counts_by_run = {str(run_id): int(count) for run_id, count in series_counts}
+            for row in selected_rows:
+                success = counts_by_run.get(str(row["run_id"]), 0)
+                skipped = int(row.get("skipped_cases") or 0)
+                total = int(row.get("expected_cases") or 0)
+                row["series_total"] = total
+                row["series_skipped"] = skipped
+                row["series_success"] = success
+                row["series_failed"] = max(0, total - skipped - success)
+        selected_rows = [
+            row for row in selected_rows
+            if row["effective_triggered_by"] == triggered_by
+        ]
+        run_ids = [str(row["run_id"]) for row in selected_rows]
+        issue_rows: list[dict] = []
+        comparison_rows: list[dict] = []
+        if run_ids:
+            run_placeholders = ",".join(["?"] * len(run_ids))
+            issue_rows = con.execute(f"""
+                  SELECT r.machine, fi.run_id, fi.nodeid, fi.outcome,
+                      fi.message, fi.model, fi.precision, r.rawlog_path
+                FROM functional_issues fi
+                JOIN runs r USING (run_id)
+                WHERE fi.run_id IN ({run_placeholders})
+                ORDER BY r.machine, fi.nodeid
+                LIMIT ?
+            """, [*run_ids, max(0, int(max_functional_issues))]).fetchdf().to_dict(
+                orient="records"
+            )
+            failed_series_by_run = {
+                str(row["run_id"]): int(row.get("series_failed") or 0)
+                for row in selected_rows
+            }
+            for issue in issue_rows:
+                issue["failed_series"] = failed_series_by_run.get(
+                    str(issue.get("run_id")), 0
+                )
+            comparison_rows = con.execute(f"""
+                SELECT r.machine, a.run_id, a.model, a.precision,
+                       a.in_token, a.out_token, a.exec_mode, a.unit,
+                       a.current_value, a.baseline_value,
+                       a.improvement_pct, a.verdict, a.worsening_z
+                FROM analysis_comparisons a
+                JOIN runs r USING (run_id)
+                WHERE a.run_id IN ({run_placeholders})
+            """, run_ids).fetchdf().to_dict(orient="records")
+
+    selected_by_machine = {str(row["machine"]): row for row in selected_rows}
+    verdict_counts: dict[str, dict[str, int]] = {}
+    for row in comparison_rows:
+        machine = str(row["machine"])
+        verdict = str(row.get("verdict") or "unavailable")
+        counts = verdict_counts.setdefault(machine, {})
+        counts[verdict] = counts.get(verdict, 0) + 1
+
+    machine_rows = []
+    duplicate_machines = []
+    versions = set()
+    for machine in machines:
+        row = selected_by_machine.get(machine)
+        if row is None:
+            machine_rows.append({"machine": machine, "status": "missing"})
+            continue
+        failed = int(row.get("failed_tests") or 0)
+        errors = int(row.get("error_tests") or 0)
+        total = int(row.get("total_tests") or 0)
+        row["status"] = "failed" if failed or errors or total == 0 else "success"
+        row["performance"] = verdict_counts.get(machine, {})
+        row["performance_status"] = (
+            "available" if machine in verdict_counts else "unavailable"
+        )
+        row["viewer_query"] = f"?run_id={row['run_id']}"
+        machine_rows.append(row)
+        if row.get("ov_version"):
+            versions.add(str(row["ov_version"]))
+        if int(row.get("candidate_count") or 0) > 1:
+            duplicate_machines.append(machine)
+
+    regressions = [r for r in comparison_rows if r.get("verdict") == "regressed"]
+    improvements = [r for r in comparison_rows if r.get("verdict") == "improved"]
+    regressions.sort(key=lambda r: float(r.get("improvement_pct") or 0.0))
+    improvements.sort(key=lambda r: float(r.get("improvement_pct") or 0.0), reverse=True)
+
+    missing = [r["machine"] for r in machine_rows if r["status"] == "missing"]
+    failed = [r["machine"] for r in machine_rows if r["status"] == "failed"]
+    regressed_machines = {str(r["machine"]) for r in regressions}
+    if missing:
+        status = "incomplete"
+    elif failed:
+        status = "red"
+    elif regressed_machines:
+        status = "yellow"
+    else:
+        status = "green"
+
+    warnings = []
+    if len(versions) > 1:
+        warnings.append("Machines used different OpenVINO versions.")
+    if duplicate_machines:
+        warnings.append("Multiple eligible runs existed for: " + ", ".join(duplicate_machines))
+    unavailable = [
+        r["machine"] for r in machine_rows
+        if r.get("status") != "missing" and r.get("performance_status") == "unavailable"
+    ]
+    if unavailable:
+        warnings.append("Performance comparison unavailable for: " + ", ".join(unavailable))
+
+    return {
+        "schema_version": 1,
+        "generated_at": dt.datetime.now(dt.timezone.utc),
+        "selection": {
+            "report_date": selected_date.isoformat(),
+            "purpose": purpose,
+            "triggered_by": triggered_by,
+        },
+        "summary": {
+            "status": status,
+            "expected_machines": len(machines),
+            "completed_machines": len(selected_rows),
+            "successful_machines": sum(r.get("status") == "success" for r in machine_rows),
+            "failed_machines": len(failed),
+        },
+        "machines": machine_rows,
+        "functional_issues": issue_rows,
+        "top_regressions": regressions[:max(0, int(top_regressions))],
+        "top_improvements": improvements[:max(0, int(top_improvements))],
+        "warnings": warnings,
+    }
 
 
 # ---------------------------------------------------------------------------

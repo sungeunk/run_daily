@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS runs (
     machine        TEXT NOT NULL,
     device         TEXT,                   -- 'GPU', 'GPU.1', ...
     purpose        TEXT,
+    triggered_by   TEXT,
     -- Normalised at ingest so the viewer can exclude CI/PR runs without
     -- pattern-matching free-form purpose text at query time.
     run_kind       TEXT DEFAULT 'daily',   -- 'daily' | 'pr' | 'test' | 'manual'

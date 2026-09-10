@@ -79,6 +79,41 @@ python daily/run.py \
 을 사용. 다른 서버로 보내려면 환경변수로 오버라이드. Linux 에서는 메일
 자체는 로컬 `mail(1)` 로 발송.
 
+### 여러 머신 통합 HTML 메일
+
+중앙 `daily_results` MCP 서버에서 같은 logical date, purpose, 실행자의
+머신별 마지막 run을 조회해 메일 한 통으로 만든다. 머신별 OpenVINO 버전이
+달라도 선택에서 제외하지 않는다.
+
+example을 운영 설정으로 복사한 뒤 머신, 실행자와 수신자를 수정한다.
+`daily/fleet_report.json`은 git에서 제외된다.
+
+```bash
+cp daily/fleet_report.example.json daily/fleet_report.json
+```
+
+각 머신의 scheduled job에는 같은 실행자 식별자를 설정한다.
+
+```bash
+export DAILY_TRIGGERED_BY=scheduler
+```
+
+메일 없이 HTML만 확인:
+
+```bash
+python daily/generate_fleet_report.py --dry-run
+```
+
+메일 발송:
+
+```bash
+python daily/generate_fleet_report.py
+```
+
+특정 날짜를 다시 생성할 때만 `--date YYYY-MM-DD`를 사용한다. 이미 발송한
+날짜를 재발송하려면 `--force`를 추가한다. 자세한 설계는
+`daily/FLEET_REPORT_PLAN.md`를 참고한다.
+
 ### 메일 포맷 빠른 검증 (전체 daily 없이)
 
 Jenkins 전체 LLM daily 를 돌리지 않고, 메일 본문 포맷 회귀만 빠르게 확인하려면
