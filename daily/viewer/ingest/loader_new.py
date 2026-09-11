@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+from common.perf_series import INFER_EXEC_MODES, TOKEN_EXEC_MODES
+
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
 from .record import IssueRow, MonitorRow, PerfRow, PhaseStatRow, RunRecord
@@ -93,19 +95,29 @@ def parse_triggered_by(purpose: str | None, description: str | None = None) -> s
 # ---------------------------------------------------------------------------
 
 def _llm_rows(m: dict) -> Iterable[PerfRow]:
+    """End-to-end token latency, plus the infer-only twin when present.
+
+    ``infer_perf`` is absent on runs older than the parser that emits it, and
+    on any prompt whose llm_bench row reported -1 — hence the zip, which
+    simply stops rather than inventing a row. See ``common.perf_series`` for
+    what the two families mean and why only the first one gets a verdict.
+    """
     model = m.get("model", "")
     precision = m.get("precision", "")
     for d in m.get("data", []) or []:
-        perf = d.get("perf") or []
         in_tok = int(d.get("in_token") or 0)
         out_tok = int(d.get("out_token") or 0)
         prompt_idx = int(d.get("prompt_idx") or 0)
-        if len(perf) > 0 and perf[0] is not None:
-            yield PerfRow(model, precision, in_tok, out_tok, "1st",
-                          float(perf[0]), "ms", prompt_idx=prompt_idx)
-        if len(perf) > 1 and perf[1] is not None:
-            yield PerfRow(model, precision, in_tok, out_tok, "2nd",
-                          float(perf[1]), "ms", prompt_idx=prompt_idx)
+        series = (
+            (d.get("perf") or [], TOKEN_EXEC_MODES),
+            (d.get("infer_perf") or [], INFER_EXEC_MODES),
+        )
+        for values, exec_modes in series:
+            for value, exec_mode in zip(values, exec_modes):
+                if value is None:
+                    continue
+                yield PerfRow(model, precision, in_tok, out_tok, exec_mode,
+                              float(value), "ms", prompt_idx=prompt_idx)
 
 
 def _benchmark_app_rows(m: dict) -> Iterable[PerfRow]:

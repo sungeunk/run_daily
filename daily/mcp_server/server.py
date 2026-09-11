@@ -180,7 +180,15 @@ def daily_results_perf_history(
         precision: Precision string as stored in perf.precision, e.g. INT4.
         in_token: Input token count (perf.in_token).
         out_token: Output token count (perf.out_token).
-        exec_mode: Execution mode as stored in perf.exec_mode, e.g. 1st, 2nd.
+        exec_mode: Execution mode as stored in perf.exec_mode. '1st'/'2nd'
+            are the end-to-end token latencies and the metric the daily
+            verdict is based on. '1st-infer'/'2nd-infer' are the infer-only
+            slice of the same tokens: they isolate GPU kernel time from
+            pipeline overhead (tokenization, detokenization, multimodal
+            embedding prep) and carry no verdict. A move visible in both
+            points at the kernels; a move only in '1st'/'2nd' points at the
+            host side. On VLMs the infer series badly understates TTFT, so
+            never quote it as the model's latency.
         days: How many days of history to include.
     """
     df = queries.series_history(
@@ -278,8 +286,11 @@ def daily_results_run_sql(sql: str) -> str:
 
     Key tables: runs (one row per benchmark run: machine, ts, ov_version,
     pass/fail counts), perf (raw per-series numbers: run_id, model, precision,
-    in_token, out_token, exec_mode, value, unit), analysis_comparisons
-    (per-series verdicts vs. baseline). The connection is read-only with
+    in_token, out_token, exec_mode, value, unit; exec_mode '1st'/'2nd' are
+    the end-to-end token latencies, '1st-infer'/'2nd-infer' the infer-only
+    GPU-kernel slice of the same tokens), analysis_comparisons
+    (per-series verdicts vs. baseline — token latency only, the infer
+    series is diagnostic and never voted). The connection is read-only with
     filesystem access disabled, only a single SELECT/WITH statement is
     accepted, and at most 500 rows are returned.
 

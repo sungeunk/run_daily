@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS perf (
     precision  TEXT NOT NULL,
     in_token   INTEGER NOT NULL DEFAULT 0,
     out_token  INTEGER NOT NULL DEFAULT 0,
+    -- LLM: '1st'/'2nd' = end-to-end token latency, the daily metric and the
+    -- only family the verdict is computed from; '1st-infer'/'2nd-infer' =
+    -- the infer-only slice of the same token, stored to separate GPU kernel
+    -- time from pipeline overhead. See daily/common/perf_series.py.
     exec_mode  TEXT NOT NULL,
     value      DOUBLE,
     unit       TEXT,

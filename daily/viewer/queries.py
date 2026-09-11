@@ -20,6 +20,7 @@ import pandas as pd
 
 from analysis.types import AnalysisConfig
 from analysis.verdict import improvement_pct, verdict_from_pct
+from common.perf_series import exclude_infer_sql
 from viewer.ingest.loader_new import parse_triggered_by
 
 log = logging.getLogger(__name__)
@@ -604,11 +605,15 @@ def extra_rows(db_path: Path, run_ids: list[str],
     if not run_ids:
         return pd.DataFrame()
     placeholders = ",".join(["?"] * len(run_ids))
+    # The infer-only series is expected to have no display row — it is a
+    # diagnostic, not part of any profile — so listing it here would bury
+    # the genuinely unexpected series this check exists to surface.
     sql = f"""
     WITH m AS (
         SELECT DISTINCT model, precision, in_token, out_token, exec_mode, prompt_idx
         FROM perf
         WHERE run_id IN ({placeholders})
+          AND {exclude_infer_sql()}
     )
     SELECT m.model, m.precision, m.in_token, m.out_token, m.exec_mode
     FROM m

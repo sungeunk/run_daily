@@ -18,6 +18,8 @@ from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
 
+from common.perf_series import is_infer_exec_mode
+
 from .baseline import find_last_known_good
 from .functional import aggregate_functional
 from .remote import fetch_reference, fetch_release
@@ -183,6 +185,12 @@ def _fetch_comparison_rows(
     # today's run stopped producing it.
     for raw_key in sorted(set(current_values) | set(reference_values)):
         model, precision, in_token, out_token, exec_mode = raw_key
+        # The infer-only series is a GPU-kernel diagnostic, not the daily
+        # metric: it is stored and charted but never voted. Filtered here,
+        # after the union, so it stays out whichever side supplies it —
+        # a remote reference DB may carry it while the local run does not.
+        if is_infer_exec_mode(exec_mode):
+            continue
         key = SeriesKey(
             model=model,
             precision=precision,
