@@ -76,8 +76,29 @@ class TestRunKind:
 
     def test_triggered_by_is_inferred_from_purpose_suffix(self):
         assert q.parse_triggered_by("daily pipeline sungeunk") == "sungeunk"
-        assert q.parse_triggered_by("daily_pipeline timer") is None
+        assert q.parse_triggered_by("daily_pipeline timer") == "timer"
+        assert q.parse_triggered_by("daily2 timer") == "timer"
+        assert q.parse_triggered_by("daily_CB timer") == "timer"
+        assert q.parse_triggered_by("manual timer") is None
         assert q.parse_triggered_by("daily_CB jenkins-user") == "jenkins-user"
+
+    def test_legacy_timer_identity_is_backfilled(self, db: Path):
+        scheduled = _record(0, value=100.0)
+        scheduled.purpose = "daily_pipeline timer"
+        unrelated = _record(1, value=101.0)
+        unrelated.purpose = "manual timer"
+        _write(db, [scheduled, unrelated])
+
+        con = writer.connect(db)
+        try:
+            writer.ensure_schema(con)
+            rows = con.execute(
+                "SELECT run_id, triggered_by FROM runs ORDER BY run_id"
+            ).fetchall()
+        finally:
+            con.close()
+
+        assert rows == [("run-000", "timer"), ("run-001", None)]
 
     def test_pr_and_test_runs_are_not_daily(self):
         assert classify_run_kind("PR-1234 validation") == "pr"

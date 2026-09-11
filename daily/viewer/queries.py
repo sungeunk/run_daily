@@ -1313,39 +1313,43 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
     placeholders = ",".join(["?"] * len(machines))
     with _read_only(db_path) as con:
         selected = con.execute(f"""
-            WITH candidates AS (
-                SELECT r.*,
-                       count(*) OVER (PARTITION BY r.machine) AS candidate_count,
-                       row_number() OVER (
-                           PARTITION BY r.machine
-                           ORDER BY r.ts DESC, r.ingested_at DESC
-                       ) AS rn
-                FROM runs_with_flags r
-                WHERE CAST(r.ts - (? * INTERVAL '1 hour') AS DATE) = ?
-                  AND r.machine IN ({placeholders})
-                  AND COALESCE(r.purpose, '') = ?
-                  AND NOT r.is_partial
-                  AND NOT r.excluded
-            )
             SELECT machine, run_id, ts, strftime(ts, '%Y%m%d_%H%M') AS stamp,
                    ov_version, ov_build, ov_sha, purpose, triggered_by,
+                   description,
                    device, total_tests, passed_tests, failed_tests,
                    error_tests, skipped_tests, skipped_cases, expected_cases,
-                   duration_sec, report_file, rawlog_path, build_url,
-                   candidate_count
-            FROM candidates
-            WHERE rn = 1
-            ORDER BY machine
+                   duration_sec, report_file, rawlog_path, build_url
+            FROM runs_with_flags r
+            WHERE CAST(r.ts - (? * INTERVAL '1 hour') AS DATE) = ?
+              AND r.machine IN ({placeholders})
+              AND COALESCE(r.purpose, '') = ?
+              AND NOT r.is_partial
+              AND NOT r.excluded
+            ORDER BY machine, ts DESC, ingested_at DESC
         """, [day_start_hour, selected_date, *machines, purpose]).fetchdf()
 
-        selected_rows = selected.to_dict(orient="records")
-        selected_rows = [
+        eligible_rows = [
             {
                 **row,
                 "effective_triggered_by": _effective_triggered_by(row, fallback=triggered_by),
             }
-            for row in selected_rows
+            for row in selected.to_dict(orient="records")
         ]
+        eligible_rows = [
+            row for row in eligible_rows
+            if row["effective_triggered_by"] == triggered_by
+        ]
+        candidate_counts: dict[str, int] = {}
+        for row in eligible_rows:
+            machine = str(row["machine"])
+            candidate_counts[machine] = candidate_counts.get(machine, 0) + 1
+        selected_by_machine: dict[str, dict] = {}
+        for row in eligible_rows:
+            selected_by_machine.setdefault(str(row["machine"]), row)
+        selected_rows = list(selected_by_machine.values())
+        for row in selected_rows:
+            row["candidate_count"] = candidate_counts[str(row["machine"])]
+
         if selected_rows:
             run_placeholders = ",".join("?" for _ in selected_rows)
             series_counts = con.execute(
@@ -1370,10 +1374,6 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
                 row["series_skipped"] = skipped
                 row["series_success"] = success
                 row["series_failed"] = max(0, total - skipped - success)
-        selected_rows = [
-            row for row in selected_rows
-            if row["effective_triggered_by"] == triggered_by
-        ]
         run_ids = [str(row["run_id"]) for row in selected_rows]
         issue_rows: list[dict] = []
         comparison_rows: list[dict] = []

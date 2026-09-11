@@ -66,6 +66,12 @@ _GENERIC_TRIGGERED_BY = {
     "unknown", "jenkins", "build", "report"
 }
 
+_LEGACY_TIMER_PURPOSES = {
+    "daily2 timer",
+    "daily_cb timer",
+    "daily_pipeline timer",
+}
+
 
 def parse_triggered_by(purpose: str | None, description: str | None = None) -> str | None:
     """Recover the execution identity from free-form purpose text.
@@ -74,6 +80,10 @@ def parse_triggered_by(purpose: str | None, description: str | None = None) -> s
     the run description still ends with the launcher's identity, e.g.
     ``daily pipeline sungeunk`` or ``daily_CB jenkins-user``.
     """
+    normalized_purpose = (purpose or "").strip().lower()
+    if normalized_purpose in _LEGACY_TIMER_PURPOSES:
+        return "timer"
+
     text = " ".join(part for part in (purpose, description) if part).strip()
     if not text:
         return None

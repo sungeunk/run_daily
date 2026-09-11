@@ -90,6 +90,14 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_speed_mhz DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS run_kind TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS triggered_by TEXT",
+                """
+                UPDATE runs SET triggered_by = 'timer'
+                WHERE triggered_by IS NULL
+                    AND run_kind = 'daily'
+                    AND lower(trim(purpose)) IN (
+                            'daily2 timer', 'daily_cb timer', 'daily_pipeline timer'
+                    )
+                """,
         # Backfill only rows never classified: an ADD COLUMN default would
         # label historical PR/CI runs as 'daily' and quietly pull them into
         # every trend comparison.
