@@ -400,6 +400,8 @@ def load_summary(path: Path) -> RunRecord:
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(path)) else None,
         file_hash=file_hash(path),
         devices=devices,
+        analysis=(summary.get("analysis")
+                  if isinstance(summary.get("analysis"), dict) else None),
     )
 
     for t in summary.get("tests", []):

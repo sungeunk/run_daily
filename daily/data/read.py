@@ -1467,6 +1467,7 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
         run_ids = [str(row["run_id"]) for row in selected_rows]
         issue_rows: list[dict] = []
         comparison_rows: list[dict] = []
+        analysis_totals: list[dict] = []
         if run_ids:
             run_placeholders = ",".join(["?"] * len(run_ids))
             issue_rows = con.execute(f"""
@@ -1497,14 +1498,26 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
                 JOIN runs r USING (run_id)
                 WHERE a.run_id IN ({run_placeholders})
             """, run_ids).fetchdf().to_dict(orient="records")
+            # Verdict totals come from analysis_results, not from counting
+            # the rows above: what ingest carries across is the aggregate
+            # plus the top regressions, so counting comparisons would report
+            # only the regressed ones and call every machine 100% regressed.
+            if "analysis_results" in _tables_for_db(db_path):
+                analysis_totals = con.execute(f"""
+                    SELECT r.machine, ar.compared_count, ar.improved_count,
+                           ar.same_count, ar.regressed_count
+                    FROM analysis_results ar
+                    JOIN runs r USING (run_id)
+                    WHERE ar.run_id IN ({run_placeholders})
+                """, run_ids).fetchdf().to_dict(orient="records")
 
     selected_by_machine = {str(row["machine"]): row for row in selected_rows}
     verdict_counts: dict[str, dict[str, int]] = {}
-    for row in comparison_rows:
-        machine = str(row["machine"])
-        verdict = str(row.get("verdict") or "unavailable")
-        counts = verdict_counts.setdefault(machine, {})
-        counts[verdict] = counts.get(verdict, 0) + 1
+    for row in analysis_totals:
+        counts = {verdict: int(row.get(f"{verdict}_count") or 0)
+                  for verdict in ("improved", "same", "regressed")}
+        counts["compared"] = int(row.get("compared_count") or 0)
+        verdict_counts[str(row["machine"])] = counts
 
     machine_rows = []
     duplicate_machines = []

@@ -150,3 +150,8 @@ class RunRecord:
     monitor: list[MonitorRow] = field(default_factory=list)
     phase_stats: list[PhaseStatRow] = field(default_factory=list)
     issues: list[IssueRow] = field(default_factory=list)
+    # The verdict the benchmark machine reached, carried verbatim from the
+    # summary's ``analysis`` block. The machine is the only place with the
+    # baseline it actually compared against, so the central DB records what
+    # it decided rather than re-deciding with different history.
+    analysis: dict | None = None

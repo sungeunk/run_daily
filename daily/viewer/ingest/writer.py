@@ -375,10 +375,103 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
                 """,
                 list(issue_dedup.values()),
             )
+
+        _upsert_analysis(con, rec)
         con.commit()
     except Exception:
         con.rollback()
         raise
+
+
+def _table_exists(con: duckdb.DuckDBPyConnection, name: str) -> bool:
+    return bool(con.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'main' AND table_name = ? LIMIT 1", [name],
+    ).fetchone())
+
+
+def _upsert_analysis(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
+    """Carry the machine's own verdict into the central aggregate tables.
+
+    Analysis runs on the benchmark machine, against that machine's history,
+    and lands in two places: the machine's local DB and the summary JSON.
+    Only the summary travels, and until now ingest dropped its ``analysis``
+    block -- so ``analysis_results`` and ``analysis_comparisons`` were empty
+    on the central DB and every fleet report said "Performance comparison
+    unavailable" for all nine machines. The numbers were never missing, just
+    never carried across.
+
+    What travels is the aggregate plus the top regressions, not every series:
+    the summary has no room for the full comparison set. So the per-verdict
+    totals come from ``analysis_results`` and ``analysis_comparisons`` holds
+    only the rows worth naming. Counting the latter would under-report.
+    """
+    analysis = rec.analysis
+    if not isinstance(analysis, dict):
+        return
+    if not all(_table_exists(con, name)
+               for name in ("analysis_results", "analysis_comparisons")):
+        return
+
+    performance = analysis.get("performance") or {}
+    functional = analysis.get("functional") or {}
+    baseline = analysis.get("baseline") or {}
+
+    def _count(source: dict, key: str) -> int:
+        try:
+            return int(source.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    con.execute("DELETE FROM analysis_results WHERE run_id = ?", [rec.run_id])
+    con.execute(
+        """
+        INSERT INTO analysis_results (
+            run_id, baseline_run_id, overall_status, compared_count,
+            improved_count, same_count, regressed_count, functional_fail_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [rec.run_id,
+         baseline.get("run_id"),
+         str(analysis.get("overall_status") or "unknown"),
+         _count(performance, "compared"),
+         _count(performance, "improved"),
+         _count(performance, "same"),
+         _count(performance, "regressed"),
+         _count(functional, "failed") + _count(functional, "error")],
+    )
+
+    con.execute("DELETE FROM analysis_comparisons WHERE run_id = ?", [rec.run_id])
+    rows = []
+    for entry in analysis.get("top_regressions") or []:
+        if not isinstance(entry, dict):
+            continue
+        rows.append((
+            rec.run_id, baseline.get("run_id"),
+            entry.get("model"), entry.get("precision"),
+            int(entry.get("in_token") or 0), int(entry.get("out_token") or 0),
+            entry.get("exec_mode"), entry.get("unit"),
+            entry.get("current_value"), entry.get("baseline_value"),
+            entry.get("improvement_pct"),
+            str(entry.get("verdict") or "regressed"),
+            entry.get("history_count"), entry.get("history_median"),
+            entry.get("history_mad"), entry.get("worsening_z"),
+            entry.get("reference_source"),
+        ))
+    if rows:
+        # Dedup on the comparison PK; a malformed summary could repeat one.
+        deduped = {row[2:8]: row for row in rows}
+        con.executemany(
+            """
+            INSERT INTO analysis_comparisons (
+                run_id, baseline_run_id, model, precision, in_token,
+                out_token, exec_mode, unit, current_value, baseline_value,
+                improvement_pct, verdict, history_count, history_median,
+                history_mad, worsening_z, reference_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            list(deduped.values()),
+        )
 
 
 def load_display_profile(con: duckdb.DuckDBPyConnection, yaml_path: Path) -> int:

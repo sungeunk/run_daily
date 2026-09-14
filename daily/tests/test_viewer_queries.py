@@ -962,3 +962,83 @@ class TestFunctionalModelColumn:
 
         issues = q.functional_issues_for_runs(db, ["run-000"], models=["qwen"])
         assert "t::legacy" in set(issues["nodeid"])
+
+
+class TestAnalysisIngest:
+    """T2: the machine's verdict has to reach the central DB.
+
+    Analysis runs on the benchmark machine and lands in its local DB and in
+    the summary JSON. Only the summary travels, and ingest used to drop its
+    `analysis` block — so the central tables were empty and every fleet
+    report read "Performance comparison unavailable" for the whole fleet.
+    """
+
+    ANALYSIS = {
+        "overall_status": "yellow",
+        "baseline": {"run_id": "base-1", "stamp": "20260910_2358"},
+        "performance": {"compared": 81, "improved": 0, "same": 78,
+                        "regressed": 3, "unavailable": 76},
+        "functional": {"total": 35, "passed": 34, "failed": 1, "error": 1,
+                       "skipped": 1, "issue_count": 2},
+        "top_regressions": [
+            {"model": "gemma-2-9b-it", "precision": "INT4", "in_token": 1033,
+             "out_token": 256, "exec_mode": "1st", "unit": "ms",
+             "current_value": 779.8, "baseline_value": 655.8,
+             "improvement_pct": -0.189, "verdict": "regressed",
+             "history_count": 10, "history_median": 642.9,
+             "reference_source": "baseline"},
+        ],
+    }
+
+    def _write_with_analysis(self, db: Path, analysis):
+        rec = _record(0, value=100.0, triggered_by="timer")
+        rec.analysis = analysis
+        _write(db, [rec])
+        return rec
+
+    def test_summary_analysis_block_reaches_the_aggregate_tables(self, db: Path):
+        self._write_with_analysis(db, self.ANALYSIS)
+
+        con = writer.connect(db)
+        try:
+            result = con.execute(
+                "SELECT overall_status, baseline_run_id, compared_count, "
+                "improved_count, same_count, regressed_count, "
+                "functional_fail_count FROM analysis_results").fetchone()
+            comparisons = con.execute(
+                "SELECT model, exec_mode, verdict, reference_source "
+                "FROM analysis_comparisons").fetchall()
+        finally:
+            con.close()
+
+        assert result == ("yellow", "base-1", 81, 0, 78, 3, 2)
+        assert comparisons == [("gemma-2-9b-it", "1st", "regressed", "baseline")]
+
+    def test_digest_counts_verdicts_from_the_aggregate_not_the_top_rows(
+            self, db: Path):
+        """Only the top regressions travel, so counting analysis_comparisons
+        would report 1 regressed out of 1 and call the machine 100%
+        regressed. The totals must come from analysis_results."""
+        rec = _record(0, value=100.0, triggered_by="timer")
+        rec.purpose = "daily_pipeline timer"
+        rec.ov_build = "23107"
+        rec.total_tests = rec.passed_tests = 1
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        rec.analysis = self.ANALYSIS
+        _write(db, [rec])
+
+        digest = q.daily_digest(
+            db, ov_build="23107", purpose="daily_pipeline timer",
+            triggered_by="timer", expected_machines=[MACHINE])
+
+        perf = {r["machine"]: r for r in digest["machines"]}[MACHINE]["performance"]
+        assert perf == {"improved": 0, "same": 78, "regressed": 3,
+                        "compared": 81}
+
+    def test_a_run_without_analysis_writes_nothing(self, db: Path):
+        self._write_with_analysis(db, None)
+        con = writer.connect(db)
+        try:
+            assert con.execute("SELECT count(*) FROM analysis_results").fetchone()[0] == 0
+        finally:
+            con.close()
