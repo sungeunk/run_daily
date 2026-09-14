@@ -5,20 +5,18 @@ Improvement backlog for the daily benchmark pipeline, DuckDB store, and the
 
 All findings below were verified against the central DB
 (`/var/www/html/daily2/daily_llm_benchmark.duckdb`) and against the working
-tree at `17bbd73` on 2026-09-07 unless the item is explicitly marked
+tree at `4b83622` on 2026-09-14 unless the item is explicitly marked
 *(assumption)*. Completed items are not kept here — see the git history.
 
 Dependency order for what is left:
 
 ```
-T2 · T19  →  T4 · T5  →  T6(MCP)  →  T7 · T8  →  T9–T14 · T17 · T18
-                                                  T15 · T16 (independent)
+T19  →  T4 · T5  →  T6(MCP)  →  T7 · T8  →  T9–T14 · T17
+                                             T15 · T16 · T20–T23 (independent)
 ```
 
-`T2`'s backfill sits after `T4`/`T5` on purpose: backfilling 239 runs before
-the baseline cohort is redefined (`run_kind × trigger × partial`) means doing
-it twice. `T18` blocks on `T2` (it can only stop warning once the tables are
-populated); `T17` blocks on `T12` (it needs the health columns exposed).
+`T17` blocks on `T12` (it needs the health columns exposed). Everything else
+in P3/P4 is independent.
 
 ## Landed
 
@@ -30,7 +28,33 @@ measurement shape is now fixed (`OUT_TOKEN_LENGTH` / `BENCHMARK_ITER_NUM`),
 `perf_stats` and the two trend queries no longer see excluded or non-daily
 runs, and the dead `runs.short_run` column is gone from the live DBs.
 
-One constraint that came out of it and still shapes T19/T5: **`is_partial`
+**T2** (populate the analysis tables centrally) and **T18** (the docs that
+claimed they were populated) shipped in `a707684`, and the data layer they
+sit on landed across `e6c93e4` … `4b83622`. In short: `daily/data` is now the
+only thing that reads or writes benchmark results, ingest carries the
+machine's `analysis` block into `analysis_results` / `analysis_comparisons`
+(318 of 331 runs back-filled — 11 predate the block, 2 lost their source
+file), a validation layer records invariants instead of clamping them, and
+the legacy pickle stack is deleted. See `daily/data/README.md` for the rules
+and the guards that keep them in one place.
+
+Three things that came out of that work and are worth carrying forward:
+
+- **The fleet cycle is keyed by build, not by date.** Machines start their
+  nightly run at their own local times, so a batch straddles midnight
+  (observed 23:41 → 00:11) and no `day_start_hour` splits it the same way for
+  every machine. `ov_build` maps 1:1 to `ov_sha` across the fleet.
+- **`analysis_comparisons` carries only the top regressions**, because that
+  is all the summary JSON has room for. Per-verdict totals must come from
+  `analysis_results`; counting the comparison rows reports every machine as
+  100 % regressed.
+- **Validation found 82 historical violations** — 61 runs with perf rows but
+  no declared expectation, 21 with `success` above `expected` (LNL-03 on
+  2026-08-25 stored 81 token series while declaring it expected 4). All from
+  July/August; nothing on or after 2026-09-07. A record of the old pipeline,
+  not a live defect.
+
+One constraint that came out of the earlier work and still shapes T19/T5: **`is_partial`
 rests on `runs.test_filter` alone.** `selected_cases < expected_cases` cannot
 detect a narrowed run, because `_cases(summary)` sums only the tests pytest
 *collected* — a `-k llama` run reports the same figure for both. And
@@ -53,36 +77,14 @@ Historical rows (all 239) have no `test_filter` and cannot be reclassified.
       real to be compared against
 - [ ] Fold `--tests` into `runs.test_filter` as well, not just `-k`
 
-### T2. Populate `analysis_results` / `analysis_comparisons` in the central DB
-
-**Why:** measured **0 rows** in both tables, against 239 `runs` and 167
-`functional_issues` rows. `functional_issues` is written by the ingest writer
-(`daily/viewer/ingest/writer.py:302`), but the other two are only written by
-`analyze_run` (`daily/analysis/engine.py:155`), which the ingest path never
-calls.
-
-Consequence: every already-designed column is unusable — `verdict`,
-`within_fluctuation`, `history_median`, `history_mad`, `history_sigma`,
-`history_cv`, `worsening_z`, `reference_source`, `release_improvement_pct`.
-
-- [ ] Add a post-ingest job that runs `analyze_run` → `write_analysis_to_db`
-      against the central DB
-- [ ] `write_analysis_to_db` currently swallows failures with a `log.warning`
-      (`daily/analysis/persistence.py:88`) and also silently returns via
-      `log.debug` when a table is missing (`:75-78`). Add a counter/alert — the
-      silent skip is why this went unnoticed.
-- [ ] **Backfill the existing 239 runs — do this after T4/T5 land.** The
-      backfill bakes in whatever baseline cohort is current, so running it
-      before `trigger` / `partial` exist means redoing it.
-
----
+--
 
 ## P1 — `run_kind` classification
 
 ### T4. Make `run_kind` declared, not inferred
 
 **Why:** it is currently regex-inferred from the free-text `purpose` field
-(`daily/viewer/ingest/loader_new.py:43-58`). The `test` pattern matches
+(`daily/data/filters.py`, `classify_run_kind`). The `test` pattern matches
 `\bjenkins\b`, `\bci\b` and `\bvalidation\b`, so a daily run whose purpose
 mentions Jenkins is misclassified.
 
@@ -172,7 +174,7 @@ schedule never produces.
       join every time.
 - [ ] **T10.** Add `daily_results_compare_builds(machine, ov_build_a, ov_build_b)`.
       There is **no build-scoped comparison tool at all**; `trend_regressions`
-      is time-window based (`daily/viewer/queries.py:672`) and cannot answer
+      is time-window based (`daily/data/read.py`) and cannot answer
       "what broke in this build?".
 - [ ] **T11.** Add `daily_results_functional_issues(build=..., machine=...)` —
       currently only reachable through hand-written `run_sql`.
@@ -182,12 +184,11 @@ schedule never produces.
       runs: RAPTOR-ELLY `gpu_clock_ratio = 0.18`, MTL-01
       `max_throttle_ratio = 0.83`.
 - [ ] **T13.** Make the 500-row cap in `run_sql` a tool argument
-      (`daily/mcp_server/server.py:26`, `MAX_ROWS`; enforced at `:85` and
-      `:138`) and state "aggregate first" in the docstring. A single model over
+      (`daily/mcp_server/server.py`, `MAX_ROWS`) and state "aggregate first" in the docstring. A single model over
       10 days is 516 raw rows, so it always truncates.
 - [ ] **T14.** Rename `pct_diff`. The value is the fraction
-      `(value - win_median) / win_median` (`daily/viewer/queries.py:653`,
-      `daily/viewer/schema.sql:413`), not a percentage, so a 190 % regression
+      `(value - win_median) / win_median` (`daily/data/read.py`,
+      `daily/data/schema.sql`), not a percentage, so a 190 % regression
       is reported as `1.9`. Rename to `ratio_diff` or multiply by 100. Same
       applies to `cv` = `win_mad / win_median`.
       *Low risk, can land early: those two definitions are the only sites in
@@ -210,13 +211,3 @@ schedule never produces.
 - [ ] **T17.** Automatically exclude or flag (`degraded`) runs whose
       `throttled_sample_ratio` / `gpu_clock_ratio` cross a threshold before
       using them in perf comparisons. Blocked on T12.
-- [ ] **T18.** Fix the docs. Both the `query-daily-results` SKILL.md and the
-      `run_sql` docstring (`daily/mcp_server/server.py:247-250`) claim
-      "`analysis_comparisons` — per-series verdicts vs. baseline, already
-      computed at ingest time". This is **not true** for the current DB (0
-      rows). Replace with a warning until T2 lands.
-      - The SKILL.md line lives in the **`openvino-gpu-plugin-skills` repo**,
-        not here: `.github/skills/query-daily-results/SKILL.md:40`. That path
-        is the source of truth — `.claude/skills/**` are generated shims, so
-        edit `.github/skills/` and then run
-        `.github/scripts/sync-claude-skills.sh`.

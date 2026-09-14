@@ -79,22 +79,6 @@ def _has_column(db_path: Path, relation: str, column: str) -> bool:
     return column in _cached_columns(str(db_path), relation, stat.st_mtime_ns)
 
 
-def _fill_missing_verdicts(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill missing verdicts with the canonical analysis threshold logic using vectorization."""
-    if df.empty:
-        return df
-    if "verdict" not in df.columns:
-        df["verdict"] = pd.NA
-
-    # Use verdict_from_pct() vectorized via apply on missing rows only (idiomatic pandas)
-    mask_missing = df["verdict"].isna()
-    if mask_missing.any():
-        df.loc[mask_missing, "verdict"] = df.loc[mask_missing, "improvement_pct"].apply(
-            lambda pct: verdict_from_pct(None if pd.isna(pct) else float(pct), _COMPARE_CONFIG)
-        )
-    return df
-
-
 def _apply_fallback_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """Derive improvement_pct/verdict for raw fallback rows via canonical helpers."""
     if df.empty:
@@ -913,41 +897,36 @@ def trend_regressions(db_path: Path, machine: str,
 # Run-to-run comparison
 # ---------------------------------------------------------------------------
 
+#: analysis_comparisons only ever names the top regressions (see
+#: ingest/writer.py:_upsert_analysis), so it can enrich a series the fallback
+#: join already found but must never be the sole source of the row list --
+#: that would silently drop every improved/unchanged series whenever the pair
+#: happens to have a stored regression.
+_STORED_HISTORY_COLUMNS = (
+    "history_count", "history_median", "history_mad", "history_sigma",
+    "history_cv", "worsening_z", "reference_source", "within_fluctuation",
+)
+
+
 def fetch_run_comparison(
     db_path: Path,
     run_id_a: str,
     run_id_b: str,
 ) -> pd.DataFrame:
-    """Compare two runs at the series level using analysis_comparisons.
+    """Compare two runs at the series level, complete, enriched with analysis.
 
-    Returns rows for run_id_a enriched with matching rows from run_id_b.
-    Falls back to a direct perf join when analysis_comparisons lacks one run.
+    Every series either run reports comes from a direct ``perf`` join, so the
+    result is never a subset. Where ``analysis_comparisons`` has a stored row
+    for a series, its verdict/improvement_pct/history context -- computed
+    once by the analysis engine and not re-derivable from a join -- overrides
+    the freshly computed ones; series it does not name keep the fallback
+    values.
     """
+    keys = ["model", "precision", "in_token", "out_token", "exec_mode"]
     with _read_only(db_path) as con:
-        if "analysis_comparisons" in _tables_for_db(db_path):
-            # Try to use pre-computed comparisons (run_a is current, run_b is baseline).
-            df = con.execute("""
-                SELECT
-                    ac.model,
-                    ac.precision,
-                    ac.in_token,
-                    ac.out_token,
-                    ac.exec_mode,
-                    ac.unit,
-                    ac.current_value  AS value_a,
-                    ac.baseline_value AS value_b,
-                    ac.improvement_pct,
-                    ac.verdict
-                FROM analysis_comparisons ac
-                WHERE ac.run_id          = ?
-                  AND ac.baseline_run_id = ?
-                ORDER BY model, precision, in_token, out_token, exec_mode
-            """, [run_id_a, run_id_b]).fetchdf()
-            if not df.empty:
-                return _fill_missing_verdicts(df)
-
-        # Fallback: direct perf join on series key.
         df = con.execute("""
+            WITH a AS (SELECT * FROM perf WHERE run_id = ?),
+                 b AS (SELECT * FROM perf WHERE run_id = ?)
             SELECT
                 COALESCE(a.model,     b.model)     AS model,
                 COALESCE(a.precision, b.precision) AS precision,
@@ -959,19 +938,40 @@ def fetch_run_comparison(
                 b.unit AS baseline_unit,
                 a.value AS value_a,
                 b.value AS value_b
-            FROM perf a
-            FULL OUTER JOIN perf b
+            FROM a
+            FULL OUTER JOIN b
               ON a.model     = b.model
              AND a.precision = b.precision
              AND a.in_token  = b.in_token
              AND a.out_token = b.out_token
              AND a.exec_mode = b.exec_mode
-             AND a.run_id    = ?
-             AND b.run_id    = ?
-            WHERE a.run_id = ? OR b.run_id = ?
             ORDER BY model, precision, in_token, out_token, exec_mode
-        """, [run_id_a, run_id_b, run_id_a, run_id_b]).fetchdf()
-        return _apply_fallback_metrics(df)
+        """, [run_id_a, run_id_b]).fetchdf()
+        df = _apply_fallback_metrics(df)
+        if df.empty or "analysis_comparisons" not in _tables_for_db(db_path):
+            return df
+
+        history_cols = [c for c in _STORED_HISTORY_COLUMNS
+                        if _has_column(db_path, "analysis_comparisons", c)]
+        extra_select = "".join(f", ac.{c}" for c in history_cols)
+        stored = con.execute(f"""
+            SELECT ac.model, ac.precision, ac.in_token, ac.out_token,
+                   ac.exec_mode,
+                   ac.improvement_pct AS stored_improvement_pct,
+                   ac.verdict AS stored_verdict{extra_select}
+            FROM analysis_comparisons ac
+            WHERE ac.run_id = ? AND ac.baseline_run_id = ?
+        """, [run_id_a, run_id_b]).fetchdf()
+
+    if stored.empty:
+        return df
+
+    # validate="one_to_one": both sides are already unique per series key.
+    merged = df.merge(stored, on=keys, how="left", validate="one_to_one")
+    has_stored = merged["stored_verdict"].notna()
+    merged.loc[has_stored, "improvement_pct"] = merged.loc[has_stored, "stored_improvement_pct"]
+    merged.loc[has_stored, "verdict"] = merged.loc[has_stored, "stored_verdict"]
+    return merged.drop(columns=["stored_improvement_pct", "stored_verdict"])
 
 
 # ---------------------------------------------------------------------------

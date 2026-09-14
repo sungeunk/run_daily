@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+import pandas as pd
 
 pytestmark = pytest.mark.dev_only
 
@@ -385,6 +386,42 @@ class TestTrendAwareCompare:
         df = q.compare_runs_with_trend(db, MACHINE, "run-010", "run-009",
                                        history_runs_n=10)
         assert df.iloc[0]["trend_context"] in {"within_history", "unknown"}
+
+    def test_stored_regression_does_not_hide_other_series(self, db: Path):
+        """analysis_comparisons only ever names the top regressions, so a
+        stored row for one model must not make fetch_run_comparison return
+        only that model -- every series either run reports has to be there,
+        with the stored row overriding its own verdict/history only."""
+        baseline = _record(0, value=655.8, model="gemma-2-9b-it")
+        baseline.perf.append(PerfRow("llama", "INT4", 32, 128, "2nd", 100.0, "ms"))
+        current = _record(1, value=779.8, model="gemma-2-9b-it")
+        current.perf.append(PerfRow("llama", "INT4", 32, 128, "2nd", 90.0, "ms"))
+        current.analysis = {
+            "overall_status": "yellow",
+            "baseline": {"run_id": baseline.run_id},
+            "performance": {"compared": 2, "improved": 1, "same": 0,
+                           "regressed": 1},
+            "top_regressions": [
+                {"model": "gemma-2-9b-it", "precision": "INT4", "in_token": 32,
+                 "out_token": 128, "exec_mode": "2nd", "unit": "ms",
+                 "current_value": 779.8, "baseline_value": 655.8,
+                 "improvement_pct": -0.189, "verdict": "regressed",
+                 "history_count": 10, "history_median": 642.9,
+                 "reference_source": "baseline"},
+            ],
+        }
+        _write(db, [baseline, current])
+
+        df = q.fetch_run_comparison(db, current.run_id, baseline.run_id)
+
+        assert set(df["model"]) == {"gemma-2-9b-it", "llama"}
+        regressed = df[df["model"] == "gemma-2-9b-it"].iloc[0]
+        assert regressed["verdict"] == "regressed"
+        assert regressed["history_median"] == pytest.approx(642.9)
+        assert regressed["reference_source"] == "baseline"
+        improved = df[df["model"] == "llama"].iloc[0]
+        assert improved["value_a"] == 90.0 and improved["value_b"] == 100.0
+        assert pd.isna(improved["reference_source"])
 
 
 class TestMachineState:
