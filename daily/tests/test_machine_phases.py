@@ -19,9 +19,9 @@ import duckdb  # noqa: E402
 
 from common.machine_monitor import summarize_window  # noqa: E402
 from parsers.llm_benchmark import phase_windows  # noqa: E402
-from viewer.ingest import writer  # noqa: E402
-from viewer.ingest.loader_new import _phase_rows  # noqa: E402
-from viewer.ingest.record import RunRecord  # noqa: E402
+from data.ingest import writer  # noqa: E402
+from data.ingest.loader_new import _phase_rows  # noqa: E402
+from data.ingest.record import RunRecord  # noqa: E402
 
 BASE = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
@@ -128,7 +128,7 @@ def test_phase_rows_skip_unknown_phase_names() -> None:
 
 
 def test_phase_stats_are_ingested_and_join_perf_one_to_one(tmp_path: Path) -> None:
-    from viewer.ingest.record import PerfRow, PhaseStatRow
+    from data.ingest.record import PerfRow, PhaseStatRow
 
     rec = RunRecord(run_id='run-1', source_format='new',
                     report_file='daily.1.summary.json', machine='TEST-01',

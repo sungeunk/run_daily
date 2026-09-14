@@ -115,8 +115,8 @@ def _ingest_from_root(*, root: Path, db_path: Path) -> tuple[int, int, int, str 
 
     Returns tuple: (candidates, added, skipped, latest_run_id)
     """
-    from viewer.ingest.cli import discover, ingest_files
-    from viewer.ingest.loader_new import load_summary
+    from data.ingest.cli import discover, ingest_files
+    from data.ingest.loader_new import load_summary
 
     if not root.exists() or not root.is_dir():
         return (0, 0, 0, None)
@@ -478,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from analysis.report import render_analysis_html
     from analysis.types import AnalysisConfig
-    from viewer.ingest.writer import connect
+    from data.ingest.writer import connect
 
     cfg = AnalysisConfig(
         history_window=args.history_window,

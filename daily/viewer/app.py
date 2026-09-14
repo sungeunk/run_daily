@@ -5,7 +5,7 @@ Run with::
 
     streamlit run daily/viewer/app.py -- --db daily_output/<machine>/bench.duckdb
 
-The DB is built by ``python -m viewer.ingest.cli``. The sidebar can refresh
+The DB is built by ``python -m data.ingest.cli``. The sidebar can refresh
 the configured daily DB by running the local ingestion script.
 
 Tabs
@@ -46,6 +46,7 @@ if str(_HERE.parent) not in sys.path:
     sys.path.insert(0, str(_HERE.parent))
 
 from data import read as q  # noqa: E402
+from data import write as w  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config / connection
@@ -402,7 +403,7 @@ def _sidebar() -> dict:
 
     all_machines = cached_machines(v)
     if not all_machines:
-        st.sidebar.warning("No runs in DB yet — run `viewer.ingest.cli` first.")
+        st.sidebar.warning("No runs in DB yet — run `data.ingest.cli` first.")
         st.stop()
 
     profile_options = cached_profiles(v) or ["default"]
@@ -1039,7 +1040,7 @@ def _tab_exclusions(cfg: dict) -> None:
         if st.button("Exclude selected", disabled=not sel):
             for i in sel:
                 row = runs.iloc[i]
-                q.add_exclusion(DB, row["run_id"], row["machine"],
+                w.add_exclusion(DB, row["run_id"], row["machine"],
                                 row["stamp"], reason)
             st.cache_data.clear()
             st.rerun()
@@ -1062,7 +1063,7 @@ def _tab_exclusions(cfg: dict) -> None:
     sel2 = event2.selection.rows if event2 and event2.selection else []
     if st.button("Restore selected", disabled=not sel2):
         for i in sel2:
-            q.remove_exclusion(DB, excluded.iloc[i]["run_id"])
+            w.remove_exclusion(DB, excluded.iloc[i]["run_id"])
         st.cache_data.clear()
         st.rerun()
 

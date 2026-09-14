@@ -16,9 +16,10 @@ if str(DAILY_DIR) not in sys.path:
 
 from analysis.functional import aggregate_functional  # noqa: E402
 from data import read as q  # noqa: E402
-from viewer.ingest import writer  # noqa: E402
-from viewer.ingest.loader_new import _cases, _skipped_cases, classify_run_kind  # noqa: E402
-from viewer.ingest.record import IssueRow, MonitorRow, PerfRow, RunRecord  # noqa: E402
+from data import write as w  # noqa: E402
+from data.ingest import writer  # noqa: E402
+from data.ingest.loader_new import _cases, _skipped_cases, classify_run_kind  # noqa: E402
+from data.ingest.record import IssueRow, MonitorRow, PerfRow, RunRecord  # noqa: E402
 
 MACHINE = "TEST-01"
 BASE_TS = datetime(2026, 1, 1, 12, 0)
@@ -766,7 +767,7 @@ class TestShortRunColumnIsGone:
 class TestExclusionsReachTheBaseline:
     def test_excluded_run_is_dropped_from_perf_stats(self, db: Path):
         _write(db, [_record(i, value=100.0) for i in range(3)])
-        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        w.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
         with q._read_only(db) as con:
             ids = {r[0] for r in con.execute(
                 "SELECT run_id FROM perf_stats").fetchall()}
@@ -774,7 +775,7 @@ class TestExclusionsReachTheBaseline:
 
     def test_excluded_run_is_not_the_machines_latest(self, db: Path):
         _write(db, [_record(i, value=100.0) for i in range(2)])
-        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        w.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
         with q._read_only(db) as con:
             latest = con.execute(
                 "SELECT run_id FROM latest_run_per_machine").fetchone()[0]
@@ -782,7 +783,7 @@ class TestExclusionsReachTheBaseline:
 
     def test_excluded_run_is_dropped_from_series_history(self, db: Path):
         _write(db, [_record(i, value=100.0) for i in range(3)])
-        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        w.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
         hist = q.series_history(db, MACHINE, "llama", "INT4", 32, 128, "2nd",
                                 days=100_000)
         assert len(hist) == 2
@@ -790,13 +791,13 @@ class TestExclusionsReachTheBaseline:
     def test_a_reason_is_required(self, db: Path):
         _write(db, [_record(0, value=100.0)])
         with pytest.raises(ValueError, match="reason is required"):
-            q.add_exclusion(db, "run-000", MACHINE, "20260101_1200", "   ")
+            w.add_exclusion(db, "run-000", MACHINE, "20260101_1200", "   ")
 
     def test_explicit_run_picker_still_sees_an_excluded_run(self, db: Path):
         # perf_flat exposes `excluded` as a column instead of filtering it, so
         # the Excel tab can still select an excluded run on purpose.
         _write(db, [_record(i, value=100.0) for i in range(2)])
-        q.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
+        w.add_exclusion(db, "run-001", MACHINE, "20260102_1200", "bad build")
         rows = q.perf_for_runs(db, ["run-001"])
         assert len(rows) == 1
 
@@ -850,7 +851,7 @@ class TestTrendGuards:
 
     def test_trend_regressions_excludes_excluded_runs(self, db: Path):
         _write(db, [_record(i, value=100.0) for i in range(5)])
-        q.add_exclusion(db, "run-002", MACHINE, "20260103_1200", "bad build")
+        w.add_exclusion(db, "run-002", MACHINE, "20260103_1200", "bad build")
 
         trend = q.trend_regressions(db, MACHINE, recent_days=100_000,
                                     baseline_days=100_000)

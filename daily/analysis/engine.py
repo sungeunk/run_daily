@@ -98,8 +98,8 @@ def analyze_run(
     functional = aggregate_functional(summary)
 
     # --- ingest + baseline selection ---
-    from viewer.ingest.loader_new import load_summary
-    from viewer.ingest.writer import connect, ensure_schema, upsert_run
+    from data.ingest.loader_new import load_summary
+    from data.ingest.writer import connect, ensure_schema, upsert_run
 
     rec = load_summary(summary_json)
 

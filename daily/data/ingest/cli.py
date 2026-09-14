@@ -3,10 +3,10 @@
 Usage::
 
     # Scan a directory and ingest whatever it finds.
-    python -m viewer.ingest.cli --root /var/www/html/daily --db bench.duckdb
+    python -m data.ingest.cli --root /var/www/html/daily --db bench.duckdb
 
     # Single file.
-    python -m viewer.ingest.cli --input output/daily.20260421_2234.summary.json
+    python -m data.ingest.cli --input output/daily.20260421_2234.summary.json
 
 Files already present in ``runs.file_hash`` are skipped unless --force.
 """

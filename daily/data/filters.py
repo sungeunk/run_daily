@@ -203,7 +203,7 @@ class RunScope:
 #
 # Lives here rather than in the ingest loader because the identity a run
 # declares and the identity a query filters on have to be the same idea.
-# queries.py already reached across into viewer.ingest.loader_new for
+# queries.py already reached across into data.ingest.loader_new for
 # parse_triggered_by; with the loader as the owner, data would have had to
 # import its own consumer.
 

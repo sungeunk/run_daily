@@ -25,9 +25,9 @@ from analysis.engine import _fetch_comparison_rows  # noqa: E402
 from analysis.types import AnalysisConfig  # noqa: E402
 from data import is_infer_exec_mode  # noqa: E402
 from data import read as q  # noqa: E402
-from viewer.ingest import writer  # noqa: E402
-from viewer.ingest.loader_new import _llm_rows  # noqa: E402
-from viewer.ingest.record import RunRecord  # noqa: E402
+from data.ingest import writer  # noqa: E402
+from data.ingest.loader_new import _llm_rows  # noqa: E402
+from data.ingest.record import RunRecord  # noqa: E402
 
 
 def _metrics(**data) -> dict:

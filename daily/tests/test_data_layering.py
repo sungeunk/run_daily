@@ -82,17 +82,18 @@ def test_perf_rows_are_not_counted_by_hand():
 
 
 def test_seconds_to_milliseconds_lives_in_one_place():
-    # perf_with_buckets still spells the conversion out in SQL, and a view
-    # cannot import Python. Collapsing the view and data.series onto one
-    # source is phase 2; until then the guard's job is to stop a *third*
-    # copy appearing, not to pretend this one is gone.
-    known_remaining = {"viewer/schema.sql"}
+    """Outside data, nobody converts units by hand.
+
+    data/schema.sql still spells the rule out in the perf_with_buckets view
+    because a view cannot import Python; collapsing that onto data.series is
+    the one remaining copy, and it is inside the layer that owns the rule.
+    """
     pattern = re.compile(r"value\s*\*\s*1000|\*\s*1000\.0\s*(?:#|$)")
     offenders = {str(path.relative_to(DAILY_DIR))
                  for path, text in _sql_and_python_files() if pattern.search(text)}
-    assert not (offenders - known_remaining), (
+    assert not offenders, (
         "use data.series.normalize_value()/normalize_value_sql() in: "
-        f"{sorted(offenders - known_remaining)}")
+        f"{sorted(offenders)}")
 
 
 def test_only_the_data_layer_and_the_monitor_open_duckdb():
@@ -103,11 +104,9 @@ def test_only_the_data_layer_and_the_monitor_open_duckdb():
     they own a connection's lifetime rather than a query's meaning — they are
     the next thing to move behind data.read/data.write.
     """
-    # run.py's _baseline_meta_from_db is the last ad-hoc reader and
-    # ingest/writer owns the write connection; both move into data in
-    # phase 3.
-    allowed = {"common/monitor_parquet.py", "mcp_server/server.py",
-               "viewer/ingest/writer.py", "run.py"}
+    # The MCP server owns a connection's lifetime rather than a query's
+    # meaning, so it stays. Nothing else outside the layer connects.
+    allowed = {"common/monitor_parquet.py", "mcp_server/server.py"}
     offenders = [
         str(path.relative_to(DAILY_DIR))
         for path, text in _python_files()

@@ -27,4 +27,4 @@ conda activate daily.py312
 
 export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}/home/sungeunk/repo/run_daily/daily"
 
-python -m viewer.ingest.cli --root /var/www/html/daily2 --db /var/www/html/daily2/daily_llm_benchmark.duckdb --force
+python -m data.ingest.cli --root /var/www/html/daily2 --db /var/www/html/daily2/daily_llm_benchmark.duckdb --force

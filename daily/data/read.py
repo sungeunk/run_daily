@@ -385,6 +385,33 @@ def perf_for_runs(db_path: Path, run_ids: Sequence[str], *,
         """, params).fetchdf()
 
 
+#: Rig details a report quotes when describing the baseline it compared
+#: against. Not the code under test -- a change here explains a difference
+#: without being a regression.
+RIG_META_COLUMNS = ("machine", "purpose", "ov_version", "host_info",
+                    "host_memory_size_gb", "host_memory_speed_mhz",
+                    "gpu_info", "gpu_driver_version",
+                    "gpu_dedicated_memory_mb", "gpu_shared_memory_mb")
+
+
+def rig_meta_for_stamp(db_path: Path, stamp: str) -> dict:
+    """Rig details of the newest run with ``stamp``, or ``{}`` if unavailable.
+
+    Swallows every failure on purpose: this decorates a report header, and a
+    missing or half-migrated DB must not take the report down with it.
+    """
+    try:
+        with _read_only(db_path) as con:
+            row = con.execute(
+                f"SELECT {', '.join(RIG_META_COLUMNS)} FROM runs "
+                "WHERE strftime(ts, '%Y%m%d_%H%M') = ? "
+                "ORDER BY ts DESC LIMIT 1", [stamp],
+            ).fetchone()
+    except Exception:  # noqa: BLE001 -- see docstring
+        return {}
+    return {k: v for k, v in zip(RIG_META_COLUMNS, row or ()) if v is not None}
+
+
 def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
     """Return runs metadata with one row per run, newest first."""
     where = "" if machine is None else "WHERE machine = ?"
@@ -412,24 +439,12 @@ def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Manual run exclusions (viewer's Exclusions tab)
+# Manual run exclusions (viewer's Exclusions tab) -- read side
 #
-# Unlike every other function in this module these mutate the DB, so they
-# open a short-lived read-write connection instead of ``_read_only`` — the
-# ingest writer is the only other thing that opens the file for writing, and
-# it never runs concurrently with a user clicking a button in the UI.
+# The mutating half lives in data.write: a module named `read` that
+# quietly opened a read-write connection was how the layering blurred in
+# the first place.
 # ---------------------------------------------------------------------------
-
-_RUN_EXCLUSIONS_DDL = """
-    CREATE TABLE IF NOT EXISTS run_exclusions (
-        run_id      TEXT PRIMARY KEY,
-        machine     TEXT NOT NULL,
-        stamp       TEXT NOT NULL,
-        reason      TEXT,
-        excluded_at TIMESTAMP DEFAULT now()
-    )
-"""
-
 
 def list_exclusions(db_path: Path) -> pd.DataFrame:
     """Currently-excluded runs across all machines, newest first."""
@@ -442,39 +457,6 @@ def list_exclusions(db_path: Path) -> pd.DataFrame:
             FROM run_exclusions
             ORDER BY excluded_at DESC
         """).fetchdf()
-
-
-def add_exclusion(db_path: Path, run_id: str, machine: str, stamp: str,
-                  reason: str) -> None:
-    """Hide ``run_id`` from every cohort-based analysis until restored.
-
-    ``reason`` is mandatory. Exclusions now feed the rolling baseline
-    (``perf_stats``) and the dashboard's latest-run pick, so an exclusion
-    without a recorded reason leaves a silently shifted baseline that nobody
-    can audit later. Enforced here rather than as a NOT NULL column because
-    the DDL is ``IF NOT EXISTS`` and would not migrate existing rows.
-    """
-    reason = (reason or "").strip()
-    if not reason:
-        raise ValueError(
-            f"a reason is required to exclude run {run_id!r} "
-            "(it is the only audit trail for a shifted baseline)"
-        )
-    with duckdb.connect(str(db_path), read_only=False) as con:
-        con.execute(_RUN_EXCLUSIONS_DDL)
-        con.execute("""
-            INSERT INTO run_exclusions (run_id, machine, stamp, reason)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (run_id) DO UPDATE SET
-                reason = excluded.reason, excluded_at = now()
-        """, [run_id, machine, stamp, reason])
-
-
-def remove_exclusion(db_path: Path, run_id: str) -> None:
-    """Restore a previously-excluded run to normal analysis."""
-    with duckdb.connect(str(db_path), read_only=False) as con:
-        con.execute(_RUN_EXCLUSIONS_DDL)
-        con.execute("DELETE FROM run_exclusions WHERE run_id = ?", [run_id])
 
 
 # ---------------------------------------------------------------------------

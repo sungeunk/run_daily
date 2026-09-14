@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import duckdb
 
-    from viewer.ingest.record import RunRecord
+    from data.ingest.record import RunRecord
 
 from .types import AnalysisConfig, BaselineInfo
 

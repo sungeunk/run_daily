@@ -612,21 +612,8 @@ def _baseline_meta(root: Path, stamp: str | None, db_path: Path) -> dict:
 
 
 def _baseline_meta_from_db(db_path: Path, stamp: str) -> dict:
-    columns = ('machine', 'purpose', 'ov_version', 'host_info',
-               'host_memory_size_gb', 'host_memory_speed_mhz',
-               'gpu_info', 'gpu_driver_version',
-               'gpu_dedicated_memory_mb', 'gpu_shared_memory_mb')
-    try:
-        import duckdb
-        with duckdb.connect(str(db_path), read_only=True) as con:
-            row = con.execute(
-                f"SELECT {', '.join(columns)} FROM runs "
-                "WHERE strftime(ts, '%Y%m%d_%H%M') = ? ORDER BY ts DESC LIMIT 1",
-                [stamp],
-            ).fetchone()
-    except Exception:  # noqa: BLE001 — the report must not fail on a missing DB
-        return {}
-    return {k: v for k, v in zip(columns, row or ()) if v is not None}
+    from data.read import rig_meta_for_stamp  # noqa: PLC0415
+    return rig_meta_for_stamp(db_path, stamp)
 
 
 def _analysis_config(args: argparse.Namespace):
@@ -669,7 +656,7 @@ def _run_analysis(html_report: Path, summary_json: Path, root: Path,
                   analysis_config=None) -> Path | None:
     """Best-effort: ingest the output tree, then run analysis and write the HTML report."""
     try:
-        from viewer.ingest.cli import discover, ingest_files
+        from data.ingest.cli import discover, ingest_files
         from analysis.engine import analyze_run
         from analysis.report import write_analysis_html
         from analysis.persistence import write_analysis_to_summary
@@ -712,7 +699,7 @@ def _convert_monitor_parquet(output_dir: Path, root: Path, stamp: str, meta: dic
     recoverable and ``metrics.machine.file`` keeps resolving.
     """
     from common.monitor_parquet import convert_run, prune_jsonl
-    from viewer.ingest._common import parse_stamp_from_name, run_id_of
+    from data.ingest._common import parse_stamp_from_name, run_id_of
 
     machine = meta.get('machine') or 'unknown'
     ts = parse_stamp_from_name(summary_json.name)
