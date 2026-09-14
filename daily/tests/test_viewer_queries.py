@@ -121,59 +121,106 @@ class TestRunKind:
 
 
 class TestDailyDigest:
-    def test_selects_latest_matching_run_per_machine_even_with_different_versions(
-            self, db: Path):
-        older = _record(0, value=100.0, triggered_by="scheduler")
-        older.purpose = "daily_pipeline timer"
-        older.ov_version = "2026.4"
-        newer = _record(0, value=101.0, triggered_by="scheduler")
-        newer.run_id = "run-newer"
-        newer.ts += timedelta(hours=1)
-        newer.purpose = "daily_pipeline timer"
-        newer.ov_version = "2026.5"
-        other = _record(0, value=102.0, triggered_by="scheduler")
-        other.run_id = "run-other"
-        other.machine = "TEST-02"
-        other.ts += timedelta(days=1, hours=-11)
-        other.purpose = "daily_pipeline timer"
-        other.ov_version = "2026.6"
-        ignored = _record(0, value=999.0, triggered_by="someone-else")
-        ignored.run_id = "run-ignored"
-        ignored.ts += timedelta(hours=2)
-        ignored.purpose = "daily_pipeline timer"
-        for rec in (older, newer, other, ignored):
-            rec.total_tests = rec.passed_tests = 1
-            rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
-        _write(db, [older, newer, other, ignored])
+    @staticmethod
+    def _cycle_run(run_id: str, machine: str, ts, build: str,
+                   *, triggered_by: str = "timer"):
+        rec = _record(0, value=100.0, triggered_by=triggered_by)
+        rec.run_id = run_id
+        rec.machine = machine
+        rec.ts = ts
+        rec.ov_build = build
+        rec.ov_version = f"2026.5.0-{build}-abc"
+        rec.purpose = "daily_pipeline timer"
+        rec.total_tests = rec.passed_tests = 1
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        return rec
+
+    def test_groups_a_build_across_midnight_and_keeps_the_newest_run(self, db: Path):
+        """Machines start their nightly run at their own local times, so the
+        batch straddles midnight. A calendar date splits it; the build does
+        not, and within the build only the newest run per machine counts."""
+        stale = self._cycle_run("run-stale", MACHINE,
+                                datetime(2026, 1, 1, 17, 30), "23107")
+        late = self._cycle_run("run-late", MACHINE,
+                               datetime(2026, 1, 1, 23, 50), "23107")
+        # Next calendar day, same nightly batch.
+        past_midnight = self._cycle_run("run-midnight", "TEST-02",
+                                        datetime(2026, 1, 2, 0, 11), "23107")
+        next_build = self._cycle_run("run-next", MACHINE,
+                                     datetime(2026, 1, 2, 23, 50), "23120")
+        other_trigger = self._cycle_run("run-manual", "TEST-02",
+                                        datetime(2026, 1, 2, 1, 0), "23107",
+                                        triggered_by="someone-else")
+        _write(db, [stale, late, past_midnight, next_build, other_trigger])
 
         digest = q.daily_digest(
             db,
-            report_date="2026-01-01",
+            ov_build="23107",
             purpose="daily_pipeline timer",
-            triggered_by="scheduler",
+            triggered_by="timer",
             expected_machines=[MACHINE, "TEST-02", "MISSING"],
-            day_start_hour=6,
         )
 
+        assert digest["selection"]["ov_build"] == "23107"
         assert digest["summary"]["status"] == "incomplete"
         assert digest["summary"]["completed_machines"] == 2
         rows = {row["machine"]: row for row in digest["machines"]}
-        assert rows[MACHINE]["run_id"] == "run-newer"
-        assert rows[MACHINE]["ov_version"] == "2026.5"
-        assert rows["TEST-02"]["ov_version"] == "2026.6"
+        # Newest of the two runs this machine made on the build.
+        assert rows[MACHINE]["run_id"] == "run-late"
+        assert rows[MACHINE]["candidate_count"] == 2
+        # Grouped in despite falling on the next calendar day.
+        assert rows["TEST-02"]["run_id"] == "run-midnight"
         assert rows["MISSING"]["status"] == "missing"
-        assert rows[MACHINE]["viewer_query"] == "?run_id=run-newer"
-        assert any("different OpenVINO" in warning for warning in digest["warnings"])
+        assert rows[MACHINE]["viewer_query"] == "?run_id=run-late"
+
+    def test_retested_build_warns_once_instead_of_naming_every_machine(self, db: Path):
+        """A build kept for a second night is re-tested fleet-wide, so every
+        machine having two candidates is the norm and must not read as an
+        anomaly report listing all of them."""
+        recs = []
+        for machine in (MACHINE, "TEST-02"):
+            recs.append(self._cycle_run(f"{machine}-n1", machine,
+                                        datetime(2026, 1, 1, 23, 50), "23107"))
+            recs.append(self._cycle_run(f"{machine}-n2", machine,
+                                        datetime(2026, 1, 2, 23, 50), "23107"))
+        _write(db, recs)
+
+        digest = q.daily_digest(
+            db,
+            ov_build="23107",
+            purpose="daily_pipeline timer",
+            triggered_by="timer",
+            expected_machines=[MACHINE, "TEST-02"],
+        )
+
+        rows = {row["machine"]: row for row in digest["machines"]}
+        assert rows[MACHINE]["run_id"] == f"{MACHINE}-n2"
+        warnings = digest["warnings"]
+        assert any("re-tested" in w for w in warnings), warnings
+        assert not any("Multiple eligible runs existed" in w for w in warnings), warnings
+
+    def test_unknown_build_reports_every_machine_missing(self, db: Path):
+        _write(db, [self._cycle_run("run-1", MACHINE,
+                                    datetime(2026, 1, 1, 23, 50), "23107")])
+
+        digest = q.daily_digest(
+            db,
+            ov_build="99999",
+            purpose="daily_pipeline timer",
+            triggered_by="timer",
+            expected_machines=[MACHINE],
+        )
+
+        assert digest["summary"]["status"] == "incomplete"
+        assert digest["summary"]["completed_machines"] == 0
 
     def test_infer_series_is_not_counted_as_success(self, db: Path):
         """series_success is measured against expected_cases, which sums the
         tests' expected_series and so counts the token family only. Letting
         the infer twin in pushes success past total, and series_failed's
         max(0, ...) then clamps a genuinely missing series to zero."""
-        rec = _record(0, value=100.0, triggered_by="scheduler")
-        rec.purpose = "daily_pipeline timer"
-        rec.total_tests = rec.passed_tests = 1
-        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        rec = self._cycle_run("run-000", MACHINE,
+                              datetime(2026, 1, 1, 23, 50), "23107")
         # Two token series were expected; one landed, and it carries an
         # infer twin. The second token series never arrived.
         rec.expected_cases = 2
@@ -183,11 +230,10 @@ class TestDailyDigest:
 
         digest = q.daily_digest(
             db,
-            report_date="2026-01-01",
+            ov_build="23107",
             purpose="daily_pipeline timer",
-            triggered_by="scheduler",
+            triggered_by="timer",
             expected_machines=[MACHINE],
-            day_start_hour=6,
         )
 
         row = {r["machine"]: r for r in digest["machines"]}[MACHINE]

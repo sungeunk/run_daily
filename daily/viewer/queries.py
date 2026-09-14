@@ -1304,16 +1304,60 @@ def _effective_triggered_by(row: dict, *, fallback: str) -> str:
     return fallback if fallback else "unknown"
 
 
-def daily_digest(db_path: Path, *, report_date: str, purpose: str,
+def recent_builds(db_path: Path, *, purpose: str, triggered_by: str,
+                  limit: int = 10) -> list[dict]:
+    """Builds a scheduled cycle has covered, newest first.
+
+    Companion to ``daily_digest``: it answers "which build do I report on"
+    without the caller having to guess a date. ``machines`` is the count of
+    distinct machines that produced an eligible run for the build, so a
+    caller can skip a build the fleet has only partly finished.
+    """
+    machines_sql = """
+        SELECT ov_build,
+               count(DISTINCT machine) AS machines,
+               count(*)                AS runs,
+               min(ts)                 AS first_ts,
+               max(ts)                 AS last_ts,
+               any_value(ov_version)   AS ov_version,
+               any_value(ov_sha)       AS ov_sha
+        FROM runs_with_flags r
+        WHERE COALESCE(r.ov_build, '') <> ''
+          AND COALESCE(r.purpose, '') = ?
+          AND COALESCE(r.triggered_by, '') = ?
+          AND NOT r.is_partial
+          AND NOT r.excluded
+        GROUP BY ov_build
+        ORDER BY max(ts) DESC
+        LIMIT ?
+    """
+    with _read_only(db_path) as con:
+        rows = con.execute(machines_sql,
+                           [purpose, triggered_by, max(1, int(limit))]).fetchdf()
+    return rows.to_dict(orient="records")
+
+
+def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
                  triggered_by: str, expected_machines: Sequence[str],
-                 day_start_hour: int = 6,
                  max_functional_issues: int = 20,
                  top_regressions: int = 10,
                  top_improvements: int = 5) -> dict:
-    """Build a bounded fleet summary for one scheduled daily cycle."""
-    selected_date = dt.date.fromisoformat(report_date)
-    if not 0 <= day_start_hour <= 23:
-        raise ValueError("day_start_hour must be between 0 and 23")
+    """Build a bounded fleet summary for one OpenVINO build across the fleet.
+
+    The cycle is identified by ``ov_build`` rather than by a calendar date:
+    machines start their nightly run at their own local times, so a batch
+    straddles midnight (observed 23:41 -> 00:11) and no ``day_start_hour``
+    splits it the same way for every machine. A build is the thing actually
+    under test, and it pins the code exactly -- ``ov_build`` maps 1:1 to
+    ``ov_sha`` across the fleet.
+
+    A build that stays current for more than one night is re-tested, so this
+    keeps only the newest eligible run per machine and reports how many
+    candidates each machine had in ``candidate_count``.
+    """
+    ov_build = str(ov_build).strip()
+    if not ov_build:
+        raise ValueError("ov_build must not be empty")
     machines = list(dict.fromkeys(expected_machines))
     if not machines:
         raise ValueError("expected_machines must not be empty")
@@ -1328,13 +1372,13 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
                    error_tests, skipped_tests, skipped_cases, expected_cases,
                    duration_sec, report_file, rawlog_path, build_url
             FROM runs_with_flags r
-            WHERE CAST(r.ts - (? * INTERVAL '1 hour') AS DATE) = ?
+            WHERE COALESCE(r.ov_build, '') = ?
               AND r.machine IN ({placeholders})
               AND COALESCE(r.purpose, '') = ?
               AND NOT r.is_partial
               AND NOT r.excluded
             ORDER BY machine, ts DESC, ingested_at DESC
-        """, [day_start_hour, selected_date, *machines, purpose]).fetchdf()
+        """, [ov_build, *machines, purpose]).fetchdf()
 
         eligible_rows = [
             {
@@ -1474,7 +1518,19 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
     if len(versions) > 1:
         warnings.append("Machines used different OpenVINO versions.")
     if duplicate_machines:
-        warnings.append("Multiple eligible runs existed for: " + ", ".join(duplicate_machines))
+        # A build that stays current for more than one night is simply
+        # re-tested, so every machine having several candidates is the norm
+        # here, not an anomaly. Name machines only when they disagree with
+        # the fleet, which is the case actually worth looking at.
+        if len(duplicate_machines) == len(selected_rows):
+            warnings.append(
+                f"Build re-tested: newest run per machine kept "
+                f"({max(int(r.get('candidate_count') or 1) for r in selected_rows)} "
+                f"eligible runs each)."
+            )
+        else:
+            warnings.append("Multiple eligible runs existed for: "
+                            + ", ".join(duplicate_machines))
     unavailable = [
         r["machine"] for r in machine_rows
         if r.get("status") != "missing" and r.get("performance_status") == "unavailable"
@@ -1486,7 +1542,7 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
         "schema_version": 1,
         "generated_at": dt.datetime.now(dt.timezone.utc),
         "selection": {
-            "report_date": selected_date.isoformat(),
+            "ov_build": ov_build,
             "purpose": purpose,
             "triggered_by": triggered_by,
         },

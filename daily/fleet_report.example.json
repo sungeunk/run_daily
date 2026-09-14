@@ -1,11 +1,10 @@
 {
   "schema_version": 1,
   "mcp_url": "http://dg2raptorlake.ikor.intel.com:8090/mcp",
-  "viewer_base_url": "http://dg2raptorlake.ikor.intel.com:8501",
+  "viewer_base_url": "http://dg2raptorlake.ikor.intel.com:8502",
   "timezone": "Asia/Seoul",
-  "day_start_hour": 6,
   "purpose": "daily_pipeline timer",
-  "triggered_by": "scheduler",
+  "triggered_by": "timer",
   "expected_machines": [
     "ARLH-01",
     "BMG-02",

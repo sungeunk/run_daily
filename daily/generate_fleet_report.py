@@ -32,7 +32,6 @@ class FleetConfig:
     viewer_base_url: str
     html_report_base_url: str
     timezone: str
-    day_start_hour: int
     purpose: str
     triggered_by: str
     expected_machines: tuple[str, ...]
@@ -79,9 +78,6 @@ def load_config(path: Path) -> FleetConfig:
     mail = _mapping(root.get("mail", {}), "mail")
     schedule = _mapping(root.get("schedule", {}), "schedule")
     report = _mapping(root.get("report", {}), "report")
-    day_start_hour = int(root.get("day_start_hour", 6))
-    if not 0 <= day_start_hour <= 23:
-        raise ValueError("day_start_hour must be between 0 and 23")
     timezone = str(root.get("timezone", "Asia/Seoul"))
     try:
         ZoneInfo(timezone)
@@ -95,7 +91,6 @@ def load_config(path: Path) -> FleetConfig:
         viewer_base_url=str(root["viewer_base_url"]),
         html_report_base_url=str(root.get("html_report_base_url", "")),
         timezone=timezone,
-        day_start_hour=day_start_hour,
         purpose=str(root["purpose"]),
         triggered_by=str(root["triggered_by"]),
         expected_machines=_strings(root.get("expected_machines"), "expected_machines"),
@@ -111,39 +106,51 @@ def load_config(path: Path) -> FleetConfig:
     )
 
 
-def _logical_report_date(config: FleetConfig, now: dt.datetime) -> str:
-    logical_now = now.astimezone(ZoneInfo(config.timezone)) - dt.timedelta(
-        hours=config.day_start_hour
+def latest_build(config: FleetConfig) -> str:
+    """Newest build the scheduled cycle has produced a run for.
+
+    The fleet is keyed by build rather than by date because machines start
+    their nightly run at their own local times and the batch straddles
+    midnight. The newest build may still be in flight; `wait_for_digest`
+    is what waits for the remaining machines.
+    """
+    builds = call_json_tool(
+        config.mcp_url,
+        "daily_results_list_builds",
+        {"purpose": config.purpose,
+         "triggered_by": config.triggered_by,
+         "limit": 1},
+        timeout=30.0,
     )
-    return logical_now.date().isoformat()
+    if not isinstance(builds, list) or not builds:
+        raise McpError(
+            f"no build found for purpose={config.purpose!r} "
+            f"triggered_by={config.triggered_by!r}"
+        )
+    build = str(builds[0].get("ov_build") or "").strip()
+    if not build:
+        raise McpError("build listing returned a row without ov_build")
+    return build
 
 
-def _default_report_date(config: FleetConfig) -> str:
-    now_local = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo(config.timezone))
-    if "timer" in config.purpose.lower() and config.triggered_by.lower() == "scheduler":
-        return (now_local.date() - dt.timedelta(days=1)).isoformat()
-    return _logical_report_date(config, dt.datetime.now(dt.timezone.utc))
-
-
-def _digest_arguments(config: FleetConfig, report_date: str) -> dict[str, object]:
+def _digest_arguments(config: FleetConfig, ov_build: str) -> dict[str, object]:
     return {
-        "report_date": report_date,
+        "ov_build": ov_build,
         "purpose": config.purpose,
         "triggered_by": config.triggered_by,
         "expected_machines": list(config.expected_machines),
-        "day_start_hour": config.day_start_hour,
         "max_functional_issues": config.max_functional_issues,
         "top_regressions": config.top_regressions,
         "top_improvements": config.top_improvements,
     }
 
 
-def fetch_digest(config: FleetConfig, report_date: str) -> dict[str, Any]:
+def fetch_digest(config: FleetConfig, ov_build: str) -> dict[str, Any]:
     """Fetch and validate one digest payload from the MCP server."""
     payload = call_json_tool(
         config.mcp_url,
         "daily_results_daily_digest",
-        _digest_arguments(config, report_date),
+        _digest_arguments(config, ov_build),
         timeout=30.0,
     )
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
@@ -151,12 +158,12 @@ def fetch_digest(config: FleetConfig, report_date: str) -> dict[str, Any]:
     return payload
 
 
-def wait_for_digest(config: FleetConfig, report_date: str,
+def wait_for_digest(config: FleetConfig, ov_build: str,
                     *, wait: bool = True) -> dict[str, Any]:
     """Poll until the fleet is ready or the configured deadline expires."""
     deadline = time.monotonic() + config.max_wait_minutes * 60
     while True:
-        digest = fetch_digest(config, report_date)
+        digest = fetch_digest(config, ov_build)
         summary = digest.get("summary")
         if isinstance(summary, dict) and summary.get("status") != "incomplete":
             return digest
@@ -165,8 +172,21 @@ def wait_for_digest(config: FleetConfig, report_date: str,
         time.sleep(min(config.poll_interval_seconds, max(0.0, deadline - time.monotonic())))
 
 
-def _delivery_key(config: FleetConfig, report_date: str) -> str:
-    identity = f"{report_date}\0{config.purpose}\0{config.triggered_by}"
+def _delivery_key(config: FleetConfig, ov_build: str, digest: dict[str, Any]) -> str:
+    """Identity of what is about to be delivered.
+
+    Keyed on the selected runs, not on the build alone: a build that stays
+    current for a second night is re-tested, and that genuinely is a new
+    report. Keying on the build would silently swallow it.
+    """
+    run_ids = sorted(
+        str(m.get("run_id"))
+        for m in digest.get("machines", [])
+        if isinstance(m, dict) and m.get("run_id")
+    )
+    identity = "\0".join(
+        [ov_build, config.purpose, config.triggered_by, *run_ids]
+    )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
 
 
@@ -192,7 +212,7 @@ def _parse_args() -> argparse.Namespace:
         "--config", type=Path,
         default=Path(os.environ.get("DAILY_FLEET_CONFIG", DEFAULT_CONFIG)),
     )
-    parser.add_argument("--date", help="Logical daily date (YYYY-MM-DD)")
+    parser.add_argument("--build", help="OpenVINO build to report on (default: newest)")
     parser.add_argument("--dry-run", action="store_true", help="Write HTML without sending mail")
     parser.add_argument("--force", action="store_true", help="Send an already delivered cycle again")
     return parser.parse_args()
@@ -204,18 +224,16 @@ def main() -> int:
     args = _parse_args()
     try:
         config = load_config(args.config)
-        report_date = args.date or _default_report_date(config)
-        dt.date.fromisoformat(report_date)
+        ov_build = args.build or latest_build(config)
         config.output_dir.mkdir(parents=True, exist_ok=True)
-        delivery_key = _delivery_key(config, report_date)
         state_path = config.output_dir / ".fleet_delivery_state.json"
         state = _state(state_path)
-        if delivery_key in state and not args.force and not args.dry_run:
-            log.info("report already sent for %s", report_date)
-            return 0
 
-        digest = wait_for_digest(config, report_date, wait=not args.dry_run)
-        output = config.output_dir / f"daily-fleet.{report_date}.html"
+        # The key depends on which runs were selected, so it can only be
+        # computed once the digest is in hand.
+        digest = wait_for_digest(config, ov_build, wait=not args.dry_run)
+        delivery_key = _delivery_key(config, ov_build, digest)
+        output = config.output_dir / f"daily-fleet.{ov_build}.html"
         output.write_text(
             render_fleet_html(
                 digest, config.viewer_base_url, config.html_report_base_url
@@ -223,6 +241,10 @@ def main() -> int:
         )
         log.info("wrote %s", output)
         if args.dry_run:
+            return 0
+
+        if delivery_key in state and not args.force:
+            log.info("report already sent for build %s (same runs)", ov_build)
             return 0
 
         if not config.recipients:
@@ -233,14 +255,14 @@ def main() -> int:
         sent = send_mail(
             output,
             ",".join(config.recipients),
-            f"{config.subject_prefix} [{status}]",
-            now_stamp=report_date,
+            f"{config.subject_prefix} [{status}] build {ov_build}",
+            now_stamp=ov_build,
             relay_server=config.relay_server,
         )
         if not sent:
             return 3
         state[delivery_key] = {
-            "report_date": report_date,
+            "ov_build": ov_build,
             "purpose": config.purpose,
             "triggered_by": config.triggered_by,
             "report": str(output),

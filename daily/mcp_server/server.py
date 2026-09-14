@@ -222,30 +222,62 @@ def daily_results_trend_regressions(
 
 
 @mcp.tool()
+def daily_results_list_builds(
+    purpose: str,
+    triggered_by: str,
+    limit: int = 10,
+) -> str:
+    """List the OpenVINO builds a scheduled cycle has covered, newest first.
+
+    Call this before daily_results_daily_digest to pick a build instead of
+    guessing a date. Each row carries the machine count for the build, so a
+    build the fleet has only partly finished is visible before you report on
+    it. A build that stayed current for more than one night shows more runs
+    than machines because it was re-tested.
+
+    Args:
+        purpose: Exact purpose string, e.g. 'daily_pipeline timer'.
+        triggered_by: Exact trigger identity, e.g. 'timer'.
+        limit: Max number of builds to return, newest first.
+    """
+    return _dump(queries.recent_builds(
+        _db_path, purpose=purpose, triggered_by=triggered_by, limit=limit,
+    ))
+
+
+@mcp.tool()
 def daily_results_daily_digest(
-    report_date: str,
+    ov_build: str,
     purpose: str,
     triggered_by: str,
     expected_machines: list[str],
-    day_start_hour: int = 6,
     max_functional_issues: int = 20,
     top_regressions: int = 10,
     top_improvements: int = 5,
 ) -> str:
-    """Return one bounded cross-machine summary for a scheduled daily cycle.
+    """Return one bounded cross-machine summary for one OpenVINO build.
 
-    The selected run is the newest complete, non-excluded run for each
-    expected machine on report_date with the exact purpose and triggered_by.
-    OpenVINO versions may differ between machines.
+    The cycle is keyed by build, not by calendar date: machines start their
+    nightly run at their own local times, so a batch straddles midnight and
+    no single day boundary splits it the same way for every machine. The
+    selected run is the newest complete, non-excluded run each expected
+    machine produced for ov_build with the exact purpose and triggered_by.
+    Use daily_results_list_builds to find a build.
+
+    Args:
+        ov_build: Build number as stored in runs.ov_build, e.g. '23107'.
+        purpose: Exact purpose string, e.g. 'daily_pipeline timer'.
+        triggered_by: Exact trigger identity, e.g. 'timer'.
+        expected_machines: Machines the cycle should cover; any that produced
+            no eligible run for the build are reported as missing.
     """
     try:
         digest = queries.daily_digest(
             _db_path,
-            report_date=report_date,
+            ov_build=ov_build,
             purpose=purpose,
             triggered_by=triggered_by,
             expected_machines=expected_machines,
-            day_start_hour=day_start_hour,
             max_functional_issues=max_functional_issues,
             top_regressions=top_regressions,
             top_improvements=top_improvements,

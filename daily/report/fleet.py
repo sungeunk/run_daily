@@ -200,8 +200,8 @@ th,td{{border:1px solid #d1d5db;padding:7px;text-align:left;vertical-align:top}}
 th{{background:#f3f4f6}}.summary{{margin:10px 0 18px;color:#4b5563}}
 </style></head><body>
 <h1>Daily GPU Fleet Summary {_status_dot(status)}</h1>
-<div class="summary">Report date: <strong>{_text(selection.get("report_date"))}</strong> · 
-Completed: <strong>{_text(summary.get("completed_machines"))}/{_text(summary.get("expected_machines"))}</strong> · 
+<div class="summary">Build: <strong>{_text(selection.get("ov_build"))}</strong> ·
+Completed: <strong>{_text(summary.get("completed_machines"))}/{_text(summary.get("expected_machines"))}</strong> ·
 Failed machines: <strong>{_text(summary.get("failed_machines"))}</strong> · 
 Purpose: {_text(selection.get("purpose"))}</div>
 <h2>Machine Summary</h2>

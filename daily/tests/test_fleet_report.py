@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import datetime as dt
-
 import pytest
 
-from generate_fleet_report import _digest_arguments, _logical_report_date, load_config
+from generate_fleet_report import _delivery_key, _digest_arguments, load_config
 from report.fleet import render_fleet_html
 
 pytestmark = pytest.mark.dev_only
@@ -13,9 +11,9 @@ pytestmark = pytest.mark.dev_only
 def test_render_fleet_html_is_compact_and_links_failed_run() -> None:
     digest = {
         "selection": {
-            "report_date": "2026-09-09",
+            "ov_build": "23107",
             "purpose": "daily_pipeline timer",
-            "triggered_by": "scheduler",
+            "triggered_by": "timer",
         },
         "summary": {
             "status": "red",
@@ -111,24 +109,53 @@ def test_load_config_and_digest_arguments(tmp_path) -> None:
         config_path.write_text("""{
             "mcp_url": "http://mcp.local",
             "viewer_base_url": "http://viewer.local",
-            "day_start_hour": 6,
             "purpose": "daily_pipeline timer",
-            "triggered_by": "scheduler",
+            "triggered_by": "timer",
             "expected_machines": ["LNL-03", "LNL-03", "MTL-01"],
             "mail": {"recipients": ["test@example.com"]}
         }""", encoding="utf-8")
 
         config = load_config(config_path)
-        arguments = _digest_arguments(config, "2026-09-09")
+        arguments = _digest_arguments(config, "23107")
 
         assert config.expected_machines == ("LNL-03", "MTL-01")
-        assert arguments["day_start_hour"] == 6
+        assert arguments["ov_build"] == "23107"
+        assert "report_date" not in arguments
+        assert "day_start_hour" not in arguments
         assert arguments["purpose"] == "daily_pipeline timer"
-        assert arguments["triggered_by"] == "scheduler"
+        assert arguments["triggered_by"] == "timer"
         assert config.output_dir == (tmp_path / "../output/fleet").resolve()
 
-        local_2am = dt.datetime(2026, 9, 9, 17, 0, tzinfo=dt.timezone.utc)
-        assert _logical_report_date(config, local_2am) == "2026-09-09"
+
+def _config(tmp_path):
+    path = tmp_path / "fleet.json"
+    path.write_text("""{
+        "mcp_url": "http://mcp.local",
+        "viewer_base_url": "http://viewer.local",
+        "purpose": "daily_pipeline timer",
+        "triggered_by": "timer",
+        "expected_machines": ["LNL-03", "MTL-01"],
+        "mail": {"recipients": ["test@example.com"]}
+    }""", encoding="utf-8")
+    return load_config(path)
+
+
+def test_delivery_key_distinguishes_a_retested_build(tmp_path) -> None:
+    """A build that stays current for a second night is re-tested, and that
+    is a new report. Keying on the build alone would swallow it."""
+    config = _config(tmp_path)
+    first = {"machines": [{"run_id": "run-a"}, {"run_id": "run-b"}]}
+    retest = {"machines": [{"run_id": "run-c"}, {"run_id": "run-d"}]}
+
+    assert _delivery_key(config, "23107", first) != _delivery_key(config, "23107", retest)
+
+
+def test_delivery_key_is_stable_for_the_same_runs(tmp_path) -> None:
+    config = _config(tmp_path)
+    one = {"machines": [{"run_id": "run-a"}, {"run_id": "run-b"}]}
+    same_reordered = {"machines": [{"run_id": "run-b"}, {"run_id": "run-a"}]}
+
+    assert _delivery_key(config, "23107", one) == _delivery_key(config, "23107", same_reordered)
 
 
 def test_load_config_allows_mail_free_dry_run_config(tmp_path) -> None:
