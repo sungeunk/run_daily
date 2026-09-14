@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
-from common.perf_series import INFER_EXEC_MODES, TOKEN_EXEC_MODES
+from data import INFER_EXEC_MODES, TOKEN_EXEC_MODES, expected_cases
 
 from ._common import (file_hash, parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
@@ -109,7 +109,7 @@ def _llm_rows(m: dict) -> Iterable[PerfRow]:
 
     ``infer_perf`` is absent on runs older than the parser that emits it, and
     on any prompt whose llm_bench row reported -1 — hence the zip, which
-    simply stops rather than inventing a row. See ``common.perf_series`` for
+    simply stops rather than inventing a row. See ``data.series`` for
     what the two families mean and why only the first one gets a verdict.
     """
     model = m.get("model", "")
@@ -281,11 +281,7 @@ def _cases(summary: dict, outcomes: set[str] | None = None) -> int:
     A pytest test can carry several cases (one LLM test covers 2 prompts x
     1st/2nd token), so ``expected_series`` is summed rather than counted.
     """
-    return sum(
-        int((test.get("metrics") or {}).get("expected_series") or 0)
-        for test in summary.get("tests", []) or []
-        if outcomes is None or test.get("outcome") in outcomes
-    )
+    return expected_cases(summary, outcomes)
 
 
 def _skipped_cases(summary: dict) -> int:

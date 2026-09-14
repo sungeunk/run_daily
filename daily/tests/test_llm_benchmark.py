@@ -27,6 +27,7 @@ from common.config import DailyConfig
 from common.fs_utils import convert_path
 from common.llm_benchmark_skip import get_skip_reason
 from common.machine_monitor import summarize_window
+from data import expected_series_for_llm
 from parsers.llm_benchmark import parse_json_report, phase_windows
 
 
@@ -77,16 +78,6 @@ CASES: list[BenchmarkCase] = [
 
 def _prompt_path(cfg: DailyConfig, case: BenchmarkCase) -> str:
     return convert_path(f'{cfg.prompts_dir}/{case.prompt_type}/{case.model}.jsonl')
-
-
-def _expected_series(prompt_path: str) -> int:
-    """Series this case would produce: one per prompt for 1st- and 2nd-token latency."""
-    try:
-        with open(prompt_path, 'r', encoding='utf-8') as fp:
-            prompts = sum(1 for line in fp if line.strip())
-    except OSError:
-        return 0
-    return prompts * 2
 
 
 def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) -> str:
@@ -157,7 +148,8 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'test_type': 'llm_benchmark',
         'model': case.model,
         'precision': case.precision,
-        'expected_series': _expected_series(_prompt_path(daily_config, case)),
+        'expected_series': expected_series_for_llm(
+            _prompt_path(daily_config, case)),
         'data': [],
     })
 

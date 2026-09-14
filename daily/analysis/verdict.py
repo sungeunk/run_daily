@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import math
 
-from .types import AnalysisConfig, ComparisonRow, SeriesKey, Verdict
+from data import lower_is_better
 
-# Units where *lower* measured value means *better* performance.
-_LOWER_IS_BETTER = {"ms", "s", "%"}
+from .types import AnalysisConfig, ComparisonRow, SeriesKey, Verdict
 
 
 def improvement_pct(
@@ -35,7 +34,7 @@ def improvement_pct(
     if baseline == 0.0:
         return None
     ratio = (current - baseline) / baseline
-    if unit in _LOWER_IS_BETTER:
+    if lower_is_better(unit):
         return -ratio   # lower current -> positive improvement
     return ratio        # higher current -> positive improvement
 

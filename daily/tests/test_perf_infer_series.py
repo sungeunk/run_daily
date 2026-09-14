@@ -23,7 +23,7 @@ if str(DAILY_DIR) not in sys.path:
 
 from analysis.engine import _fetch_comparison_rows  # noqa: E402
 from analysis.types import AnalysisConfig  # noqa: E402
-from common.perf_series import is_infer_exec_mode  # noqa: E402
+from data import is_infer_exec_mode  # noqa: E402
 from viewer import queries as q  # noqa: E402
 from viewer.ingest import writer  # noqa: E402
 from viewer.ingest.loader_new import _llm_rows  # noqa: E402

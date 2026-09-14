@@ -13,6 +13,8 @@ import io
 import math
 from pathlib import Path
 
+from data import expected_cases
+
 from .types import AnalysisResult
 
 
@@ -59,17 +61,10 @@ def _series_counts(summary: dict | None) -> tuple[int, int, int]:
     ``common.delivery.mail_title_suffix``: one test function can stand for
     several benchmark series.
     """
-    skipped = success = failed = 0
-    for test in (summary or {}).get("tests", []):
-        expected = int((test.get("metrics") or {}).get("expected_series") or 0)
-        outcome = test.get("outcome")
-        if outcome == "skipped":
-            skipped += expected
-        elif outcome == "passed":
-            success += expected
-        elif outcome in ("failed", "error"):
-            failed += expected
-    return skipped, success, failed
+    summary = summary or {}
+    return (expected_cases(summary, {"skipped"}),
+            expected_cases(summary, {"passed"}),
+            expected_cases(summary, {"failed", "error"}))
 
 
 def _thumbnail_data_uri(path: Path) -> str | None:

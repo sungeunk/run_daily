@@ -9,6 +9,7 @@ import pytest
 
 from common.config import DailyConfig
 from common.fs_utils import convert_path
+from data import expected_series_for_image_gen
 from parsers.stable_diffusion_genai import parse_output
 
 
@@ -45,13 +46,8 @@ def _prompt_path(cfg: DailyConfig, case: ImageGenCase) -> str:
 
 def _expected_series(cfg: DailyConfig, case: ImageGenCase) -> int:
     """Series this case would produce: one pipeline timing per prompt run."""
-    if case.prompt_index is not None:
-        return 1
-    try:
-        with open(_prompt_path(cfg, case), 'r', encoding='utf-8') as fp:
-            return sum(1 for line in fp if line.strip())
-    except OSError:
-        return 0
+    return expected_series_for_image_gen(_prompt_path(cfg, case),
+                                         case.prompt_index)
 
 
 def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:

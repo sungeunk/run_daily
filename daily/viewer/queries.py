@@ -20,7 +20,11 @@ import pandas as pd
 
 from analysis.types import AnalysisConfig
 from analysis.verdict import improvement_pct, verdict_from_pct
-from common.perf_series import exclude_infer_sql
+from data import (
+    MAD_TO_SIGMA, count_success_series, counts_are_consistent,
+    direction_label_sql, direction_sign, exclude_infer_sql, failed_series,
+    normalize_value_sql, success_series_scalar_sql,
+)
 from viewer.ingest.loader_new import parse_triggered_by
 
 log = logging.getLogger(__name__)
@@ -272,9 +276,7 @@ def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
                 SELECT r.*
                 FROM runs r
                 WHERE r.machine = ?{clause}{excl_clause}{ts_clause}
-                  AND (SELECT count(*) FROM perf p
-                        WHERE p.run_id = r.run_id
-                          AND {exclude_infer_sql('p.exec_mode')}) > ?
+                  AND {success_series_scalar_sql('r.run_id')} > ?
                 ORDER BY r.ts DESC
                 LIMIT ?
             )
@@ -448,18 +450,12 @@ def success_counts(db_path: Path, run_ids: list[str]) -> dict[str, int]:
     diagnostic twin of a row already counted here rather than a benchmark
     case of its own, and every expectation this is read against
     (``expected_cases``) counts the token family only.
+
+    ``distinct=False`` because this row counts stored measurements, matching
+    the legacy viewer; the fleet digest counts distinct series instead.
     """
-    if not run_ids:
-        return {}
-    placeholders = ",".join(["?"] * len(run_ids))
     with _read_only(db_path) as con:
-        rows = con.execute(
-            f"SELECT run_id, count(*) FROM perf WHERE run_id IN ({placeholders}) "
-            f"AND {exclude_infer_sql()} "
-            "GROUP BY run_id",
-            run_ids,
-        ).fetchall()
-    return {run_id: count for run_id, count in rows}
+        return count_success_series(con, run_ids, distinct=False)
 
 
 def legacy_geomean_summary(db_path: Path, run_ids: list[str]) -> pd.DataFrame:
@@ -474,7 +470,7 @@ def legacy_geomean_summary(db_path: Path, run_ids: list[str]) -> pd.DataFrame:
     sql = f"""
     WITH base AS (
         SELECT run_id, exec_mode, in_token,
-               CASE WHEN unit = 's' THEN value * 1000 ELSE value END AS value
+               {normalize_value_sql()} AS value
         FROM perf
         WHERE run_id IN ({placeholders}) AND value > 0
     )
@@ -761,8 +757,8 @@ def trend_regressions(db_path: Path, machine: str,
       - both windows need enough points (>= min_*_points) to be meaningful;
         otherwise ``status`` = 'insufficient_data'.
 
-    Direction handling: for 'ms', 's', '%', higher is worse; for 'FPS'/'tps',
-    lower is worse. ``pct_change`` is signed so that positive means "worse"
+    Direction handling comes from ``data.series``: for latency units higher
+    is worse, for throughput units lower is worse. ``pct_change`` is signed so that positive means "worse"
     regardless of unit, making sort-by-worst trivial.
 
     ``run_kinds`` defaults to daily-only, and manually excluded runs are
@@ -836,17 +832,19 @@ def trend_regressions(db_path: Path, machine: str,
         machine, model, precision, in_token, out_token, exec_mode, unit,
         recent_median, baseline_median, recent_n, baseline_n,
         recent_mad, baseline_mad,
-        CASE WHEN unit IN ('ms', 's', '%') THEN 'lower_is_better'
-             ELSE 'higher_is_better' END AS direction,
+        {direction_label_sql()} AS direction,
         CASE
             WHEN baseline_median IS NULL OR recent_median IS NULL
               OR baseline_median = 0 THEN NULL
-            -- pct_change is signed positive = worse for both directions,
-            -- so the UI can just sort DESC to surface regressions.
-            WHEN unit IN ('ms', 's', '%')
+            -- Signed positive = worse for both directions, so the UI can
+            -- just sort DESC to surface regressions.
+            WHEN {direction_label_sql()} = 'lower_is_better'
               THEN (recent_median - baseline_median) / baseline_median
             ELSE -((recent_median - baseline_median) / baseline_median)
         END AS worsening_pct,
+        -- data.stats.mad_ratio, not a coefficient of variation: no 1.4826.
+        -- The analysis engine's `cv` is the rescaled one; the column name
+        -- here is historical and the two are not interchangeable.
         CASE
             WHEN recent_median IS NULL OR recent_median = 0 THEN NULL
             ELSE recent_mad / recent_median
@@ -871,9 +869,9 @@ def trend_regressions(db_path: Path, machine: str,
     df.loc[insufficient, "status"] = "insufficient_data"
 
     # Vectorized direction sign (1 for lower_is_better units, -1 otherwise)
-    direction_sign = df["unit"].apply(lambda unit: 1 if unit in ("ms", "s", "%") else -1)
-    sigma = 1.4826 * df["baseline_mad"]
-    df["worsening_z"] = (direction_sign
+    signs = df["unit"].apply(direction_sign)
+    sigma = MAD_TO_SIGMA * df["baseline_mad"]
+    df["worsening_z"] = (signs
                           * (df["recent_median"] - df["baseline_median"])
                           / sigma.where(sigma > 0))
     result = df.sort_values("worsening_pct", ascending=False,
@@ -952,12 +950,10 @@ def fetch_run_comparison(
 # Count-based trend analysis
 # ---------------------------------------------------------------------------
 
-_LOWER_IS_BETTER_UNITS = {"ms", "s", "%"}
-
-
-def _direction_sign(unit: object) -> int:
-    """+1 when a rising value is worse, -1 when a rising value is better."""
-    return 1 if unit in _LOWER_IS_BETTER_UNITS else -1
+#: Kept as a module-level alias so the many call sites below read the same as
+#: before; the definition itself lives in data.series with the other
+#: cross-layer semantics.
+_direction_sign = direction_sign
 
 
 def series_trend(db_path: Path, machine: str, *, recent_runs_n: int = 3,
@@ -1403,27 +1399,12 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
             row["candidate_count"] = candidate_counts[str(row["machine"])]
 
         if selected_rows:
-            run_placeholders = ",".join("?" for _ in selected_rows)
             # Counted against `expected_cases`, which sums the tests'
-            # `expected_series` (prompts x 1st/2nd) and therefore knows
-            # nothing about the infer family. Counting infer here would put
-            # success above total and clamp series_failed to zero, hiding
-            # every genuinely missing series.
-            series_counts = con.execute(
-                f"""
-                SELECT run_id, count(*) AS series_count
-                FROM (
-                    SELECT DISTINCT run_id, model, precision, in_token,
-                                    out_token, exec_mode, prompt_idx
-                    FROM perf
-                    WHERE run_id IN ({run_placeholders})
-                      AND {exclude_infer_sql()}
-                )
-                GROUP BY run_id
-                """,
-                [str(row["run_id"]) for row in selected_rows],
-            ).fetchall()
-            counts_by_run = {str(run_id): int(count) for run_id, count in series_counts}
+            # `expected_series` and therefore knows only the token family.
+            # data.counts owns both halves of that contract.
+            counts_by_run = count_success_series(
+                con, [str(row["run_id"]) for row in selected_rows],
+            )
             for row in selected_rows:
                 success = counts_by_run.get(str(row["run_id"]), 0)
                 skipped = int(row.get("skipped_cases") or 0)
@@ -1431,7 +1412,12 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
                 row["series_total"] = total
                 row["series_skipped"] = skipped
                 row["series_success"] = success
-                row["series_failed"] = max(0, total - skipped - success)
+                row["series_failed"] = failed_series(total, skipped, success)
+                # The clamp inside failed_series is what hid the infer
+                # overflow, so the inconsistency is reported rather than
+                # absorbed.
+                row["counts_consistent"] = counts_are_consistent(
+                    total, skipped, success)
         run_ids = [str(row["run_id"]) for row in selected_rows]
         issue_rows: list[dict] = []
         comparison_rows: list[dict] = []
@@ -1857,9 +1843,7 @@ def machines_overview(db_path: Path,
                        -- Token family only: success_cases is weighed against
                        -- recorded_cases (expected_cases) below, and also
                        -- feeds the "what a full run looks like" expectation.
-                       (SELECT count(*) FROM perf p WHERE p.run_id = k.run_id
-                         AND {exclude_infer_sql('p.exec_mode')})
-                           AS success_cases,
+                       {success_series_scalar_sql('k.run_id')} AS success_cases,
                        {recorded_expr} AS recorded_cases
                 FROM ranked k
             ),

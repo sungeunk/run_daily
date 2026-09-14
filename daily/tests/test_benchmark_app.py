@@ -9,6 +9,7 @@ import pytest
 
 from common.config import DailyConfig
 from common.fs_utils import convert_path
+from data import expected_series_for_app
 from parsers.benchmark_app import parse_output
 
 
@@ -61,7 +62,7 @@ def test_benchmark_app(case: BenchAppCase, daily_config: DailyConfig,
         'precision': case.precision,
         'batch': case.batch,
         'cmd': cmd_str,
-        'expected_series': 1,
+        'expected_series': expected_series_for_app(),
         'data': [],
     })
 

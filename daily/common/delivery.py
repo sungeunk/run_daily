@@ -596,25 +596,19 @@ def mail_title_suffix(summary: dict) -> str:
     benchmark cases (e.g. one LLM test covers N prompts x 1st/2nd, so "2
     passed" would hide that only 4 of the expected series actually landed).
     """
-    from statistics import geometric_mean
+    from data import expected_cases, geomean as geomean_of  # noqa: PLC0415
 
     values: list[float] = []
-    success_series = 0
-    failed_series = 0
     for t in summary.get('tests', []):
         m = t.get('metrics', {})
-        expected = int(m.get('expected_series') or 0)
-        outcome = t.get('outcome')
-        if outcome == 'passed':
-            success_series += expected
-            if m.get('test_type') == 'llm_benchmark':
-                for d in m.get('data', []):
-                    perf = d.get('perf') or []
-                    # 1st-inference latency — mirrors the old geomean input.
-                    if perf and isinstance(perf[0], (int, float)):
-                        values.append(float(perf[0]))
-        elif outcome in ('failed', 'error'):
-            failed_series += expected
+        if t.get('outcome') != 'passed' or m.get('test_type') != 'llm_benchmark':
+            continue
+        for d in m.get('data', []):
+            perf = d.get('perf') or []
+            # 1st-token latency — mirrors the old geomean input.
+            if perf and isinstance(perf[0], (int, float)):
+                values.append(float(perf[0]))
 
-    geomean = geometric_mean(values) if values else 0.0
-    return f'({geomean:.2f}/{success_series}/{failed_series})'
+    success_series = expected_cases(summary, {'passed'})
+    failed = expected_cases(summary, {'failed', 'error'})
+    return f'({geomean_of(values) or 0.0:.2f}/{success_series}/{failed})'

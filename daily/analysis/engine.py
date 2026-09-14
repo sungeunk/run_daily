@@ -15,10 +15,10 @@ import json
 import logging
 import math
 from pathlib import Path
-from statistics import median
 from types import SimpleNamespace
 
-from common.perf_series import is_infer_exec_mode
+from data import is_infer_exec_mode
+from data import stats
 
 from .baseline import find_last_known_good
 from .functional import aggregate_functional
@@ -346,30 +346,16 @@ def _history_stats(values: list[float], unit: str | None, config: AnalysisConfig
             "worsening_z": lambda _current: None,
         }
 
-    med = median(values)
-    abs_dev = [abs(v - med) for v in values]
-    mad = median(abs_dev)
-    sigma = 1.4826 * mad if mad is not None else None
-    cv = None
-    if sigma is not None and med not in (None, 0.0):
-        cv = sigma / abs(med)
-
-    lower_is_better = unit in {"ms", "s", "%"}
-
-    def _worsening_z(current: float) -> float | None:
-        if sigma is None or sigma <= 0.0 or not math.isfinite(sigma):
-            return None
-        if lower_is_better:
-            return (current - med) / sigma
-        return (med - current) / sigma
-
+    # `cv` here is the 1.4826-scaled one (data.stats.robust_cv), NOT the
+    # bare MAD/median that trend_regressions reports as `recent_cv`. The two
+    # differ by that factor and are compared against different thresholds.
     return {
         "count": len(values),
-        "median": med,
-        "mad": mad,
-        "sigma": sigma,
-        "cv": cv,
-        "worsening_z": _worsening_z,
+        "median": stats.safe_median(values),
+        "mad": stats.mad(values),
+        "sigma": stats.robust_sigma(values),
+        "cv": stats.robust_cv(values),
+        "worsening_z": lambda current: stats.robust_z(current, values, unit),
     }
 
 
