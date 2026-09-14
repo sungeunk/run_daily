@@ -273,7 +273,8 @@ def recent_runs(db_path: Path, machine: str, *, limit: int = 10,
                 FROM runs r
                 WHERE r.machine = ?{clause}{excl_clause}{ts_clause}
                   AND (SELECT count(*) FROM perf p
-                        WHERE p.run_id = r.run_id) > ?
+                        WHERE p.run_id = r.run_id
+                          AND {exclude_infer_sql('p.exec_mode')}) > ?
                 ORDER BY r.ts DESC
                 LIMIT ?
             )
@@ -441,13 +442,20 @@ def list_profiles(db_path: Path) -> list[str]:
 def success_counts(db_path: Path, run_ids: list[str]) -> dict[str, int]:
     """Count of perf value rows ingested per run — mirrors the legacy
     viewer's 'Success count' (number of benchmark data points that produced
-    a parsable value), independent of pytest pass/fail status."""
+    a parsable value), independent of pytest pass/fail status.
+
+    The infer-only family is excluded: the legacy count predates it, it is a
+    diagnostic twin of a row already counted here rather than a benchmark
+    case of its own, and every expectation this is read against
+    (``expected_cases``) counts the token family only.
+    """
     if not run_ids:
         return {}
     placeholders = ",".join(["?"] * len(run_ids))
     with _read_only(db_path) as con:
         rows = con.execute(
             f"SELECT run_id, count(*) FROM perf WHERE run_id IN ({placeholders}) "
+            f"AND {exclude_infer_sql()} "
             "GROUP BY run_id",
             run_ids,
         ).fetchall()
@@ -1352,6 +1360,11 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
 
         if selected_rows:
             run_placeholders = ",".join("?" for _ in selected_rows)
+            # Counted against `expected_cases`, which sums the tests'
+            # `expected_series` (prompts x 1st/2nd) and therefore knows
+            # nothing about the infer family. Counting infer here would put
+            # success above total and clamp series_failed to zero, hiding
+            # every genuinely missing series.
             series_counts = con.execute(
                 f"""
                 SELECT run_id, count(*) AS series_count
@@ -1360,6 +1373,7 @@ def daily_digest(db_path: Path, *, report_date: str, purpose: str,
                                     out_token, exec_mode, prompt_idx
                     FROM perf
                     WHERE run_id IN ({run_placeholders})
+                      AND {exclude_infer_sql()}
                 )
                 GROUP BY run_id
                 """,
@@ -1784,7 +1798,11 @@ def machines_overview(db_path: Path,
             ),
             counted AS (
                 SELECT k.*,
-                       (SELECT count(*) FROM perf p WHERE p.run_id = k.run_id)
+                       -- Token family only: success_cases is weighed against
+                       -- recorded_cases (expected_cases) below, and also
+                       -- feeds the "what a full run looks like" expectation.
+                       (SELECT count(*) FROM perf p WHERE p.run_id = k.run_id
+                         AND {exclude_infer_sql('p.exec_mode')})
                            AS success_cases,
                        {recorded_expr} AS recorded_cases
                 FROM ranked k

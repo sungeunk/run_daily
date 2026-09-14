@@ -165,6 +165,35 @@ class TestDailyDigest:
         assert rows[MACHINE]["viewer_query"] == "?run_id=run-newer"
         assert any("different OpenVINO" in warning for warning in digest["warnings"])
 
+    def test_infer_series_is_not_counted_as_success(self, db: Path):
+        """series_success is measured against expected_cases, which sums the
+        tests' expected_series and so counts the token family only. Letting
+        the infer twin in pushes success past total, and series_failed's
+        max(0, ...) then clamps a genuinely missing series to zero."""
+        rec = _record(0, value=100.0, triggered_by="scheduler")
+        rec.purpose = "daily_pipeline timer"
+        rec.total_tests = rec.passed_tests = 1
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        # Two token series were expected; one landed, and it carries an
+        # infer twin. The second token series never arrived.
+        rec.expected_cases = 2
+        rec.skipped_cases = 0
+        rec.perf.append(PerfRow("llama", "INT4", 32, 128, "2nd-infer", 99.0, "ms"))
+        _write(db, [rec])
+
+        digest = q.daily_digest(
+            db,
+            report_date="2026-01-01",
+            purpose="daily_pipeline timer",
+            triggered_by="scheduler",
+            expected_machines=[MACHINE],
+            day_start_hour=6,
+        )
+
+        row = {r["machine"]: r for r in digest["machines"]}[MACHINE]
+        assert row["series_success"] == 1, "the infer twin is not a success"
+        assert row["series_failed"] == 1, "the missing token series must show"
+
     def test_run_detail_returns_exact_run_and_issues(self, db: Path):
         rec = _record(0, value=100.0, triggered_by="scheduler")
         rec.total_tests, rec.passed_tests, rec.failed_tests = 1, 0, 1
@@ -428,6 +457,33 @@ class TestCaseCounts:
         row = ov.iloc[0]
         assert row["success_cases"] == 1
         assert row["expected_cases"] == 3
+
+    def test_infer_twin_does_not_inflate_success_cases(self, db: Path):
+        # success_cases is weighed against expected_cases, which counts the
+        # token family only, so counting the infer twin would report more
+        # cases than the run could ever have been expected to produce.
+        rec = _record(0, value=100.0)
+        rec.expected_cases = 2
+        rec.skipped_cases = 0
+        rec.perf.append(PerfRow("llama", "INT4", 32, 128, "2nd-infer", 99.0, "ms"))
+        _write(db, [rec])
+
+        row = q.machines_overview(db, [MACHINE]).iloc[0]
+        assert row["success_cases"] == 1
+        assert row["expected_cases"] == 2
+
+
+class TestSuccessCounts:
+    def test_infer_twin_is_not_a_benchmark_case(self, db: Path):
+        """The viewer's 'Success count' row predates the infer family and is
+        read against expected_cases, which counts the token family only."""
+        rec = _record(0, value=100.0)
+        rec.perf.append(PerfRow("llama", "INT4", 32, 128, "2nd-infer", 99.0, "ms"))
+        rec.perf.append(PerfRow("qwen", "INT4", 32, 128, "1st", 70.0, "ms"))
+        rec.perf.append(PerfRow("qwen", "INT4", 32, 128, "1st-infer", 69.0, "ms"))
+        _write(db, [rec])
+
+        assert q.success_counts(db, ["run-000"]) == {"run-000": 2}
 
 
 class TestFleetStatus:
