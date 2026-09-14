@@ -9,88 +9,14 @@ Extracted from ``run.py::_trend_verdict``.  Two modes:
 
 from __future__ import annotations
 
-import math
+from data.verdict import (Verdict, improvement_pct, verdict_from_pct,
+                          verdict_from_signal)
 
-from data import lower_is_better
-
-from .types import AnalysisConfig, ComparisonRow, SeriesKey, Verdict
-
-
-def improvement_pct(
-    current: float | None,
-    baseline: float | None,
-    unit: str | None,
-) -> float | None:
-    """Return signed improvement percentage.
-
-    Positive means the current run is *better* than baseline regardless
-    of the metric direction.  Returns *None* when baseline is zero or
-    unavailable.
-    """
-    if current is None or baseline is None:
-        return None
-    if not math.isfinite(current) or not math.isfinite(baseline):
-        return None
-    if baseline == 0.0:
-        return None
-    ratio = (current - baseline) / baseline
-    if lower_is_better(unit):
-        return -ratio   # lower current -> positive improvement
-    return ratio        # higher current -> positive improvement
+from .types import AnalysisConfig, ComparisonRow, SeriesKey
 
 
-def verdict_from_pct(pct: float | None, config: AnalysisConfig) -> Verdict:
-    """Classify *pct* into improved / same / regressed using simple threshold."""
-    return verdict_from_signal(pct, config)
-
-
-def verdict_from_signal(
-    pct: float | None,
-    config: AnalysisConfig,
-    *,
-    worsening_z: float | None = None,
-    recent_cv: float | None = None,
-    recent_n: int | None = None,
-    baseline_n: int | None = None,
-) -> Verdict:
-    """Classify one series using threshold + optional dual-gate signals.
-
-    Rules:
-    - invalid pct -> unavailable
-    - improvement (pct >= threshold) -> improved (bypasses dual-gate gates)
-    - regression (pct <= -threshold):
-      - if high CV -> noisy
-      - if insufficient points -> insufficient
-      - if z provided: regressed if z >= threshold, else same
-      - else: regressed
-    - neutral (|pct| < threshold) -> same
-    """
-    if pct is None or not math.isfinite(pct):
-        return "unavailable"
-
-    # Improvement bypasses all other gates (pct-only rule)
-    if pct >= config.pct_threshold:
-        return "improved"
-
-    # For regressions, check dual-gate signals
-    if pct <= -config.pct_threshold:
-        # Check points gates first (most restrictive)
-        if recent_n is not None and recent_n < config.min_recent_points:
-            return "insufficient"
-        if baseline_n is not None and baseline_n < config.min_baseline_points:
-            return "insufficient"
-
-        # Check noisy gate
-        if recent_cv is not None and math.isfinite(recent_cv) and recent_cv >= config.noisy_cv_threshold:
-            return "noisy"
-
-        # Apply z-threshold if available
-        if worsening_z is not None and math.isfinite(worsening_z):
-            return "regressed" if worsening_z >= config.z_threshold else "same"
-        return "regressed"
-
-    # Neutral: |pct| < threshold
-    return "same"
+__all__ = ["Verdict", "improvement_pct", "verdict_from_pct",
+           "verdict_from_signal", "make_comparison_row"]
 
 
 def make_comparison_row(

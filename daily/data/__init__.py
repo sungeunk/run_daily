@@ -28,8 +28,10 @@ from .filters import (
     DEFAULT_RUN_KINDS,
     RUN_KINDS,
     RunScope,
+    classify_run_kind,
     has_column,
     has_table,
+    parse_triggered_by,
     run_kind_predicate,
     tables,
 )
@@ -56,6 +58,13 @@ from .series import (
     token_bucket,
     worsening_pct,
 )
+from .verdict import (
+    Verdict,
+    VerdictThresholds,
+    improvement_pct,
+    verdict_from_pct,
+    verdict_from_signal,
+)
 from .stats import (
     MAD_TO_SIGMA,
     geomean,
@@ -77,8 +86,9 @@ __all__ = [
     "normalize_unit", "normalize_unit_sql", "normalize_value",
     "normalize_value_sql", "series_key_sql", "token_bucket", "worsening_pct",
     # filters
-    "DEFAULT_RUN_KINDS", "RUN_KINDS", "RunScope", "has_column", "has_table",
-    "run_kind_predicate", "tables",
+    "DEFAULT_RUN_KINDS", "RUN_KINDS", "RunScope", "classify_run_kind",
+    "has_column", "has_table", "parse_triggered_by", "run_kind_predicate",
+    "tables",
     # stats
     "MAD_TO_SIGMA", "geomean", "geomean_sql", "mad", "mad_ratio", "robust_cv",
     "robust_sigma", "robust_z", "safe_median",
@@ -87,4 +97,7 @@ __all__ = [
     "counts_are_consistent", "expected_cases", "expected_series_for_app",
     "expected_series_for_image_gen", "expected_series_for_llm",
     "failed_series", "success_series_scalar_sql", "success_series_sql",
+    # verdict
+    "Verdict", "VerdictThresholds", "improvement_pct",
+    "verdict_from_pct", "verdict_from_signal",
 ]

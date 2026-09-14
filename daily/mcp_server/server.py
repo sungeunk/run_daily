@@ -30,7 +30,7 @@ if str(DAILY_DIR) not in sys.path:
 
 import duckdb  # noqa: E402
 from mcp.server.mcpserver import MCPServer  # noqa: E402
-from viewer import queries  # noqa: E402
+from data import read as queries  # noqa: E402
 
 log = logging.getLogger(__name__)
 

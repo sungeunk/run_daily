@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from data import is_infer_exec_mode
-from data import stats
+from data import read, stats
 
 from .baseline import find_last_known_good
 from .functional import aggregate_functional
@@ -177,7 +177,7 @@ def _fetch_comparison_rows(
     release_values: dict[tuple, tuple[float, str | None]] | None = None,
 ) -> list[ComparisonRow]:
     run_id = rec if isinstance(rec, str) else rec.run_id
-    current_values = _load_current_values(con, run_id)
+    current_values = read.series_values_for_run(con, run_id)
 
     result: list[ComparisonRow] = []
 
@@ -309,30 +309,6 @@ def _attach_release(rows: list[ComparisonRow], release_values: dict[tuple, tuple
         current = row.current_value
         if current is not None and math.isfinite(current):
             row.release_improvement_pct = improvement_pct(current, value, row.unit or release_unit)
-
-
-def _load_current_values(con, run_id: str) -> dict[tuple, tuple[float, str | None]]:
-    """Per-series values of the run being analysed, read from the local DB."""
-    rows = con.execute(
-        """
-        SELECT model, precision, in_token, out_token, exec_mode,
-               min(unit) AS unit, avg(value) AS value
-        FROM perf
-        WHERE run_id = ?
-        GROUP BY model, precision, in_token, out_token, exec_mode
-        """,
-        [run_id],
-    ).fetchall()
-
-    out: dict[tuple, tuple[float, str | None]] = {}
-    for model, precision, in_token, out_token, exec_mode, unit, value in rows:
-        try:
-            num = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(num):
-            out[(model, precision, int(in_token), int(out_token), exec_mode)] = (num, unit)
-    return out
 
 
 def _history_stats(values: list[float], unit: str | None, config: AnalysisConfig) -> dict:
@@ -486,7 +462,7 @@ def _build_bisect_delta(
             sha_changed=None,
         )
 
-    lkg_reference_values = _load_current_values(con, lkg.run_id)
+    lkg_reference_values = read.series_values_for_run(con, lkg.run_id)
     lkg_rows = _fetch_comparison_rows(
         con,
         current_run_id,

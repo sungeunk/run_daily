@@ -24,6 +24,7 @@ rather than left for each caller to remember.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Sequence
@@ -194,3 +195,77 @@ class RunScope:
             return "", []
         joined = " AND ".join(parts)
         return (f" AND {joined}" if leading_and else joined), params
+
+
+# ---------------------------------------------------------------------------
+# Run identity
+# ---------------------------------------------------------------------------
+#
+# Lives here rather than in the ingest loader because the identity a run
+# declares and the identity a query filters on have to be the same idea.
+# queries.py already reached across into viewer.ingest.loader_new for
+# parse_triggered_by; with the loader as the owner, data would have had to
+# import its own consumer.
+
+# Free-form purpose text is the only hint about who launched a run, so map it
+# to a fixed vocabulary the viewer can filter on. Order matters: an explicit
+# PR marker wins over everything, and a run that calls itself daily stays
+# daily even if its description also mentions validation.
+# Word boundaries keep short tokens like 'ci' and 'pr' from matching inside
+# words such as 'precision'.
+_RUN_KIND_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("pr", r"\bpr[-_# ]*\d+|\bpull[-_ ]?request\b|\bpre-?commit\b"),
+    ("daily", r"\bdaily|\bnightly\b|\bweekly\b"),
+    ("test", r"\btest|\btrial\b|\bdebug\b|\bexperiment|\bjenkins\b|\bci\b|\bvalidation\b"),
+)
+
+
+def classify_run_kind(purpose: str | None, description: str | None = None) -> str:
+    """Map purpose/description text onto 'daily' | 'pr' | 'test' | 'manual'."""
+    text = f"{purpose or ''} {description or ''}".strip().lower()
+    if not text:
+        return "manual"
+    for kind, pattern in _RUN_KIND_PATTERNS:
+        if re.search(pattern, text):
+            return kind
+    return "manual"
+
+
+_GENERIC_TRIGGERED_BY = {
+    "daily", "nightly", "weekly", "timer", "pipeline",
+    "llm", "cb", "test", "validation", "manual", "scheduler",
+    "unknown", "jenkins", "build", "report"
+}
+
+_LEGACY_TIMER_PURPOSES = {
+    "daily2 timer",
+    "daily_cb timer",
+    "daily_pipeline timer",
+}
+
+
+def parse_triggered_by(purpose: str | None, description: str | None = None) -> str | None:
+    """Recover the execution identity from free-form purpose text.
+
+    Older summary files often omit the dedicated ``triggered_by`` metadata, but
+    the run description still ends with the launcher's identity, e.g.
+    ``daily pipeline sungeunk`` or ``daily_CB jenkins-user``.
+    """
+    normalized_purpose = (purpose or "").strip().lower()
+    if normalized_purpose in _LEGACY_TIMER_PURPOSES:
+        return "timer"
+
+    text = " ".join(part for part in (purpose, description) if part).strip()
+    if not text:
+        return None
+    tail = text.rsplit(maxsplit=1)[-1].strip(" \t\r\n.,;:()[]{}")
+    if not tail:
+        return None
+    # Ignore descriptive keywords and keep a meaningful creator name when the
+    # metadata is missing.
+    candidate = tail.strip("_-")
+    if not candidate or candidate.lower() in _GENERIC_TRIGGERED_BY:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", candidate):
+        return candidate
+    return None

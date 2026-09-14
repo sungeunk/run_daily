@@ -15,7 +15,7 @@ if str(DAILY_DIR) not in sys.path:
     sys.path.insert(0, str(DAILY_DIR))
 
 from analysis.functional import aggregate_functional  # noqa: E402
-from viewer import queries as q  # noqa: E402
+from data import read as q  # noqa: E402
 from viewer.ingest import writer  # noqa: E402
 from viewer.ingest.loader_new import _cases, _skipped_cases, classify_run_kind  # noqa: E402
 from viewer.ingest.record import IssueRow, MonitorRow, PerfRow, RunRecord  # noqa: E402

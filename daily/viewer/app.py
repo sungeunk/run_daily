@@ -40,12 +40,12 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-# Make `viewer.queries` importable when launched via `streamlit run`.
+# Make `data.read` importable when launched via `streamlit run`.
 _HERE = Path(__file__).resolve().parent
 if str(_HERE.parent) not in sys.path:
     sys.path.insert(0, str(_HERE.parent))
 
-from viewer import queries as q  # noqa: E402
+from data import read as q  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config / connection

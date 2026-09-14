@@ -12,25 +12,26 @@ import datetime as dt
 from functools import lru_cache
 from pathlib import Path
 import logging
+import math
 import re
 import time
 
 import duckdb
 import pandas as pd
 
-from analysis.types import AnalysisConfig
-from analysis.verdict import improvement_pct, verdict_from_pct
-from data import (
-    MAD_TO_SIGMA, count_success_series, counts_are_consistent,
-    direction_label_sql, direction_sign, exclude_infer_sql, failed_series,
-    normalize_value_sql, success_series_scalar_sql,
-)
-from viewer.ingest.loader_new import parse_triggered_by
+from .counts import (count_success_series, counts_are_consistent,
+                     failed_series, success_series_scalar_sql)
+from .filters import parse_triggered_by
+from .series import (direction_label_sql, direction_sign,
+                     exclude_infer_sql, normalize_unit_sql,
+                     normalize_value_sql, series_key_sql)
+from .stats import MAD_TO_SIGMA
+from .verdict import VerdictThresholds, improvement_pct, verdict_from_pct
 
 log = logging.getLogger(__name__)
 
 
-_COMPARE_CONFIG = AnalysisConfig()
+_COMPARE_CONFIG = VerdictThresholds()
 
 # Cache table existence per database file + mtime so the cache stays bounded
 # and automatically refreshes when the DuckDB file is rewritten.
@@ -309,6 +310,51 @@ def list_models(db_path: Path, machine: str | None = None,
             {where}
             ORDER BY p.model
         """, params).fetchall()]
+
+
+def series_values_for_run(con, run_id: str,
+                         *, normalize_units: bool = False,
+                         ) -> dict[tuple, tuple[float, str | None]]:
+    """Per-series value of one run, as ``{series_key: (value, unit)}``.
+
+    Takes an open connection because the analysis engine owns one for the
+    length of a run; every other reader here takes a path.
+
+    ``normalize_units`` is off by default, which keeps the raw stored unit.
+    That is deliberately *different* from what the viewer shows: perf_flat
+    serves ``viewer_value``/``viewer_unit``, so the three image-generation
+    models that report seconds read as milliseconds there and as seconds
+    here. Comparisons are unaffected -- current and baseline both come
+    through this function, so the ratio is the same either way -- but the
+    absolute numbers the analysis stores and the ones the dashboard draws
+    differ for those models. Flipping the default is a visible change to
+    stored values, so it is a decision of its own rather than a side effect
+    of moving this query.
+    """
+    value_expr = normalize_value_sql("value") if normalize_units else "value"
+    unit_expr = normalize_unit_sql("unit") if normalize_units else "unit"
+    rows = con.execute(
+        f"""
+        SELECT {series_key_sql()},
+               min({unit_expr}) AS unit,
+               avg({value_expr}) AS value
+        FROM perf
+        WHERE run_id = ?
+        GROUP BY {series_key_sql()}
+        """,
+        [run_id],
+    ).fetchall()
+
+    out: dict[tuple, tuple[float, str | None]] = {}
+    for model, precision, in_token, out_token, exec_mode, unit, value in rows:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            out[(model, precision, int(in_token), int(out_token),
+                 exec_mode)] = (number, unit)
+    return out
 
 
 def perf_for_runs(db_path: Path, run_ids: Sequence[str], *,

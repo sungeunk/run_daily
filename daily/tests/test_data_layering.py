@@ -103,10 +103,11 @@ def test_only_the_data_layer_and_the_monitor_open_duckdb():
     they own a connection's lifetime rather than a query's meaning — they are
     the next thing to move behind data.read/data.write.
     """
-    # run.py's _baseline_meta_from_db is the last ad-hoc reader; it moves
-    # into data.read in phase 2.
+    # run.py's _baseline_meta_from_db is the last ad-hoc reader and
+    # ingest/writer owns the write connection; both move into data in
+    # phase 3.
     allowed = {"common/monitor_parquet.py", "mcp_server/server.py",
-               "viewer/ingest/writer.py", "viewer/queries.py", "run.py"}
+               "viewer/ingest/writer.py", "run.py"}
     offenders = [
         str(path.relative_to(DAILY_DIR))
         for path, text in _python_files()
