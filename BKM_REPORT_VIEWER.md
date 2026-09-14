@@ -66,40 +66,25 @@ After a reinstall, only the `run_daily` repo is needed. The DuckDB file is
 
 ---
 
-# Legacy viewer (8501)
+# Legacy viewer (8501) — removed
 
-http://dg2raptorlake.ikor.intel.com:8501/
+The pickle/`.report`-based pipeline and its viewer were deleted once the
+`daily/` pytest suite covered every tab it offered (Excel Paste and
+Summary & Chart map onto Excel and Dashboard/Compare). Recover from git
+history if a question about a pre-migration run ever needs it:
 
-Old pickle/`.report`-based pipeline (`scripts/run_llm_daily.py`). Kept for
-reference during the migration to the pytest-based `daily/` suite below.
-
-## Settings
-dg2raptorlake
-src: /home/sungeunk/repo/run_daily/scripts/run_daily_report_viewer3.py
-service file: /etc/systemd/system/viewer_daily_report.service
-```ini
-[Unit]
- Description=Daily report viewer
-
-[Service]
- User=sungeunk
- WorkingDirectory=/home/sungeunk/repo/run_daily/scripts
- ExecStart=/home/sungeunk/miniforge3/envs/daily/bin/python -m streamlit run /home/sungeunk/repo/run_daily/scripts/run_daily_report_viewer3.py
- Restart=always
-
-[Install]
- WantedBy=multi-user.target
+```bash
+git log --diff-filter=D -- scripts/run_daily_report_viewer3.py
 ```
 
+The artefacts it read are untouched under `/var/www/html/daily/` — 19
+machines back to 2024-11, against the 9 the central DuckDB carries. Nothing
+writes there any more.
 
-## Start service
+Retire the service with:
+
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl stop viewer_daily_report
-sudo systemctl start viewer_daily_report
-sudo systemctl status viewer_daily_report
-
-sudo systemctl restart viewer_daily_report
+sudo systemctl disable --now viewer_daily_report.service
 ```
 
 ---

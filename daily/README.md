@@ -1,7 +1,7 @@
 # daily — pytest 기반 일일 테스트 수트 (WIP)
 
-`scripts/run_llm_daily.py` 의 대체 구현. 마이그레이션 기간 동안 기존
-`scripts/` 는 참조용으로 남아있으며, 모든 테스트가 여기로 포팅되면 제거 예정.
+기존 `scripts/run_llm_daily.py` 파이프라인의 대체 구현이며, 마이그레이션이
+끝나 legacy 스택은 제거되었다. 데이터 접근은 모두 `daily/data/` 를 거친다.
 
 ## 목표
 
