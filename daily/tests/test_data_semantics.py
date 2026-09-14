@@ -276,3 +276,62 @@ class TestRunScope:
         con.close()
         clause, params = RunScope(path, relation="runs_with_flags").where()
         assert clause == "" and params == []
+
+
+class TestValidation:
+    """The layer that would have caught this session's bug on day one."""
+
+    @staticmethod
+    def _rec(perf, *, expected=None, skipped=0):
+        from types import SimpleNamespace
+        rows = [SimpleNamespace(model=m, precision="INT4", in_token=i,
+                                out_token=256, exec_mode=e, prompt_idx=p)
+                for m, i, e, p in perf]
+        return SimpleNamespace(run_id="r1", perf=rows,
+                               expected_cases=expected, skipped_cases=skipped)
+
+    def test_success_above_expected_is_an_error_not_a_clamp(self):
+        from data.validate import check_run
+        # 2 expected, 3 token series stored: exactly the shape that made the
+        # fleet report show Failed: 0 while a series was genuinely missing.
+        rec = self._rec([("llama", 32, "1st", 0), ("llama", 32, "2nd", 0),
+                         ("qwen", 32, "1st", 0)], expected=2)
+        codes = {(f.code, f.severity) for f in check_run(rec)}
+        assert ("counts_overflow", "error") in codes
+
+    def test_a_consistent_run_reports_nothing(self):
+        from data.validate import check_run
+        rec = self._rec([("llama", 32, "1st", 0), ("llama", 32, "2nd", 0)],
+                        expected=4, skipped=2)
+        assert check_run(rec) == []
+
+    def test_infer_rows_do_not_count_toward_the_overflow(self):
+        from data.validate import check_run
+        # 2 token + 2 infer against an expectation of 2 is fine; counting the
+        # twins would have produced a false error.
+        rec = self._rec([("llama", 32, "1st", 0), ("llama", 32, "2nd", 0),
+                         ("llama", 32, "1st-infer", 0),
+                         ("llama", 32, "2nd-infer", 0)], expected=2)
+        assert [f.code for f in check_run(rec)] == []
+
+    def test_perf_without_a_declared_expectation_is_flagged(self):
+        from data.validate import check_run
+        rec = self._rec([("llama", 32, "1st", 0)], expected=None)
+        assert [f.code for f in check_run(rec)] == ["expectation_missing"]
+
+    def test_duplicate_series_keys_are_an_error(self):
+        from data.validate import check_run
+        rec = self._rec([("llama", 32, "1st", 0), ("llama", 32, "1st", 0)],
+                        expected=4)
+        codes = {f.code for f in check_run(rec)}
+        assert "duplicate_series" in codes
+
+    def test_an_infer_row_with_no_token_twin_is_flagged(self):
+        from data.validate import check_run
+        rec = self._rec([("llama", 32, "1st-infer", 0)], expected=2)
+        assert "orphan_infer_series" in {f.code for f in check_run(rec)}
+
+    def test_severity_must_be_known(self):
+        from data.validate import Finding
+        with pytest.raises(ValueError):
+            Finding("x", "catastrophic", "d")

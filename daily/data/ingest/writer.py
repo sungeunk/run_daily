@@ -11,6 +11,7 @@ from pathlib import Path
 
 import duckdb
 
+from .. import validate
 from .record import DeviceRecord, RunRecord
 
 log = logging.getLogger(__name__)
@@ -377,6 +378,7 @@ def upsert_run(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
             )
 
         _upsert_analysis(con, rec)
+        validate.store(con, rec.run_id, validate.check_run(rec))
         con.commit()
     except Exception:
         con.rollback()

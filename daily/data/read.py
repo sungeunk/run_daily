@@ -1450,6 +1450,7 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
         issue_rows: list[dict] = []
         comparison_rows: list[dict] = []
         analysis_totals: list[dict] = []
+        validation_rows: list[dict] = []
         if run_ids:
             run_placeholders = ",".join(["?"] * len(run_ids))
             issue_rows = con.execute(f"""
@@ -1484,6 +1485,14 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
             # the rows above: what ingest carries across is the aggregate
             # plus the top regressions, so counting comparisons would report
             # only the regressed ones and call every machine 100% regressed.
+            if "run_validations" in _tables_for_db(db_path):
+                validation_rows = con.execute(f"""
+                    SELECT r.machine, v.run_id, v.code, v.severity, v.detail
+                    FROM run_validations v
+                    JOIN runs r USING (run_id)
+                    WHERE v.run_id IN ({run_placeholders})
+                    ORDER BY v.severity, r.machine, v.code
+                """, run_ids).fetchdf().to_dict(orient="records")
             if "analysis_results" in _tables_for_db(db_path):
                 analysis_totals = con.execute(f"""
                     SELECT r.machine, ar.compared_count, ar.improved_count,
@@ -1517,6 +1526,10 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
         row["performance_status"] = (
             "available" if machine in verdict_counts else "unavailable"
         )
+        row["validations"] = [
+            {"code": v["code"], "severity": v["severity"], "detail": v["detail"]}
+            for v in validation_rows if str(v["machine"]) == machine
+        ]
         row["viewer_query"] = f"?run_id={row['run_id']}"
         machine_rows.append(row)
         if row.get("ov_version"):
@@ -1564,6 +1577,13 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
     ]
     if unavailable:
         warnings.append("Performance comparison unavailable for: " + ", ".join(unavailable))
+    # Invariant violations last but never omitted: the whole point is that a
+    # number which does not add up should not be able to look plausible.
+    for violation in validation_rows:
+        warnings.append(
+            f"[{violation['severity']}] {violation['machine']}: "
+            f"{violation['detail']}"
+        )
 
     return {
         "schema_version": 1,
@@ -1581,6 +1601,7 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
             "failed_machines": len(failed),
         },
         "machines": machine_rows,
+        "validations": validation_rows,
         "functional_issues": issue_rows,
         "top_regressions": regressions[:max(0, int(top_regressions))],
         "top_improvements": improvements[:max(0, int(top_improvements))],

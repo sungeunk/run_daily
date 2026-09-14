@@ -1043,3 +1043,45 @@ class TestAnalysisIngest:
             assert con.execute("SELECT count(*) FROM analysis_results").fetchone()[0] == 0
         finally:
             con.close()
+
+
+class TestValidationReachesTheReport:
+    def test_an_inconsistent_run_is_named_in_the_digest_warnings(self, db: Path):
+        """Recording the violation is only half the point; it has to be
+        visible where someone reads the numbers."""
+        rec = _record(0, value=100.0, triggered_by="timer")
+        rec.purpose = "daily_pipeline timer"
+        rec.ov_build = "23107"
+        rec.total_tests = rec.passed_tests = 1
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        # One token series stored, but the run claimed to expect none of it.
+        rec.expected_cases = 0
+        rec.perf.append(PerfRow("qwen", "INT4", 32, 128, "1st", 70.0, "ms"))
+        _write(db, [rec])
+
+        digest = q.daily_digest(
+            db, ov_build="23107", purpose="daily_pipeline timer",
+            triggered_by="timer", expected_machines=[MACHINE])
+
+        codes = {v["code"] for v in digest["validations"]}
+        assert "expectation_missing" in codes
+        assert any("expectation_missing" in v["code"]
+                   for v in digest["machines"][0]["validations"])
+        assert any("declared no expected" in w for w in digest["warnings"])
+
+    def test_a_clean_run_adds_no_validation_noise(self, db: Path):
+        rec = _record(0, value=100.0, triggered_by="timer")
+        rec.purpose = "daily_pipeline timer"
+        rec.ov_build = "23107"
+        rec.total_tests = rec.passed_tests = 1
+        rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
+        rec.expected_cases = 4
+        rec.skipped_cases = 3
+        _write(db, [rec])
+
+        digest = q.daily_digest(
+            db, ov_build="23107", purpose="daily_pipeline timer",
+            triggered_by="timer", expected_machines=[MACHINE])
+
+        assert digest["validations"] == []
+        assert not any(w.startswith("[") for w in digest["warnings"])

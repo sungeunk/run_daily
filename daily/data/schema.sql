@@ -262,6 +262,19 @@ ON CONFLICT (key) DO NOTHING;
 -- which would otherwise collapse the common-series intersection for the
 -- whole cohort. The Excel tab's manual run picker deliberately ignores this
 -- table since it lets the user pick any run on purpose.
+-- Invariants that did not hold for a stored run. Ingest records instead of
+-- rejecting: a nightly run that already cost an hour of machine time has to
+-- land even when its bookkeeping is odd, and the report is where the
+-- inconsistency belongs. See daily/data/validate.py.
+CREATE TABLE IF NOT EXISTS run_validations (
+    run_id     TEXT NOT NULL,
+    code       TEXT NOT NULL,
+    severity   TEXT NOT NULL,
+    detail     TEXT,
+    checked_at TIMESTAMP DEFAULT now(),
+    PRIMARY KEY (run_id, code)
+);
+
 CREATE TABLE IF NOT EXISTS run_exclusions (
     run_id      TEXT PRIMARY KEY,
     machine     TEXT NOT NULL,

@@ -58,6 +58,7 @@ from .series import (
     token_bucket,
     worsening_pct,
 )
+from .validate import Finding, check_run
 from .verdict import (
     Verdict,
     VerdictThresholds,
@@ -100,4 +101,6 @@ __all__ = [
     # verdict
     "Verdict", "VerdictThresholds", "improvement_pct",
     "verdict_from_pct", "verdict_from_signal",
+    # validate
+    "Finding", "check_run",
 ]
