@@ -1026,6 +1026,20 @@ class TestAnalysisIngest:
              "history_count": 10, "history_median": 642.9,
              "reference_source": "baseline"},
         ],
+        "regressions": [
+            {"model": "gemma-2-9b-it", "precision": "INT4", "in_token": 1033,
+             "out_token": 256, "exec_mode": "1st", "unit": "ms",
+             "current_value": 779.8, "baseline_value": 655.8,
+             "improvement_pct": -0.189, "verdict": "regressed",
+             "history_count": 10, "history_median": 642.9,
+             "reference_source": "baseline"},
+            {"model": "llama-3", "precision": "INT4", "in_token": 32,
+             "out_token": 128, "exec_mode": "2nd", "unit": "ms",
+             "current_value": 22.5, "baseline_value": 20.0,
+             "improvement_pct": -0.125, "verdict": "regressed",
+             "history_count": 10, "history_median": 20.0,
+             "reference_source": "baseline"},
+        ],
     }
 
     def _write_with_analysis(self, db: Path, analysis):
@@ -1050,7 +1064,10 @@ class TestAnalysisIngest:
             con.close()
 
         assert result == ("yellow", "base-1", 81, 0, 78, 3, 2)
-        assert comparisons == [("gemma-2-9b-it", "1st", "regressed", "baseline")]
+        assert comparisons == [
+            ("gemma-2-9b-it", "1st", "regressed", "baseline"),
+            ("llama-3", "2nd", "regressed", "baseline"),
+        ]
 
     def test_digest_counts_verdicts_from_the_aggregate_not_the_top_rows(
             self, db: Path):
@@ -1080,6 +1097,54 @@ class TestAnalysisIngest:
             assert con.execute("SELECT count(*) FROM analysis_results").fetchone()[0] == 0
         finally:
             con.close()
+
+    def test_digest_returns_all_regressions_and_per_run_html_url(self, db: Path):
+        rec = _record(0, value=100.0, triggered_by="timer")
+        rec.purpose = "daily_pipeline timer"
+        rec.ov_build = "23107"
+        rec.report_file = "daily.20260913_2342.summary.json"
+        rec.total_tests = rec.passed_tests = 1
+        rec.analysis = self.ANALYSIS
+        _write(db, [rec])
+
+        digest = q.daily_digest(
+            db, ov_build="23107", purpose="daily_pipeline timer",
+            triggered_by="timer", expected_machines=[MACHINE], top_regressions=None,
+            html_report_base_url="http://reports.local",
+        )
+
+        assert len(digest["top_regressions"]) == 2
+        assert digest["machines"][0]["html_report_url"] == (
+            "http://reports.local/daily2/TEST-01/2026.09/daily.20260913_2342.html"
+        )
+
+    def test_digest_resolves_last_good_html_report_for_issue(self, db: Path):
+        last_good = _record(-1, value=100.0, triggered_by="timer")
+        last_good.run_id = "last-good"
+        last_good.report_file = "daily.20251231_2358.summary.json"
+        current = _record(0, value=100.0, triggered_by="timer")
+        current.purpose = "daily_pipeline timer"
+        current.ov_build = "23107"
+        current.report_file = "daily.20260101_1200.summary.json"
+        current.total_tests = current.passed_tests = 1
+        current.analysis = {
+            **self.ANALYSIS,
+            "last_known_good": {"status": "found", "run_id": "last-good"},
+        }
+        current.issues.append(IssueRow("test", "failed", model="llama", precision="INT4"))
+        _write(db, [last_good, current])
+
+        digest = q.daily_digest(
+            db, ov_build="23107", purpose="daily_pipeline timer",
+            triggered_by="timer", expected_machines=[MACHINE],
+            html_report_base_url="http://reports.local",
+        )
+
+        issue = digest["functional_issues"][0]
+        assert issue["last_good_run_id"] == "last-good"
+        assert issue["last_good_html_report_url"] == (
+            "http://reports.local/daily2/TEST-01/2025.12/daily.20251231_2358.html"
+        )
 
 
 class TestValidationReachesTheReport:

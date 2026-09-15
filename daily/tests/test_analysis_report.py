@@ -89,3 +89,22 @@ def test_release_columns_require_actual_data(
     assert f"colspan='{width}'" in rendered
     assert f"colspan='{11 if visible else 13}'" not in rendered
     assert ("Relative change vs the release build" in rendered) == visible
+
+
+def test_measurement_unit_is_html_escaped() -> None:
+    result = AnalysisResult(
+        overall_status="green", baseline=BaselineInfo(status="not_found"),
+        functional=FunctionalResult(total=1, passed=1, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=1, improved=0, same=1, regressed=0, unavailable=0),
+        models=[], top_regressions=[],
+        rows=[ComparisonRow(
+            key=SeriesKey("model", "FP16", 1, 1, "1st"),
+            unit='<img src=x onerror=alert(1)>', current_value=1.0, baseline_value=1.0,
+            improvement_pct=0.0, verdict="same",
+        )],
+    )
+
+    rendered = render_analysis_html(result)
+
+    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
+    assert "<img src=x onerror=alert(1)>" not in rendered

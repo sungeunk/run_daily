@@ -42,7 +42,15 @@ class ReferenceResult:
         self.history: SeriesHistory = history or {}
 
 
-def fetch_reference(config: AnalysisConfig, rec: "RunRecord") -> ReferenceResult:
+def _run_sql(config: AnalysisConfig, sql: str, client=None) -> list[dict]:
+    if client is not None:
+        return client.run_sql(sql)
+    from common.mcp_client import run_sql
+
+    return run_sql(config.mcp_url, sql, timeout=config.mcp_timeout_sec)
+
+
+def fetch_reference(config: AnalysisConfig, rec: "RunRecord", *, client=None) -> ReferenceResult:
     """Return the newest scheduled run older than *rec*, plus its history.
 
     Paged queries pull the last ``config.history_window`` scheduled runs;
@@ -57,10 +65,10 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord") -> ReferenceResult
                          detail="current run has no machine name")
         )
 
-    from common.mcp_client import McpError, run_sql
+    from common.mcp_client import McpError
 
     try:
-        runs = run_sql(url, _reference_runs_sql(config, rec), timeout=config.mcp_timeout_sec)
+        runs = _run_sql(config, _reference_runs_sql(config, rec), client)
     except McpError as exc:
         return ReferenceResult(
             BaselineInfo(status="unavailable", machine=machine, source_url=url, detail=str(exc))
@@ -80,7 +88,7 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord") -> ReferenceResult
     newest = runs[0]
     run_ids = [str(row.get("run_id") or "") for row in runs if row.get("run_id")]
     try:
-        perf_rows = _fetch_perf_rows(config, run_ids)
+        perf_rows = _fetch_perf_rows(config, run_ids, client=client)
     except McpError as exc:
         return ReferenceResult(
             BaselineInfo(status="unavailable", machine=machine, source_url=url, detail=str(exc))
@@ -100,7 +108,7 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord") -> ReferenceResult
     return ReferenceResult(info, values, history)
 
 
-def fetch_release(config: AnalysisConfig, machine: str | None) -> tuple[ReleaseInfo, SeriesValues]:
+def fetch_release(config: AnalysisConfig, machine: str | None, *, client=None) -> tuple[ReleaseInfo, SeriesValues]:
     """Return the newest release run for *machine* and its per-series values."""
     if not config.release_enabled:
         return ReleaseInfo(status="disabled"), {}
@@ -110,11 +118,10 @@ def fetch_release(config: AnalysisConfig, machine: str | None) -> tuple[ReleaseI
         return ReleaseInfo(status="not_found", source_url=url,
                            detail="current run has no machine name"), {}
 
-    from common.mcp_client import McpError, run_sql
+    from common.mcp_client import McpError
 
     try:
-        runs = run_sql(url, _latest_release_sql(machine, config.release_purpose_like),
-                       timeout=config.mcp_timeout_sec)
+        runs = _run_sql(config, _latest_release_sql(machine, config.release_purpose_like), client)
     except McpError as exc:
         return ReleaseInfo(status="unavailable", machine=machine,
                            source_url=url, detail=str(exc)), {}
@@ -133,7 +140,7 @@ def fetch_release(config: AnalysisConfig, machine: str | None) -> tuple[ReleaseI
     run = runs[0]
     run_id = str(run.get("run_id") or "")
     try:
-        perf_rows = _fetch_perf_rows(config, [run_id])
+        perf_rows = _fetch_perf_rows(config, [run_id], client=client)
     except McpError as exc:
         return ReleaseInfo(status="unavailable", machine=machine,
                            source_url=url, detail=str(exc)), {}
@@ -151,6 +158,13 @@ def fetch_release(config: AnalysisConfig, machine: str | None) -> tuple[ReleaseI
         ),
         values,
     )
+
+
+def fetch_series_values(config: AnalysisConfig, run_id: str, *, client=None) -> SeriesValues:
+    """Fetch one run's complete performance series through daily_results."""
+    rows = _fetch_perf_rows(config, [run_id], client=client)
+    values, _ = _split_perf(rows, newest_run_id=run_id, order=[run_id])
+    return values
 
 
 # ---------------------------------------------------------------------------
@@ -187,9 +201,9 @@ def _latest_release_sql(machine: str, purpose_like: str) -> str:
     )
 
 
-def _fetch_perf_rows(config: AnalysisConfig, run_ids: list[str]) -> list[dict]:
+def _fetch_perf_rows(config: AnalysisConfig, run_ids: list[str], *, client=None) -> list[dict]:
     """Fetch complete grouped performance data within the MCP response limit."""
-    from common.mcp_client import McpError, run_sql
+    from common.mcp_client import McpError
 
     if not run_ids:
         return []
@@ -197,7 +211,7 @@ def _fetch_perf_rows(config: AnalysisConfig, run_ids: list[str]) -> list[dict]:
     count_sql = f"SELECT count(*) AS total FROM ({sql}) AS series"
 
     def row_count() -> int:
-        counts = run_sql(config.mcp_url, count_sql, timeout=config.mcp_timeout_sec)
+        counts = _run_sql(config, count_sql, client)
         if len(counts) != 1 or type(counts[0].get("total")) is not int or counts[0]["total"] < 0:
             raise McpError("Incomplete performance lookup: invalid row count")
         return counts[0]["total"]
@@ -208,11 +222,7 @@ def _fetch_perf_rows(config: AnalysisConfig, run_ids: list[str]) -> list[dict]:
     order = ", ".join(_PERF_KEY_COLUMNS)
     for offset in range(0, expected, _PERF_PAGE_SIZE):
         limit = min(_PERF_PAGE_SIZE, expected - offset)
-        page = run_sql(
-            config.mcp_url,
-            f"{sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}",
-            timeout=config.mcp_timeout_sec,
-        )
+        page = _run_sql(config, f"{sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}", client)
         if len(page) != limit:
             raise McpError(
                 f"Incomplete performance lookup: expected {limit} rows at offset {offset}, "

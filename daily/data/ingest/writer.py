@@ -85,6 +85,7 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
     """Apply idempotent column migrations for long-lived existing DBs."""
     migrations = [
         "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now()",
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS last_known_good_run_id TEXT",
         "ALTER TABLE analysis_comparisons ADD COLUMN IF NOT EXISTS threshold_pct DOUBLE",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_info TEXT",
         "ALTER TABLE runs ADD COLUMN IF NOT EXISTS host_memory_size_gb DOUBLE",
@@ -418,6 +419,7 @@ def _upsert_analysis(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
     performance = analysis.get("performance") or {}
     functional = analysis.get("functional") or {}
     baseline = analysis.get("baseline") or {}
+    last_known_good = analysis.get("last_known_good") or {}
 
     def _count(source: dict, key: str) -> int:
         try:
@@ -429,12 +431,13 @@ def _upsert_analysis(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
     con.execute(
         """
         INSERT INTO analysis_results (
-            run_id, baseline_run_id, overall_status, compared_count,
+            run_id, baseline_run_id, last_known_good_run_id, overall_status, compared_count,
             improved_count, same_count, regressed_count, functional_fail_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [rec.run_id,
          baseline.get("run_id"),
+         last_known_good.get("run_id") if last_known_good.get("status") == "found" else None,
          str(analysis.get("overall_status") or "unknown"),
          _count(performance, "compared"),
          _count(performance, "improved"),
@@ -445,7 +448,8 @@ def _upsert_analysis(con: duckdb.DuckDBPyConnection, rec: RunRecord) -> None:
 
     con.execute("DELETE FROM analysis_comparisons WHERE run_id = ?", [rec.run_id])
     rows = []
-    for entry in analysis.get("top_regressions") or []:
+    comparison_entries = analysis.get("regressions") or analysis.get("top_regressions") or []
+    for entry in comparison_entries:
         if not isinstance(entry, dict):
             continue
         rows.append((

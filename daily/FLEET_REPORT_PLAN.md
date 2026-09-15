@@ -8,7 +8,7 @@
 
 ## 2. 핵심 원칙
 
-1. 같은 날짜에 실행된 결과를 하나의 daily cycle로 묶는다.
+1. 같은 OpenVINO build에서 실행된 결과를 하나의 daily cycle로 묶는다.
 2. OpenVINO 버전은 머신마다 달라도 허용한다.
 3. 각 머신에서는 조건에 맞는 마지막 run 하나를 선택한다.
 4. run 선택 시 날짜, `purpose`, 실행자를 핵심 조건으로 사용한다.
@@ -33,10 +33,10 @@ flowchart LR
 
 ### 4.1 선택 기준
 
-리포트 대상 날짜를 먼저 결정한 뒤, 각 머신에서 다음 조건을 모두 만족하는 run 중 마지막 run을 선택한다.
+리포트 대상 build를 먼저 결정한 뒤, 각 머신에서 다음 조건을 모두 만족하는 run 중 마지막 run을 선택한다.
 
 1. `machine`이 설정된 예상 머신과 일치한다.
-2. run의 기준 날짜가 리포트 대상 날짜와 일치한다.
+2. run의 OpenVINO build가 리포트 대상 build와 일치한다.
 3. `purpose`가 설정값과 일치한다.
 4. 실행자(`triggered_by`)가 설정값과 일치한다.
 5. partial run이나 명시적으로 제외된 run이 아니다.
@@ -45,7 +45,7 @@ flowchart LR
 즉, OpenVINO version/build가 아니라 다음 key로 후보군을 제한한다.
 
 ```text
-(report_date, machine, purpose, triggered_by)
+(ov_build, machine, purpose, triggered_by)
 ```
 
 후보군 안에서는 다음 순서로 하나를 선택한다.
@@ -57,26 +57,14 @@ LIMIT 1
 
 `ts`가 같을 때는 나중에 ingest된 결과를 선택한다. 동일 조건의 중복 run이 있으면 선택된 run 외의 개수도 warning으로 남긴다.
 
-### 4.2 날짜 처리
+### 4.2 Build cycle 처리
 
-머신 시간이 조금씩 다르고 테스트가 자정을 넘길 수 있으므로 날짜의 의미를 명확히 고정한다.
+머신 시간이 조금씩 다르고 테스트가 자정을 넘길 수 있으므로 cycle은 날짜가 아니라 `ov_build`로 고정한다.
 
-- 기본 기준은 run 시작 시각인 `runs.ts`의 날짜이다.
-- 모든 timestamp는 중앙 DB에서 사용하는 timezone 기준으로 비교한다.
-- 운영 timezone은 JSON 설정의 `timezone`으로 명시한다.
-- 필요하면 `day_start_hour`를 두어 오전 0시 이후 끝난 run을 전날 cycle로 묶을 수 있게 한다.
-- 이전 날짜의 run을 누락 머신의 최신 결과처럼 자동 대체하지 않는다.
-
-권장 초기값은 다음과 같다.
-
-```json
-{
-  "timezone": "Asia/Seoul",
-  "day_start_hour": 0
-}
-```
-
-실제 DB의 `ts`가 timezone 정보가 없는 local time이면 서버와 각 머신의 timezone을 먼저 통일한다.
+- 기본 build는 조건에 맞는 run 중 가장 최근 timestamp를 가진 build다.
+- 선택한 build에서 머신별 마지막 eligible run을 `ts DESC, ingested_at DESC`로 고른다.
+- 누락 머신을 이전 build의 run으로 자동 대체하지 않는다.
+- 동일 build가 여러 날 재시험된 경우에도 각 머신의 최신 eligible run만 포함하고, 후보가 여러 개인 경우 warning으로 남긴다.
 
 ### 4.3 OpenVINO 버전 처리
 
@@ -118,8 +106,6 @@ LIMIT 1
   "mcp_url": "http://dg2raptorlake.ikor.intel.com:8090/mcp",
   "viewer_base_url": "http://dg2raptorlake.ikor.intel.com:8501",
   "report_base_url": "http://dg2raptorlake.ikor.intel.com/daily2",
-  "timezone": "Asia/Seoul",
-  "day_start_hour": 6,
   "purpose": "daily_pipeline timer",
   "triggered_by": "scheduler",
   "expected_machines": [
@@ -158,7 +144,7 @@ LIMIT 1
 
 ```text
 daily_results_daily_digest(
-    report_date: string,
+    ov_build: string,
     purpose: string,
     triggered_by: string,
     expected_machines: list[string],
@@ -177,7 +163,7 @@ daily_results_daily_digest(
   "schema_version": 1,
   "generated_at": "2026-09-10T02:00:00+09:00",
   "selection": {
-    "report_date": "2026-09-09",
+    "ov_build": "23107",
     "purpose": "daily_pipeline timer",
     "triggered_by": "scheduler"
   },
@@ -288,13 +274,13 @@ CLI 인자는 최소한으로 유지한다.
 
 ```text
 --config PATH
---date YYYY-MM-DD
+--build BUILD_NUMBER
 --dry-run
 --force
 ```
 
 - `--config`: JSON 설정 파일 경로. 기본 경로를 제공한다.
-- `--date`: 재생성이나 테스트가 필요할 때만 지정한다. 기본값은 자동 계산한 이전 daily 날짜이다.
+- `--build`: 재생성이나 테스트가 필요할 때만 지정한다. 기본값은 조건에 맞는 run 중 가장 최근 timestamp를 가진 build다.
 - `--dry-run`: HTML만 생성하고 메일은 보내지 않는다.
 - `--force`: 이미 발송한 날짜를 다시 발송한다.
 
@@ -314,7 +300,7 @@ MCP URL, 머신 목록, purpose, 실행자, 수신자, polling, 표시 개수 �
 모든 머신이 같은 시각에 끝난다고 가정하지 않는다.
 
 1. 통합 리포트 job을 01:30 또는 02:00 무렵 시작한다.
-2. 같은 `report_date`, `purpose`, `triggered_by` 조건으로 MCP를 주기적으로 호출한다.
+2. 같은 `ov_build`, `purpose`, `triggered_by` 조건으로 MCP를 주기적으로 호출한다.
 3. 모든 예상 머신의 적합한 run이 준비되면 즉시 발송한다.
 4. JSON 설정의 최대 대기시간이 지나면 polling을 중단한다.
 5. deadline까지 결과가 없는 머신을 포함한 `INCOMPLETE` 리포트를 한 번 발송한다.
@@ -323,10 +309,11 @@ MCP URL, 머신 목록, purpose, 실행자, 수신자, polling, 표시 개수 �
 
 ## 10. 중복 발송 방지
 
-중복 방지 key는 OpenVINO build를 포함하지 않는다. 머신마다 버전이 다를 수 있기 때문이다.
+중복 방지 key는 build, purpose, 실행자와 선택된 run ID를 사용한다. 머신마다 version은 달라도
+같은 build를 재시험할 수 있으므로 run ID가 달라지면 새 보고서로 처리한다.
 
 ```text
-<report-date>_<purpose>_<triggered-by>
+<ov-build>_<purpose>_<triggered-by>_<sorted-run-ids>
 ```
 
 상태 파일에는 수신자 목록, 생성된 리포트 경로, 발송 시각과 결과를 기록한다. 이미 성공적으로 발송한 key는 `--force`가 없으면 다시 보내지 않는다.

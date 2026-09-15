@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from data import is_infer_exec_mode
-from data import read, stats
+from data import stats
 
 from .baseline import find_last_known_good
 from .functional import aggregate_functional
@@ -167,18 +167,14 @@ def analyze_run(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_comparison_rows(
-    con,
-    rec,
-    config: AnalysisConfig,
+def build_comparison_rows(
+    current_values: dict[tuple[str, str, int, int, str], tuple[float, str | None]],
     *,
+    config: AnalysisConfig,
     reference_values: dict[tuple, tuple[float, str | None]],
     history_map: dict[tuple, list[float]],
     release_values: dict[tuple, tuple[float, str | None]] | None = None,
 ) -> list[ComparisonRow]:
-    run_id = rec if isinstance(rec, str) else rec.run_id
-    current_values = read.series_values_for_run(con, run_id)
-
     result: list[ComparisonRow] = []
 
     # A series present only in the reference still deserves a row: it means
@@ -291,6 +287,27 @@ def _fetch_comparison_rows(
 
     _attach_release(result, release_values or {})
     return result
+
+
+def _fetch_comparison_rows(
+    con,
+    rec,
+    config: AnalysisConfig,
+    *,
+    reference_values: dict[tuple, tuple[float, str | None]],
+    history_map: dict[tuple, list[float]],
+    release_values: dict[tuple, tuple[float, str | None]] | None = None,
+) -> list[ComparisonRow]:
+    from data import read
+
+    run_id = rec if isinstance(rec, str) else rec.run_id
+    return build_comparison_rows(
+        read.series_values_for_run(con, run_id),
+        config=config,
+        reference_values=reference_values,
+        history_map=history_map,
+        release_values=release_values,
+    )
 
 
 def _attach_release(rows: list[ComparisonRow], release_values: dict[tuple, tuple[float, str | None]]) -> None:
@@ -419,6 +436,8 @@ def _build_bisect_delta(
     functional_issue_count: int,
     config: AnalysisConfig,
 ) -> BisectDelta:
+    from data import read
+
     issue_meta = _fetch_run_meta(con, current_run_id)
 
     if lkg.status != "found" or not lkg.run_id:

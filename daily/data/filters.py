@@ -29,8 +29,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Sequence
 
-import duckdb
-
 #: Canonical run kinds. Anything else the sidebar offers is free text.
 RUN_KINDS = ("daily", "pr", "test", "manual")
 DEFAULT_RUN_KINDS = ("daily",)
@@ -49,6 +47,8 @@ FLAG_RELATIONS = frozenset({"runs_with_flags", "perf_flat", "perf_stats"})
 
 @lru_cache(maxsize=32)
 def _cached_tables(db_path_str: str, mtime_ns: int) -> frozenset[str]:
+    import duckdb
+
     with duckdb.connect(db_path_str, read_only=True) as con:
         return frozenset(
             row[0] for row in con.execute(
@@ -61,6 +61,8 @@ def _cached_tables(db_path_str: str, mtime_ns: int) -> frozenset[str]:
 @lru_cache(maxsize=64)
 def _cached_columns(db_path_str: str, relation: str,
                     mtime_ns: int) -> frozenset[str]:
+    import duckdb
+
     with duckdb.connect(db_path_str, read_only=True) as con:
         try:
             return frozenset(row[0] for row in

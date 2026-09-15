@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS display_rows (
 CREATE TABLE IF NOT EXISTS analysis_results (
     run_id                TEXT PRIMARY KEY,
     baseline_run_id       TEXT,
+    last_known_good_run_id TEXT,
     overall_status        TEXT NOT NULL,
     compared_count        INTEGER NOT NULL DEFAULT 0,
     improved_count        INTEGER NOT NULL DEFAULT 0,

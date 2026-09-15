@@ -54,14 +54,16 @@ def _is_carve_out(dedicated_mb, shared_mb) -> bool:
         return False
 
 
-def _series_counts(summary: dict | None) -> tuple[int, int, int]:
+def _series_counts(summary: dict | None, result: AnalysisResult) -> tuple[int, int, int]:
     """Return ``(skipped, success, failed)`` series counts for the run.
 
     Counted per ``expected_series`` rather than per test function, matching
     ``common.delivery.mail_title_suffix``: one test function can stand for
     several benchmark series.
     """
-    summary = summary or {}
+    if summary is None:
+        functional = result.functional
+        return functional.skipped, functional.passed, functional.failed + functional.error
     return (expected_cases(summary, {"skipped"}),
             expected_cases(summary, {"passed"}),
             expected_cases(summary, {"failed", "error"}))
@@ -297,7 +299,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     fluctuation_same = sum(1 for r in result.rows if r.within_fluctuation)
     # Top table counts one benchmark series as one unit, including the series
     # skipped tests would have produced.
-    series_skipped, series_success, series_failed = _series_counts(summary)
+    series_skipped, series_success, series_failed = _series_counts(summary, result)
     series_total = series_skipped + series_success + series_failed
 
     baseline_text = "not found"
@@ -359,7 +361,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         if v is None or not math.isfinite(v):
             return "n/a"
         s = f"{v:.3f}"
-        return f"{s} {unit}".strip() if unit else s
+        return f"{s} {html.escape(unit)}".strip() if unit else s
 
     def _fmt_cv(v: float | None) -> str:
         return "n/a" if v is None else f"{v * 100:.2f}%"

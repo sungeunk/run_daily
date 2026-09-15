@@ -15,6 +15,7 @@ import logging
 import math
 import re
 import time
+from urllib.parse import quote, urlparse
 
 import duckdb
 import pandas as pd
@@ -1361,11 +1362,30 @@ def recent_builds(db_path: Path, *, purpose: str, triggered_by: str,
     return rows.to_dict(orient="records")
 
 
+def _html_report_url(base_url: str | None, row: dict) -> str | None:
+    if not base_url:
+        return None
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    report_file = str(row.get("report_file") or "")
+    match = re.fullmatch(r"daily\.(\d{8}_\d{4})\.summary\.json", report_file)
+    machine = str(row.get("machine") or "")
+    if match is None or not machine:
+        return None
+    stamp = match.group(1)
+    return (
+        f"{base_url.rstrip('/')}/daily2/{quote(machine, safe='')}/"
+        f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
+    )
+
+
 def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
                  triggered_by: str, expected_machines: Sequence[str],
                  max_functional_issues: int = 20,
-                 top_regressions: int = 10,
-                 top_improvements: int = 5) -> dict:
+                 top_regressions: int | None = 10,
+                 top_improvements: int = 5,
+                 html_report_base_url: str | None = None) -> dict:
     """Build a bounded fleet summary for one OpenVINO build across the fleet.
 
     The cycle is identified by ``ov_build`` rather than by a calendar date:
@@ -1453,6 +1473,20 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
         validation_rows: list[dict] = []
         if run_ids:
             run_placeholders = ",".join(["?"] * len(run_ids))
+            last_good_by_run: dict[str, dict] = {}
+            if "analysis_results" in _tables_for_db(db_path):
+                last_good_rows = con.execute(f"""
+                    SELECT current.run_id, previous.run_id AS last_good_run_id,
+                           previous.machine AS last_good_machine,
+                           previous.report_file AS last_good_report_file
+                    FROM analysis_results current
+                    JOIN runs current_run ON current_run.run_id = current.run_id
+                    LEFT JOIN runs previous ON previous.run_id = current.last_known_good_run_id
+                        AND previous.machine = current_run.machine
+                        AND previous.ts < current_run.ts
+                    WHERE current.run_id IN ({run_placeholders})
+                """, run_ids).fetchdf().to_dict(orient="records")
+                last_good_by_run = {str(row["run_id"]): row for row in last_good_rows}
             issue_rows = con.execute(f"""
                   SELECT r.machine, fi.run_id, fi.nodeid, fi.outcome,
                       fi.message, fi.model, fi.precision, r.rawlog_path
@@ -1471,6 +1505,15 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
             for issue in issue_rows:
                 issue["failed_series"] = failed_series_by_run.get(
                     str(issue.get("run_id")), 0
+                )
+                last_good = last_good_by_run.get(str(issue.get("run_id")), {})
+                issue["last_good_run_id"] = last_good.get("last_good_run_id")
+                issue["last_good_html_report_url"] = _html_report_url(
+                    html_report_base_url,
+                    {
+                        "machine": last_good.get("last_good_machine"),
+                        "report_file": last_good.get("last_good_report_file"),
+                    },
                 )
             comparison_rows = con.execute(f"""
                 SELECT r.machine, a.run_id, a.model, a.precision,
@@ -1531,6 +1574,7 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
             for v in validation_rows if str(v["machine"]) == machine
         ]
         row["viewer_query"] = f"?run_id={row['run_id']}"
+        row["html_report_url"] = _html_report_url(html_report_base_url, row)
         machine_rows.append(row)
         if row.get("ov_version"):
             versions.add(str(row["ov_version"]))
@@ -1603,7 +1647,10 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
         "machines": machine_rows,
         "validations": validation_rows,
         "functional_issues": issue_rows,
-        "top_regressions": regressions[:max(0, int(top_regressions))],
+        "top_regressions": (
+            regressions if top_regressions is None or top_regressions < 0
+            else regressions[:max(0, int(top_regressions))]
+        ),
         "top_improvements": improvements[:max(0, int(top_improvements))],
         "warnings": warnings,
     }

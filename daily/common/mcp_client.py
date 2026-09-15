@@ -55,6 +55,24 @@ class McpHttpClient:
         ]
         return "".join(texts)
 
+    def call_json_tool(self, name: str, arguments: dict) -> Any:
+        """Call a tool and decode its JSON text payload in this MCP session."""
+        payload = self.call_tool(name, arguments)
+        try:
+            result = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise McpError(f"unparsable tool output: {payload[:200]}") from exc
+        if isinstance(result, dict) and "error" in result:
+            raise McpError(f"tool {name} failed: {result['error']}")
+        return result
+
+    def run_sql(self, sql: str) -> list[dict]:
+        """Run read-only SQL through daily_results in this MCP session."""
+        rows = self.call_json_tool("daily_results_run_sql", {"sql": sql})
+        if not isinstance(rows, list):
+            raise McpError(f"unexpected tool output type: {type(rows).__name__}")
+        return rows
+
     # -- protocol -----------------------------------------------------------
 
     def _initialize(self) -> None:
@@ -129,21 +147,10 @@ def call_json_tool(url: str, name: str, arguments: dict,
                    *, timeout: float = 15.0) -> Any:
     """Call an MCP tool and decode its JSON text payload."""
     with McpHttpClient(url, timeout=timeout) as client:
-        payload = client.call_tool(name, arguments)
-    try:
-        result = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise McpError(f"unparsable tool output: {payload[:200]}") from exc
-    if isinstance(result, dict) and "error" in result:
-        raise McpError(f"tool {name} failed: {result['error']}")
-    return result
+        return client.call_json_tool(name, arguments)
 
 
 def run_sql(url: str, sql: str, *, timeout: float = 15.0) -> list[dict]:
     """Run a read-only query through the `daily_results_run_sql` tool."""
-    rows = call_json_tool(
-        url, "daily_results_run_sql", {"sql": sql}, timeout=timeout
-    )
-    if not isinstance(rows, list):
-        raise McpError(f"unexpected tool output type: {type(rows).__name__}")
-    return rows
+    with McpHttpClient(url, timeout=timeout) as client:
+        return client.run_sql(sql)

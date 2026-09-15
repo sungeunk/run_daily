@@ -81,7 +81,7 @@ python daily/run.py \
 
 ### 여러 머신 통합 HTML 메일
 
-중앙 `daily_results` MCP 서버에서 같은 logical date, purpose, 실행자의
+중앙 `daily_results` MCP 서버에서 같은 build, purpose, 실행자의
 머신별 마지막 run을 조회해 메일 한 통으로 만든다. 머신별 OpenVINO 버전이
 달라도 선택에서 제외하지 않는다.
 
@@ -110,8 +110,9 @@ python daily/generate_fleet_report.py --dry-run
 python daily/generate_fleet_report.py
 ```
 
-특정 날짜를 다시 생성할 때만 `--date YYYY-MM-DD`를 사용한다. 이미 발송한
-날짜를 재발송하려면 `--force`를 추가한다. 자세한 설계는
+특정 build를 다시 생성할 때만 `--build <build-number>`를 사용한다. 기본값은
+조건에 맞는 run 중 가장 최근 timestamp를 가진 build다. 이미 발송한 동일 run
+조합을 재발송하려면 `--force`를 추가한다. 자세한 설계는
 `daily/FLEET_REPORT_PLAN.md`를 참고한다.
 
 ### 메일 포맷 빠른 검증 (전체 daily 없이)

@@ -17,7 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from common.delivery import send_mail
-from common.mcp_client import McpError, call_json_tool
+from common.mcp_client import McpError, McpHttpClient, call_json_tool
 from report.fleet import render_fleet_html
 
 
@@ -41,7 +41,7 @@ class FleetConfig:
     max_wait_minutes: int
     poll_interval_seconds: int
     max_functional_issues: int
-    top_regressions: int
+    top_regressions: int | None
     top_improvements: int
     output_dir: Path
 
@@ -100,13 +100,22 @@ def load_config(path: Path) -> FleetConfig:
         max_wait_minutes=max(0, int(schedule.get("max_wait_minutes", 60))),
         poll_interval_seconds=max(1, int(schedule.get("poll_interval_seconds", 300))),
         max_functional_issues=max(0, int(report.get("max_functional_issues", 20))),
-        top_regressions=max(0, int(report.get("top_regressions", 10))),
+        top_regressions=(
+            None if report.get("top_regressions", 10) is None
+            else max(0, int(report.get("top_regressions", 10)))
+        ),
         top_improvements=max(0, int(report.get("top_improvements", 5))),
         output_dir=output_dir,
     )
 
 
-def latest_build(config: FleetConfig) -> str:
+def _call_json_tool(config: FleetConfig, name: str, arguments: dict[str, object], *, client=None):
+    if client is not None:
+        return client.call_json_tool(name, arguments)
+    return call_json_tool(config.mcp_url, name, arguments, timeout=30.0)
+
+
+def latest_build(config: FleetConfig, *, client=None) -> str:
     """Newest build the scheduled cycle has produced a run for.
 
     The fleet is keyed by build rather than by date because machines start
@@ -114,13 +123,13 @@ def latest_build(config: FleetConfig) -> str:
     midnight. The newest build may still be in flight; `wait_for_digest`
     is what waits for the remaining machines.
     """
-    builds = call_json_tool(
-        config.mcp_url,
+    builds = _call_json_tool(
+        config,
         "daily_results_list_builds",
         {"purpose": config.purpose,
          "triggered_by": config.triggered_by,
          "limit": 1},
-        timeout=30.0,
+        client=client,
     )
     if not isinstance(builds, list) or not builds:
         raise McpError(
@@ -140,18 +149,19 @@ def _digest_arguments(config: FleetConfig, ov_build: str) -> dict[str, object]:
         "triggered_by": config.triggered_by,
         "expected_machines": list(config.expected_machines),
         "max_functional_issues": config.max_functional_issues,
-        "top_regressions": config.top_regressions,
+        "top_regressions": 500 if config.top_regressions is None else config.top_regressions,
         "top_improvements": config.top_improvements,
+        "html_report_base_url": config.html_report_base_url,
     }
 
 
-def fetch_digest(config: FleetConfig, ov_build: str) -> dict[str, Any]:
+def fetch_digest(config: FleetConfig, ov_build: str, *, client=None) -> dict[str, Any]:
     """Fetch and validate one digest payload from the MCP server."""
-    payload = call_json_tool(
-        config.mcp_url,
+    payload = _call_json_tool(
+        config,
         "daily_results_daily_digest",
         _digest_arguments(config, ov_build),
-        timeout=30.0,
+        client=client,
     )
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
         raise McpError("daily digest returned an unsupported payload")
@@ -159,11 +169,11 @@ def fetch_digest(config: FleetConfig, ov_build: str) -> dict[str, Any]:
 
 
 def wait_for_digest(config: FleetConfig, ov_build: str,
-                    *, wait: bool = True) -> dict[str, Any]:
+                    *, wait: bool = True, client=None) -> dict[str, Any]:
     """Poll until the fleet is ready or the configured deadline expires."""
     deadline = time.monotonic() + config.max_wait_minutes * 60
     while True:
-        digest = fetch_digest(config, ov_build)
+        digest = fetch_digest(config, ov_build, client=client)
         summary = digest.get("summary")
         if isinstance(summary, dict) and summary.get("status") != "incomplete":
             return digest
@@ -224,14 +234,16 @@ def main() -> int:
     args = _parse_args()
     try:
         config = load_config(args.config)
-        ov_build = args.build or latest_build(config)
+        with McpHttpClient(config.mcp_url, timeout=30.0) as client:
+            ov_build = args.build or latest_build(config, client=client)
+            # The key depends on which runs were selected, so it can only be
+            # computed once the digest is in hand.
+            digest = wait_for_digest(
+                config, ov_build, wait=not args.dry_run, client=client
+            )
         config.output_dir.mkdir(parents=True, exist_ok=True)
         state_path = config.output_dir / ".fleet_delivery_state.json"
         state = _state(state_path)
-
-        # The key depends on which runs were selected, so it can only be
-        # computed once the digest is in hand.
-        digest = wait_for_digest(config, ov_build, wait=not args.dry_run)
         delivery_key = _delivery_key(config, ov_build, digest)
         output = config.output_dir / f"daily-fleet.{ov_build}.html"
         output.write_text(

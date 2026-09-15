@@ -254,6 +254,7 @@ def daily_results_daily_digest(
     max_functional_issues: int = 20,
     top_regressions: int = 10,
     top_improvements: int = 5,
+    html_report_base_url: str | None = None,
 ) -> str:
     """Return one bounded cross-machine summary for one OpenVINO build.
 
@@ -281,6 +282,7 @@ def daily_results_daily_digest(
             max_functional_issues=max_functional_issues,
             top_regressions=top_regressions,
             top_improvements=top_improvements,
+            html_report_base_url=html_report_base_url,
         )
         return _dump(digest)
     except (ValueError, duckdb.Error) as exc:

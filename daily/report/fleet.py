@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 
 def _text(value: object) -> str:
@@ -35,32 +36,35 @@ def _viewer_url(base_url: str, run_id: object) -> str:
     return f"{base_url.rstrip('/')}/?{urlencode({'run_id': str(run_id)})}"
 
 
-def _html_report_url(base_url: str, row: Mapping[str, Any]) -> str:
+def _html_report_url(row: Mapping[str, Any]) -> str:
+    value = str(row.get("html_report_url") or "")
+    parsed = urlparse(value)
+    return value if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+
+
+def _fallback_html_report_url(base_url: str, row: Mapping[str, Any]) -> str:
+    parsed = urlparse(base_url)
     report_file = str(row.get("report_file") or "")
     machine = str(row.get("machine") or "")
-    timestamp = str(row.get("ts") or "")
-    if not base_url or not report_file or not machine or not timestamp:
+    match = re.fullmatch(r"daily\.(\d{8}_\d{4})\.summary\.json", report_file)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or match is None or not machine:
         return ""
-    if report_file.endswith(".summary.json"):
-        report_file = report_file.removesuffix(".summary.json") + ".html"
-    month = timestamp[:7].replace("-", ".")
+    stamp = match.group(1)
     return (
-        f"{base_url.rstrip('/')}/daily2/{quote(machine)}/{quote(month)}/"
-        f"{quote(report_file)}"
+        f"{base_url.rstrip('/')}/daily2/{quote(machine, safe='')}/"
+        f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
     )
 
 
 def _details_link(viewer_base_url: str, row: Mapping[str, Any],
                   html_report_base_url: str) -> str:
-    report_url = _html_report_url(html_report_base_url, row)
+    report_url = _html_report_url(row)
+    if not report_url:
+        report_url = _fallback_html_report_url(html_report_base_url, row)
     if report_url:
         url = html.escape(report_url, quote=True)
         return f'<a href="{url}" style="color:#075985">HTML report</a>'
-    run_id = row.get("run_id")
-    if not viewer_base_url or not run_id:
-        return ""
-    url = html.escape(_viewer_url(viewer_base_url, run_id), quote=True)
-    return f'<a href="{url}" style="color:#075985">HTML report</a>'
+    return ""
 
 
 def _raw_log_link(base_url: str, row: Mapping[str, Any]) -> str:
@@ -111,11 +115,11 @@ def _machine_rows(machines: Sequence[Mapping[str, Any]], viewer_base_url: str,
             "<tr>"
             f'<td>{_text(row.get("machine"))}</td>'
             f'<td>{_status_dot(status)}</td>'
-            f'<td>{_text(_format_timestamp(row.get("ts")))}</td>'
-            f'<td>{_text(_format_duration(row.get("duration_sec")))}</td>'
+            f'<td class="num">{_text(_format_timestamp(row.get("ts")))}</td>'
+            f'<td class="num">{_text(_format_duration(row.get("duration_sec")))}</td>'
             f'<td>{_text(row.get("ov_version") or "-")}</td>'
-            f'<td>{_text(series)}</td>'
-            f'<td>{regression_count}</td>'
+            f'<td class="num">{_text(series)}</td>'
+            f'<td class="num">{regression_count}</td>'
             f'<td>{_details_link(viewer_base_url, row, html_report_base_url)}</td>'
             "</tr>"
         )
@@ -124,15 +128,29 @@ def _machine_rows(machines: Sequence[Mapping[str, Any]], viewer_base_url: str,
 
 def _issue_rows(issues: Sequence[Mapping[str, Any]], viewer_base_url: str,
                 html_report_base_url: str) -> str:
+    def attention_reason(outcome: object) -> str:
+        labels = {
+            "failed": "Test assertion failed",
+            "error": "Test execution error",
+            "timeout": "Test timed out",
+        }
+        return labels.get(str(outcome or "").lower(), "Test requires investigation")
+
     rows = []
     for issue in issues:
+        model = issue.get("model") or "-"
+        precision = issue.get("precision") or "-"
+        last_good_url = _html_report_url({"html_report_url": issue.get("last_good_html_report_url")})
+        last_good_link = (
+            f'<a href="{html.escape(last_good_url, quote=True)}" style="color:#075985">HTML report</a>'
+            if issue.get("last_good_run_id") and last_good_url else ""
+        )
         rows.append(
             "<tr>"
             f'<td>{_text(issue.get("machine"))}</td>'
-            f'<td>{_text(issue.get("failed_series") or 0)}</td>'
-            f'<td>{_text(issue.get("model") or "-")}</td>'
-            f'<td>{_text(issue.get("precision") or "-")}</td>'
-            f'<td>{_raw_log_link(html_report_base_url, issue)}</td>'
+            f'<td>{_text(f"{model} / {precision}")}</td>'
+            f'<td>{_text(attention_reason(issue.get("outcome")))}</td>'
+            f'<td>{last_good_link}</td>'
             "</tr>"
         )
     return "".join(rows)
@@ -140,19 +158,46 @@ def _issue_rows(issues: Sequence[Mapping[str, Any]], viewer_base_url: str,
 
 def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
                      html_report_base_url: str) -> str:
+    def latency_mode(value: object) -> str:
+        labels = {
+            "1st": "First token latency",
+            "2nd": "Second token latency",
+            "1st-infer": "First token inference latency",
+            "2nd-infer": "Second token inference latency",
+        }
+        return labels.get(str(value), str(value or "-"))
+
+    def measurement(value: object, unit: object) -> str:
+        try:
+            return f"{float(value):.3f} {unit or ''}".strip()
+        except (TypeError, ValueError):
+            return "-"
+
     rendered = []
     for row in rows:
         improvement = row.get("improvement_pct")
-        change = f"{float(improvement) * 100:+.1f}%" if improvement is not None else "-"
-        shape = f'{int(row.get("in_token") or 0)} → {int(row.get("out_token") or 0)}'
+        try:
+            regression_pct = -float(improvement) * 100
+            change = f"{regression_pct:.1f}% regression"
+        except (TypeError, ValueError):
+            regression_pct = None
+            change = "-"
+        unit = row.get("unit") or ""
+        baseline = measurement(row.get("baseline_value"), unit)
+        current = measurement(row.get("current_value"), unit)
+        in_token = int(row.get("in_token") or 0)
+        out_token = int(row.get("out_token") or 0)
+        tokens = f"in: {in_token} / out: {out_token}"
         rendered.append(
             "<tr>"
-            f'<td>{_text(row.get("machine"))}</td>'
-            f'<td>{_text(row.get("model"))}</td>'
-            f'<td>{_text(row.get("precision"))}</td>'
-            f'<td>{_text(shape)}</td>'
-            f'<td>{_text(row.get("exec_mode"))}</td>'
-            f'<td>{_text(change)}</td>'
+            f'<td data-sort="{_text(row.get("machine"))}">{_text(row.get("machine"))}</td>'
+            f'<td data-sort="{_text(row.get("model"))}">{_text(row.get("model"))}</td>'
+            f'<td data-sort="{_text(row.get("precision"))}">{_text(row.get("precision"))}</td>'
+            f'<td class="num" data-sort="{in_token * 1000000 + out_token}">{_text(tokens)}</td>'
+            f'<td data-sort="{_text(row.get("exec_mode"))}">{_text(latency_mode(row.get("exec_mode")))}</td>'
+            f'<td class="num" data-sort="{regression_pct if regression_pct is not None else ""}">{_text(change)}</td>'
+            f'<td class="num" data-sort="{_text(row.get("baseline_value"))}">{_text(baseline)}</td>'
+            f'<td class="num" data-sort="{_text(row.get("current_value"))}">{_text(current)}</td>'
             f'<td>{_details_link(viewer_base_url, row, html_report_base_url)}</td>'
             "</tr>"
         )
@@ -174,20 +219,28 @@ def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
         digest.get("top_regressions")
         if isinstance(digest.get("top_regressions"), list) else []
     )
+    machine_by_name = {
+        str(machine.get("machine")): machine
+        for machine in machines if isinstance(machine, Mapping)
+    }
+    regressions = [
+        {**machine_by_name.get(str(row.get("machine")), {}), **row}
+        for row in regressions if isinstance(row, Mapping)
+    ]
     status = str(summary.get("status") or "unknown")
     warning_html = "".join(f"<li>{_text(item)}</li>" for item in warnings)
     issue_section = ""
     if issues:
         issue_section = f"""
         <h2>Issues Requiring Attention</h2>
-        <table><thead><tr><th>Machine</th><th>Failed series</th><th>Model</th><th>Precision</th><th>Raw log</th></tr></thead>
+        <table><thead><tr><th>Machine</th><th>Models</th><th>Attention reason</th><th>Last good</th></tr></thead>
         <tbody>{_issue_rows(issues, viewer_base_url, html_report_base_url)}</tbody></table>
         """
     regression_section = ""
     if regressions:
         regression_section = f"""
-        <h2>Top Performance Regressions</h2>
-        <table><thead><tr><th>Machine</th><th>Model</th><th>Precision</th><th>Tokens</th><th>Mode</th><th>Change</th><th>Report</th></tr></thead>
+        <h2>Performance Regressions</h2>
+        <table id="performance-regressions"><thead><tr><th data-sort-type="text">Machine</th><th data-sort-type="text">Model</th><th data-sort-type="text">Precision</th><th data-sort-type="number">Tokens</th><th data-sort-type="text">Mode</th><th data-sort-type="number">Regression</th><th data-sort-type="number">Baseline</th><th data-sort-type="number">Current</th><th>Report</th></tr></thead>
         <tbody>{_regression_rows(regressions, viewer_base_url, html_report_base_url)}</tbody></table>
         """
 
@@ -197,7 +250,9 @@ body{{font-family:Segoe UI,Arial,sans-serif;color:#202124;margin:24px;line-heigh
 h1{{font-size:22px;margin:0 0 8px}}h2{{font-size:17px;margin:24px 0 8px}}
 table{{border-collapse:collapse;width:100%;font-size:13px}}
 th,td{{border:1px solid #d1d5db;padding:7px;text-align:left;vertical-align:top}}
-th{{background:#f3f4f6}}.summary{{margin:10px 0 18px;color:#4b5563}}
+.num{{text-align:right;font-variant-numeric:tabular-nums}}
+th{{background:#f3f4f6}}th[data-sort-type]{{cursor:pointer;text-decoration:underline}}
+.summary{{margin:10px 0 18px;color:#4b5563}}
 </style></head><body>
 <h1>Daily GPU Fleet Summary {_status_dot(status)}</h1>
 <div class="summary">Build: <strong>{_text(selection.get("ov_build"))}</strong> ·
@@ -210,4 +265,33 @@ Purpose: {_text(selection.get("purpose"))}</div>
 {issue_section}
 {regression_section}
 {f'<h2>Warnings</h2><ul>{warning_html}</ul>' if warning_html else ''}
+<script>
+function sortFleetTable(header) {{
+    const table = header.closest('table');
+    const index = Array.prototype.indexOf.call(header.parentNode.children, header);
+    const ascending = header.getAttribute('aria-sort') !== 'ascending';
+    const type = header.dataset.sortType;
+    const rows = Array.from(table.tBodies[0].rows);
+    rows.sort((left, right) => {{
+        const a = left.cells[index].dataset.sort || '';
+        const b = right.cells[index].dataset.sort || '';
+        if (!a) return 1;
+        if (!b) return -1;
+        const comparison = type === 'number' ? Number(a) - Number(b) : a.localeCompare(b);
+        return ascending ? comparison : -comparison;
+    }});
+    rows.forEach((row) => table.tBodies[0].appendChild(row));
+    Array.from(header.parentNode.children).forEach((cell) => cell.removeAttribute('aria-sort'));
+    header.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
+}}
+document.querySelectorAll('th[data-sort-type]').forEach((header) => {{
+    header.tabIndex = 0;
+    header.setAttribute('role', 'button');
+    header.setAttribute('aria-sort', 'none');
+    header.addEventListener('click', () => sortFleetTable(header));
+    header.addEventListener('keydown', (event) => {{
+        if (event.key === 'Enter' || event.key === ' ') {{ event.preventDefault(); sortFleetTable(header); }}
+    }});
+}});
+</script>
 </body></html>"""

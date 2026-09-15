@@ -1,35 +1,30 @@
 #!/usr/bin/env python3
-"""Generate a distribution-aware HTML analysis report from daily run results.
+"""Generate a distribution-aware HTML analysis report through daily_results MCP.
 
-Reads from an existing DuckDB (runs/perf) and selects a run
-(latest by default, or explicit --run-id/--stamp), then renders HTML using
-the history-based fluctuation-guard analysis engine.
-
-Before selecting a run, it ingests the latest artefact from --root into DB,
-so the newest run is always available in DB first.
+Selects a run from the central daily_results server (latest by default, or an
+explicit --run-id/--stamp), then renders HTML using the history-based
+fluctuation-guard analysis engine. It never reads a local DuckDB or benchmark
+report artefact.
 
 The output file is always a *new* file (never overwrites an existing one).
 
 Usage::
 
-    # default: use existing bench.duckdb and latest run
+    # default: select the latest central run
     python scripts/generate_analysis_report.py
 
-    # pick a past run from DB by run_id (or by stamp)
-    python scripts/generate_analysis_report.py --run-id daily.20260530_0315.report
+    # pick a past run by run ID (or by timestamp)
+    python scripts/generate_analysis_report.py --run-id <run-id>
     python scripts/generate_analysis_report.py --stamp 20260530_0315
 
-    # explicit DB path
-    python scripts/generate_analysis_report.py --db daily_output/<machine>/bench.duckdb
-
-    # ingest from custom root and write to custom output directory
+    # select a machine and write to a custom output directory
     python scripts/generate_analysis_report.py \\
-        --root /var/www/html/daily2/ARLH-01 \\
+        --machine ARLH-01 \
         --out-dir /tmp/reports
 
     # tune analysis parameters
     python scripts/generate_analysis_report.py \\
-        --history-window 15 --reference-top-k 7 --fluctuation-scale 2.0
+        --history-window 15 --fluctuation-scale 2.0
 
     # override baseline purpose used for baseline selection
     python scripts/generate_analysis_report.py --baseline-purpose "daily2 timer"
@@ -45,9 +40,6 @@ Quick re-run alias (runs from any directory)::
 from __future__ import annotations
 
 import argparse
-import json
-import os
-import platform
 import re
 import sys
 from datetime import datetime
@@ -59,9 +51,6 @@ from types import SimpleNamespace
 # Default paths
 # ---------------------------------------------------------------------------
 
-DEFAULT_ROOT = Path('/var/www/html/daily2/dg2alderlake')
-DEFAULT_DB = (Path(__file__).resolve().parent.parent / 'daily_output'
-              / platform.node() / 'bench.duckdb')
 DAILY_DIR = Path(__file__).resolve().parent.parent / 'daily'
 
 STAMP_RE = re.compile(r'daily\.(\d{8}_\d{4})\.summary\.json$')
@@ -88,8 +77,8 @@ def _unique_out_path(out_dir: Path, current_stamp: str, now_tag: str) -> Path:
         idx += 1
 
 
-def _daily_out_path(out_dir: Path, current_stamp: str) -> Path:
-    return out_dir / f'daily.{current_stamp}.html'
+def _daily_out_path(out_dir: Path, machine: str, current_stamp: str) -> Path:
+    return out_dir / f'daily.{machine}.{current_stamp}.html'
 
 
 def _resolve_stamp_from_name(name: str) -> str:
@@ -102,6 +91,16 @@ def _resolve_stamp_from_name(name: str) -> str:
     return datetime.now().strftime('%Y%m%d_%H%M')
 
 
+def _stamp_from_run(run: dict) -> str:
+    timestamp = run.get('ts')
+    if timestamp:
+        try:
+            return datetime.fromisoformat(str(timestamp)).strftime('%Y%m%d_%H%M')
+        except ValueError:
+            pass
+    return _resolve_stamp_from_name(str(run.get('run_id') or ''))
+
+
 def _stamp_of_any(path: Path) -> str:
     name = path.name
     m = re.search(r"daily\.(\d{8}_\d{4})", name)
@@ -110,212 +109,82 @@ def _stamp_of_any(path: Path) -> str:
     return "00000000_0000"
 
 
-def _ingest_from_root(*, root: Path, db_path: Path) -> tuple[int, int, int, str | None]:
-    """Ingest artefacts from root into DB.
-
-    Returns tuple: (candidates, added, skipped, latest_run_id)
-    """
-    from data.ingest.cli import discover, ingest_files
-    from data.ingest.loader_new import load_summary
-
-    if not root.exists() or not root.is_dir():
-        return (0, 0, 0, None)
-
-    files = discover(root, fmt="auto")
-    if not files:
-        return (0, 0, 0, None)
-
-    latest_path, _fmt = max(
-        files,
-        key=lambda pf: (_stamp_of_any(pf[0]), int(pf[0].stat().st_mtime)),
-    )
-    latest_run_id = load_summary(latest_path).run_id
-
-    added, skipped, failures = ingest_files(files, db_path, force=False)
-    if failures:
-        raise RuntimeError(f"ingest failed: {files[0][0]} -> {failures[0][1]}")
-    return (len(files), added, skipped, latest_run_id)
+def _sql_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
-def _load_summary(source_path: str | None) -> dict | None:
-    """The run's own ``summary.json``, which carries the per-test case counts."""
-    if not source_path:
-        return None
-    path = Path(source_path)
-    if not path.is_file():
-        return None
-    try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return None
+def _pick_run_from_mcp(config, *, machine: str | None, run_id: str | None,
+                       stamp: str | None, client=None) -> dict:
+    from analysis.remote import _run_sql
 
-
-def _load_baseline_meta(root: Path, stamp: str | None, db_path: Path) -> dict:
-    from run import _baseline_meta  # noqa: PLC0415 — daily/ is on sys.path by now
-
-    return _baseline_meta(root, stamp, db_path)
-
-
-def _image_assets_from_backup(root: Path, stamp: str, baseline_stamp: str | None,
-                              summary: dict | None) -> dict[str, dict]:
-    """Pair each generated image with its staged copy in the backup tree.
-
-    ``image_path`` in a summary points at the benchmark machine's filesystem,
-    which this host cannot read, so each entry is re-pointed at the published
-    copy before the gallery renders it.
-    """
-    from common.delivery import staged_image_slot, staged_images_for  # noqa: PLC0415
-
-    current = staged_images_for(root, stamp) if stamp else {}
-    baseline = staged_images_for(root, baseline_stamp) if baseline_stamp else {}
-    if not current and not baseline:
-        return {}
-
-    assets: dict[str, dict] = {}
-    for test in (summary or {}).get('tests', []):
-        metrics = test.get('metrics') or {}
-        if metrics.get('test_type') != 'image_generation':
-            continue
-        for idx, entry in enumerate(metrics.get('data') or []):
-            source = entry.get('image_path')
-            if not source:
-                continue
-            slot = staged_image_slot(metrics.get('model', ''),
-                                     metrics.get('precision', ''),
-                                     idx, Path(source).suffix)
-            staged = current.get(slot)
-            if staged is not None:
-                entry['image_path'] = str(staged)
-            assets[entry['image_path']] = {
-                'url': None,
-                'baseline_path': baseline.get(slot),
-                'baseline_url': None,
-            }
-    return assets
-
-
-def _pick_run_from_db(con, *, run_id: str | None, stamp: str | None):
     if run_id and stamp:
         raise ValueError('Use only one of --run-id or --stamp')
 
+    filters = ["machine NOT LIKE 'tmp%'"]
+    if machine:
+        filters.append(f"machine = {_sql_quote(machine)}")
     if run_id:
-        row = con.execute(
-            """
-            SELECT run_id, source_path, report_file, ts, machine
-            FROM runs
-            WHERE run_id = ?
-            """,
-            [run_id],
-        ).fetchone()
-        return row
+        filters.append(f"run_id = {_sql_quote(run_id)}")
+    elif stamp:
+        filters.append(f"strftime(ts, '%Y%m%d_%H%M') = {_sql_quote(stamp)}")
 
-    if stamp:
-        # Accept either exact stamp or any run_id/report_file containing the stamp.
-        row = con.execute(
-            """
-            SELECT run_id, source_path, report_file, ts, machine
-            FROM runs
-            WHERE run_id LIKE '%' || ? || '%'
-               OR report_file LIKE '%' || ? || '%'
-               OR source_path LIKE '%' || ? || '%'
-            ORDER BY ts DESC
-            LIMIT 1
-            """,
-            [stamp, stamp, stamp],
-        ).fetchone()
-        return row
-
-    row = con.execute(
-        """
-        SELECT run_id, source_path, report_file, ts, machine
-        FROM runs
-                WHERE COALESCE(source_path, '') NOT LIKE '/tmp/%'
-                    AND machine NOT LIKE 'tmp%'
-        ORDER BY ts DESC
-        LIMIT 1
-        """
-    ).fetchone()
-    return row
+    sql = (
+        "SELECT run_id, ts, machine, ov_version, purpose, device, description, "
+        "host_info, host_memory_size_gb, host_memory_speed_mhz, total_tests, "
+        "passed_tests, failed_tests, error_tests, skipped_tests "
+        f"FROM runs WHERE {' AND '.join(filters)} ORDER BY ts DESC, run_id DESC LIMIT 1"
+    )
+    rows = client.run_sql(sql) if client is not None else _run_sql(config, sql)
+    if not rows:
+        raise ValueError('No matching run found through daily_results MCP')
+    return rows[0]
 
 
-def _build_functional_from_db(con, run_id: str):
+def _build_functional_from_mcp(config, run_id: str, run: dict, *, client=None):
+    from analysis.remote import _run_sql
     from analysis.types import FunctionalIssue, FunctionalResult
-
-    issue_rows = con.execute(
-        """
-        SELECT nodeid, outcome, COALESCE(message, '')
-        FROM functional_issues
-        WHERE run_id = ?
-        """,
-        [run_id],
-    ).fetchall()
-
-    issues = [FunctionalIssue(nodeid=n, outcome=o, message=m) for n, o, m in issue_rows]
-    failed = sum(1 for i in issues if i.outcome == 'failed')
-    errored = sum(1 for i in issues if i.outcome == 'error')
-    skipped = sum(1 for i in issues if i.outcome == 'skipped')
-
-    row = con.execute(
-        """
-        SELECT
-            (SELECT COUNT(*) FROM perf WHERE run_id = ?) AS perf_count
-        """,
-        [run_id],
-    ).fetchone()
-    perf_count = int(row[0] or 0)
-
-    total = max(perf_count, failed + errored + skipped)
-    passed = max(total - failed - errored - skipped, 0)
+    issue_rows = _run_sql(
+        config,
+        "SELECT nodeid, outcome, COALESCE(message, '') AS message, model, precision "
+        f"FROM functional_issues WHERE run_id = {_sql_quote(run_id)} ORDER BY nodeid",
+        client,
+    )
+    issues = [
+        FunctionalIssue(
+            nodeid=str(issue['nodeid']), outcome=str(issue['outcome']),
+            message=str(issue['message']), model=issue.get('model'), precision=issue.get('precision'),
+        )
+        for issue in issue_rows
+    ]
     return FunctionalResult(
-        total=total,
-        passed=passed,
-        failed=failed,
-        error=errored,
-        skipped=skipped,
+        total=int(run.get('total_tests') or 0),
+        passed=int(run.get('passed_tests') or 0),
+        failed=int(run.get('failed_tests') or 0),
+        error=int(run.get('error_tests') or 0),
+        skipped=int(run.get('skipped_tests') or 0),
         issues=issues,
     )
 
 
-def _build_current_run_info(con, run_id: str):
+def _build_current_run_info(config, run_id: str, run: dict, *, client=None):
+    from analysis.remote import _run_sql
     from analysis.types import CurrentRunInfo
-
-    run_row = con.execute(
-        """
-        SELECT ov_version, purpose, machine, device, description,
-               host_info, host_memory_size_gb, host_memory_speed_mhz
-        FROM runs
-        WHERE run_id = ?
-        """,
-        [run_id],
-    ).fetchone()
-    if run_row is None:
-        return CurrentRunInfo()
-
-    device_rows = con.execute(
-        """
-        SELECT device_index, device, driver, eu, clock_freq_mhz, global_mem_size_gb
-        FROM system_devices
-        WHERE run_id = ?
-        ORDER BY device_index
-        """,
-        [run_id],
-    ).fetchall()
-
-    (
-        ov_version,
-        purpose,
-        machine,
-        run_device,
-        description,
-        host_info_db,
-        host_memory_size_gb,
-        host_memory_speed_mhz,
-    ) = run_row
+    device_rows = _run_sql(
+        config,
+        "SELECT device_index, device, driver, eu, clock_freq_mhz, global_mem_size_gb "
+        f"FROM system_devices WHERE run_id = {_sql_quote(run_id)} ORDER BY device_index",
+        client,
+    )
 
     primary_driver = None
     gpu_parts: list[str] = []
     mem_sizes: list[str] = []
-    for _device_index, device, driver, eu, clock_freq_mhz, global_mem_size_gb in device_rows:
+    for device_row in device_rows:
+        device = device_row.get('device')
+        driver = device_row.get('driver')
+        eu = device_row.get('eu')
+        clock_freq_mhz = device_row.get('clock_freq_mhz')
+        global_mem_size_gb = device_row.get('global_mem_size_gb')
         if primary_driver is None and driver:
             primary_driver = str(driver)
         parts = []
@@ -332,17 +201,21 @@ def _build_current_run_info(con, run_id: str):
         if global_mem_size_gb is not None:
             mem_sizes.append(f"{float(global_mem_size_gb):.1f} GB")
 
-    gpu_info = "; ".join(gpu_parts) if gpu_parts else (str(run_device) if run_device else None)
+    gpu_info = "; ".join(gpu_parts) if gpu_parts else (str(run.get('device')) if run.get('device') else None)
     memory_size = ", ".join(mem_sizes) if mem_sizes else None
 
-    host_info = str(host_info_db) if host_info_db else (description if description and description != purpose else None)
+    purpose = run.get('purpose')
+    description = run.get('description')
+    host_memory_size_gb = run.get('host_memory_size_gb')
+    host_memory_speed_mhz = run.get('host_memory_speed_mhz')
+    host_info = run.get('host_info') or (description if description and description != purpose else None)
     memory_size = (f"{float(host_memory_size_gb):.1f} GB" if host_memory_size_gb is not None else None) or memory_size
     memory_speed = f"{float(host_memory_speed_mhz):.0f} MHz" if host_memory_speed_mhz is not None else None
 
     return CurrentRunInfo(
-        ov_version=str(ov_version) if ov_version else None,
+        ov_version=str(run['ov_version']) if run.get('ov_version') else None,
         purpose=str(purpose) if purpose else None,
-        machine_name=str(machine) if machine else None,
+        machine_name=str(run['machine']) if run.get('machine') else None,
         gpu_driver_version=primary_driver,
         gpu_info=gpu_info,
         host_info=host_info,
@@ -351,69 +224,52 @@ def _build_current_run_info(con, run_id: str):
     )
 
 
-def _analyze_run_id_from_db(con, run_id: str, cfg):
-    from analysis.baseline import find_last_known_good, select_baseline
+def _analyze_run_from_mcp(config, run: dict, *, client=None):
     from analysis.engine import (
         _aggregate_models,
         _aggregate_performance,
-        _build_bisect_delta,
-        _fetch_comparison_rows,
         _overall_status,
         _top_regressions,
+        build_comparison_rows,
     )
+    from analysis.remote import _run_sql, fetch_reference, fetch_release, fetch_series_values
     from analysis.types import AnalysisResult
 
-    rec_row = con.execute(
-        """
-        SELECT run_id, machine, ts, is_partial, purpose
-        FROM runs_with_flags
-        WHERE run_id = ?
-        """,
-        [run_id],
-    ).fetchone()
-    if rec_row is None:
-        raise ValueError(f'run_id not found in DB: {run_id}')
-
     rec = SimpleNamespace(
-        run_id=rec_row[0],
-        machine=rec_row[1],
-        ts=rec_row[2],
-        is_partial=bool(rec_row[3]) if rec_row[3] is not None else False,
-        purpose=rec_row[4],
+        run_id=str(run['run_id']),
+        machine=str(run['machine']),
+        ts=datetime.fromisoformat(str(run['ts'])),
+        is_partial=False,
+        purpose=run.get('purpose'),
     )
 
-    functional = _build_functional_from_db(con, run_id)
-    current_run = _build_current_run_info(con, run_id)
-    baseline_info = select_baseline(con, rec, cfg)
-    rows = _fetch_comparison_rows(con, rec, baseline_info, cfg)
+    functional = _build_functional_from_mcp(config, rec.run_id, run, client=client)
+    current_run = _build_current_run_info(config, rec.run_id, run, client=client)
+    reference = fetch_reference(config, rec, client=client)
+    release_info, release_values = fetch_release(config, rec.machine, client=client)
+    current_values = fetch_series_values(config, rec.run_id, client=client)
+    rows = build_comparison_rows(
+        current_values,
+        config=config,
+        reference_values=reference.values,
+        history_map=reference.history,
+        release_values=release_values,
+    )
     performance = _aggregate_performance(rows)
     models = _aggregate_models(rows)
-    top_regressions = _top_regressions(rows, cfg.top_regressions)
-    overall_status = _overall_status(functional, performance, baseline_info)
-
-    last_known_good = None
-    bisect_delta = None
-    if overall_status in {"red", "yellow"}:
-        last_known_good = find_last_known_good(con, rec)
-        bisect_delta = _build_bisect_delta(
-            con,
-            current_run_id=run_id,
-            lkg=last_known_good,
-            functional_issue_count=functional.issue_count,
-            config=cfg,
-        )
+    top_regressions = _top_regressions(rows, config.top_regressions)
+    overall_status = _overall_status(functional, performance, reference.info)
 
     return AnalysisResult(
         overall_status=overall_status,
-        baseline=baseline_info,
+        baseline=reference.info,
         functional=functional,
         performance=performance,
         models=models,
         top_regressions=top_regressions,
         rows=rows,
         current_run=current_run,
-        last_known_good=last_known_good,
-        bisect_delta=bisect_delta,
+        release=release_info,
     )
 
 
@@ -427,32 +283,28 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument(
-        '--db', type=Path, default=DEFAULT_DB,
-        help='DuckDB path (runs/perf source) for DB mode.',
+        '--mcp-url', type=str, default='http://dg2raptorlake.ikor.intel.com:8090/mcp',
+        help='Streamable-HTTP endpoint for the daily_results MCP server.',
+    )
+    ap.add_argument(
+        '--machine', type=str, default=None,
+        help='Limit run selection to this machine.',
     )
     ap.add_argument(
         '--run-id', type=str, default=None,
-        help='Run ID to analyze when using --db mode. Default: latest run by ts.',
+        help='Run ID to analyze. Default: latest run by timestamp.',
     )
     ap.add_argument(
         '--stamp', type=str, default=None,
-        help='Stamp selector (e.g. 20260601_0315) when using --db mode.',
-    )
-    ap.add_argument(
-        '--root', type=Path, default=DEFAULT_ROOT,
-        help='Input root to ingest latest artefact into DB before analysis.',
+        help='Timestamp selector (e.g. 20260601_0315).',
     )
     ap.add_argument(
         '--out-dir', type=Path, default=None,
-        help='Output directory for the HTML report. Default: <root>/report.',
+        help='Output directory for the HTML report. Default: ./report.',
     )
     ap.add_argument(
         '--history-window', type=int, default=10,
         help='Number of past runs to use for reference distribution.',
-    )
-    ap.add_argument(
-        '--reference-top-k', type=int, default=5,
-        help='Top-K best runs to average as the reference value.',
     )
     ap.add_argument(
         '--fluctuation-scale', type=float, default=1.5,
@@ -468,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         '--write-daily-html', action='store_true',
-        help='Also overwrite daily.<stamp>.html in out-dir with the generated HTML.',
+        help='Also overwrite daily.<machine>.<stamp>.html in out-dir.',
     )
     args = ap.parse_args(argv)
 
@@ -478,95 +330,42 @@ def main(argv: list[str] | None = None) -> int:
 
     from analysis.report import render_analysis_html
     from analysis.types import AnalysisConfig
-    from data.ingest.writer import connect
 
     cfg = AnalysisConfig(
         history_window=args.history_window,
-        reference_top_k=args.reference_top_k,
         fluctuation_sigma_scale=args.fluctuation_scale,
         pct_threshold=args.pct_threshold,
-        baseline_purpose=args.baseline_purpose,
+        mcp_url=args.mcp_url,
+        reference_purpose_like=args.baseline_purpose or "%timer%",
     )
 
-    db_path = args.db
-
-    print(f'[report] mode     : db-only')
-    print(f'[report] db       : {db_path}')
-
-    # 1) Ingest latest artefact into DB first.
+    print('[report] mode     : mcp-only')
+    print(f'[report] mcp      : {args.mcp_url}')
     try:
-        candidate_count, added, skipped, latest_run_id = _ingest_from_root(root=args.root, db_path=db_path)
-        if candidate_count == 0:
-            if not db_path.exists():
-                print(
-                    f'[report] ingest   : no artefacts found under {args.root} and DB does not exist: {db_path}',
-                    file=sys.stderr,
-                )
-                return 1
-            print(f'[report] ingest   : no artefacts found under {args.root}; using existing DB rows')
-        else:
-            print(
-                f'[report] ingest   : candidates={candidate_count} added={added} skipped={skipped}'
+        from common.mcp_client import McpHttpClient
+
+        with McpHttpClient(cfg.mcp_url, timeout=cfg.mcp_timeout_sec) as client:
+            run = _pick_run_from_mcp(
+                cfg, machine=args.machine, run_id=args.run_id, stamp=args.stamp, client=client
             )
-    except Exception as e:  # noqa: BLE001
-        print(f'[report] ingest failed: {e}', file=sys.stderr)
+            result = _analyze_run_from_mcp(cfg, run, client=client)
+    except (RuntimeError, ValueError) as exc:
+        print(f'[report] MCP query failed: {exc}', file=sys.stderr)
         return 1
 
-    # 2) Select run from DB and analyze using DB rows only.
-    selected_run_id = args.run_id
-    if selected_run_id is None and args.stamp is None and latest_run_id is not None:
-        selected_run_id = latest_run_id
+    out_dir = args.out_dir or Path.cwd() / 'report'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    now_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
+    current_stamp = _stamp_from_run(run)
+    print(f"[report] current  : run_id={run['run_id']} machine={run['machine']}")
 
-    with connect(db_path, read_only=True) as con:
-        picked = _pick_run_from_db(con, run_id=selected_run_id, stamp=args.stamp)
-        if picked is None:
-            print('[report] No runs found in DB.', file=sys.stderr)
-            return 1
-        run_id, source_path, report_file, _ts, machine = picked
-
-        out_dir: Path
-        if args.out_dir:
-            out_dir = args.out_dir
-        elif source_path:
-            out_dir = Path(source_path).resolve().parent / 'report'
-        elif report_file:
-            report_file_path = Path(report_file)
-            if report_file_path.is_absolute():
-                out_dir = report_file_path.parent
-            else:
-                out_dir = Path.cwd() / 'report'
-        else:
-            out_dir = Path.cwd() / 'report'
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        now_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
-        # The run_id is a hash, so the artefact name is the only place the
-        # run's own stamp survives.
-        current_stamp = _resolve_stamp_from_name(
-            Path(source_path).name if source_path else str(run_id))
-
-        print(f'[report] current  : run_id={run_id} machine={machine}')
-        result = _analyze_run_id_from_db(con, run_id, cfg)
-
-    # The Run Summary case counts come from the run's own summary.json, and the
-    # baseline column only appears when the baseline's meta block is supplied.
-    summary_data = _load_summary(source_path)
-    baseline_meta = _load_baseline_meta(args.root, result.baseline.stamp, db_path)
-    image_assets = _image_assets_from_backup(
-        args.root, current_stamp, result.baseline.stamp, summary_data)
-    if summary_data is None:
-        print(f'[report] summary  : not found next to {source_path}', file=sys.stderr)
-    if not baseline_meta:
-        print('[report] baseline : meta unavailable, rendering single-column summary',
-              file=sys.stderr)
-
-    html = render_analysis_html(result, summary_data, image_assets, baseline_meta)
+    html = render_analysis_html(result)
     out_path = _unique_out_path(out_dir, current_stamp, now_tag)
     out_path.write_text(html, encoding='utf-8')
 
     daily_out_path = None
     if args.write_daily_html:
-        daily_out_path = _daily_out_path(out_dir, current_stamp)
+        daily_out_path = _daily_out_path(out_dir, str(run['machine']), current_stamp)
         daily_out_path.write_text(html, encoding='utf-8')
 
     p = result.performance

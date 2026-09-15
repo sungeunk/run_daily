@@ -94,12 +94,13 @@ def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult) -> No
     con.execute(
         """
         INSERT INTO analysis_results (
-            run_id, baseline_run_id, overall_status,
+            run_id, baseline_run_id, last_known_good_run_id, overall_status,
             compared_count, improved_count, same_count,
             regressed_count, functional_fail_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (run_id) DO UPDATE SET
             baseline_run_id      = excluded.baseline_run_id,
+            last_known_good_run_id = excluded.last_known_good_run_id,
             overall_status       = excluded.overall_status,
             compared_count       = excluded.compared_count,
             improved_count       = excluded.improved_count,
@@ -111,6 +112,12 @@ def _try_upsert_analysis_results(con, run_id: str, result: AnalysisResult) -> No
         [
             run_id,
             b.run_id if b.status == "found" else None,
+            (
+                result.last_known_good.run_id
+                if result.last_known_good is not None
+                and result.last_known_good.status == "found"
+                else None
+            ),
             result.overall_status,
             p.compared, p.improved, p.same, p.regressed,
             result.functional.issue_count,
@@ -279,6 +286,9 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
             for m in result.models
         ],
         "top_regressions": [_row_dict(r) for r in result.top_regressions],
+        "regressions": [
+            _row_dict(row) for row in result.rows if row.verdict == "regressed"
+        ],
     }
 
     if result.release is not None:
