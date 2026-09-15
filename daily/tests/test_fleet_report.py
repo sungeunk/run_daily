@@ -94,6 +94,8 @@ def test_render_fleet_html_is_compact_and_links_failed_run() -> None:
     )
 
     assert "Completed: <strong>2/2</strong>" in rendered
+    assert 'href="http://viewer.local"' in rendered
+    assert ">Daily Viewer</a>" in rendered
     assert "🟢" in rendered and "🔴" in rendered
     assert "Total: 5 / Skip: 1 / Success: 3 / Failed: 1" in rendered
     assert "41m" in rendered

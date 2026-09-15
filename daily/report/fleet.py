@@ -255,6 +255,7 @@ th{{background:#f3f4f6}}th[data-sort-type]{{cursor:pointer;text-decoration:under
 .summary{{margin:10px 0 18px;color:#4b5563}}
 </style></head><body>
 <h1>Daily GPU Fleet Summary {_status_dot(status)}</h1>
+<div class="summary"><a href="{_text(viewer_base_url)}" style="color:#075985">Daily Viewer</a></div>
 <div class="summary">Build: <strong>{_text(selection.get("ov_build"))}</strong> ·
 Completed: <strong>{_text(summary.get("completed_machines"))}/{_text(summary.get("expected_machines"))}</strong> ·
 Failed machines: <strong>{_text(summary.get("failed_machines"))}</strong> · 
