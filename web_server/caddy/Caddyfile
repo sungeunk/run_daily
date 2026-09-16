@@ -1,0 +1,5 @@
+{
+    admin localhost:2019
+}
+
+import /home/sungeunk/repo/run_daily/web_server/caddy/conf.d/*.caddy

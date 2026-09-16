@@ -1,0 +1,5 @@
+:8080 {
+    root * /home/sungeunk/repo/run_daily/web_server/wiki/site
+    encode gzip
+    file_server
+}

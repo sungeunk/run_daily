@@ -1,0 +1,11 @@
+# Runtime state and secrets must stay outside Git.
+*.log
+*.pid
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+
+# Keep local-only site files out of the repository.
+conf.d/*.local.caddy

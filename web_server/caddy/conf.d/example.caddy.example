@@ -1,0 +1,6 @@
+# Copy this file to a name ending in .caddy and replace the example values.
+# Do not commit private keys, credentials, or machine-specific secrets.
+
+:8080 {
+    respond "Caddy is running" 200
+}

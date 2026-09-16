@@ -1,0 +1,22 @@
+:8081 {
+    encode gzip
+
+    redir /daily /daily/ 308
+    redir /benchmarking_datasets /benchmarking_datasets/ 308
+    redir /model_cache_server /model_cache_server/ 308
+
+    handle_path /daily/* {
+        root * /mnt/hdd/daily
+        file_server browse
+    }
+
+    handle_path /benchmarking_datasets/* {
+        root * /mnt/hdd/jenkins
+        file_server browse
+    }
+
+    handle_path /model_cache_server/* {
+        root * /mnt/hdd/model
+        file_server browse
+    }
+}
