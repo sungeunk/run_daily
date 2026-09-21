@@ -122,9 +122,9 @@ def test_render_fleet_html_is_compact_and_links_failed_run() -> None:
     assert "data-sort-type=\"number\"" in rendered
     assert 'class="num"' in rendered
     assert ".num{text-align:right;font-variant-numeric:tabular-nums}" in rendered
-    assert "<th>Models</th>" in rendered
-    assert "<th>Attention reason</th>" in rendered
-    assert "<th>Last good</th>" in rendered
+    assert ">Models</th>" in rendered
+    assert ">Attention reason</th>" in rendered
+    assert ">Last good</th>" in rendered
     assert "gemma-2-9b-it / OV_FP16-4BIT_DEFAULT" in rendered
     assert "Test assertion failed" in rendered
     assert ">failed<" not in rendered
@@ -340,6 +340,29 @@ def test_delivery_key_is_stable_for_the_same_runs(tmp_path) -> None:
     same_reordered = {"machines": [{"run_id": "run-b"}, {"run_id": "run-a"}]}
 
     assert _delivery_key(config, "23107", one) == _delivery_key(config, "23107", same_reordered)
+
+
+def test_delivery_key_ignores_unrendered_improvements(tmp_path) -> None:
+    config = _config(tmp_path)
+    digest = {"summary": {"status": "green"}, "top_improvements": [{"model": "a"}]}
+    changed = {"summary": {"status": "green"}, "top_improvements": [{"model": "b"}]}
+
+    assert _delivery_key(config, "23107", digest) == _delivery_key(config, "23107", changed)
+
+
+def test_delivery_key_ignores_unrendered_machine_fields(tmp_path) -> None:
+    config = _config(tmp_path)
+    digest = {
+        "machines": [{"machine": "LNL-03", "status": "success", "run_id": "run-1"}],
+    }
+    changed = {
+        "machines": [{
+            "machine": "LNL-03", "status": "success", "run_id": "run-1",
+            "performance": {"improved": 4},
+        }],
+    }
+
+    assert _delivery_key(config, "23107", digest) == _delivery_key(config, "23107", changed)
 
 
 def test_load_config_allows_mail_free_dry_run_config(tmp_path) -> None:

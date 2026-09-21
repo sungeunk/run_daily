@@ -538,8 +538,8 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
             if result.returncode == 0:
                 return True
             log.warning('send_mail: sendmail path failed (rc=%d), falling back to mail(1)', result.returncode)
-        except subprocess.TimeoutExpired:
-            log.warning('send_mail: sendmail path timed out on %s, falling back to mail(1)', relay)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.warning('send_mail: sendmail path failed on %s: %s', relay, exc)
 
         # Fallback: legacy remote mail command. List-based (no shell=True) so
         # the title/recipients never pass through a second, local shell's
@@ -562,8 +562,8 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         try:
             result = subprocess.run(cmd, input=body.encode('utf-8'), timeout=60)
             return result.returncode == 0
-        except subprocess.TimeoutExpired:
-            log.error('send_mail: fallback mail(1) path timed out on %s', relay)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.error('send_mail: fallback mail(1) path failed on %s: %s', relay, exc)
             return False
     else:
         cmd = [
@@ -575,7 +575,11 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         ]
 
     log.info('send_mail: %s → %s', full_title, recipients)
-    result = subprocess.run(cmd, input=body, text=True)
+    try:
+        result = subprocess.run(cmd, input=body, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.error('send_mail: local mail command failed: %s', exc)
+        return False
     return result.returncode == 0
 
 

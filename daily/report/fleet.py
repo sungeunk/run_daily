@@ -10,6 +10,22 @@ from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
 
+_TABLE_STYLE = "border-collapse:collapse;width:100%;font-size:13px"
+_CELL_STYLE = "border:1px solid #d1d5db;padding:7px;text-align:left;vertical-align:top"
+_NUM_CELL_STYLE = f"{_CELL_STYLE};text-align:right;font-variant-numeric:tabular-nums"
+_HEADER_STYLE = f"{_CELL_STYLE};background:#f3f4f6"
+
+
+def _td(value: object, *, numeric: bool = False, attrs: str = "") -> str:
+    style = _NUM_CELL_STYLE if numeric else _CELL_STYLE
+    class_attr = ' class="num"' if numeric else ""
+    return f'<td{class_attr} style="{style}"{attrs}>{value}</td>'
+
+
+def _th(value: str, *, attrs: str = "") -> str:
+    return f'<th style="{_HEADER_STYLE}"{attrs}>{value}</th>'
+
+
 def _text(value: object) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
@@ -124,14 +140,14 @@ def _machine_rows(machines: Sequence[Mapping[str, Any]], viewer_base_url: str,
         )
         rows.append(
             "<tr>"
-            f'<td>{_text(row.get("machine"))}</td>'
-            f'<td>{_status_dot(status)}</td>'
-            f'<td class="num">{_text(_format_timestamp(row.get("ts")))}</td>'
-            f'<td class="num">{_text(_format_duration(row.get("duration_sec")))}</td>'
-            f'<td>{_text(row.get("ov_version") or "-")}</td>'
-            f'<td class="num">{_text(series)}</td>'
-            f'<td class="num">{regression_count}</td>'
-            f'<td>{_artifact_links(viewer_base_url, row, html_report_base_url)}</td>'
+            f'{_td(_text(row.get("machine")))}'
+            f'{_td(_status_dot(status))}'
+            f'{_td(_text(_format_timestamp(row.get("ts"))), numeric=True)}'
+            f'{_td(_text(_format_duration(row.get("duration_sec"))), numeric=True)}'
+            f'{_td(_text(row.get("ov_version") or "-"))}'
+            f'{_td(_text(series), numeric=True)}'
+            f'{_td(regression_count, numeric=True)}'
+            f'{_td(_artifact_links(viewer_base_url, row, html_report_base_url))}'
             "</tr>"
         )
     return "".join(rows)
@@ -159,11 +175,11 @@ def _issue_rows(issues: Sequence[Mapping[str, Any]], viewer_base_url: str,
         raw_log_link = _raw_log_link(html_report_base_url, issue)
         rows.append(
             "<tr>"
-            f'<td>{_text(issue.get("machine"))}</td>'
-            f'<td>{_text(f"{model} / {precision}")}</td>'
-            f'<td>{_text(attention_reason(issue.get("outcome")))}</td>'
-            f'<td>{last_good_link}</td>'
-            f'<td>{raw_log_link}</td>'
+            f'{_td(_text(issue.get("machine")))}'
+            f'{_td(_text(f"{model} / {precision}"))}'
+            f'{_td(_text(attention_reason(issue.get("outcome"))))}'
+            f'{_td(last_good_link)}'
+            f'{_td(raw_log_link)}'
             "</tr>"
         )
     return "".join(rows)
@@ -201,17 +217,32 @@ def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
         in_token = int(row.get("in_token") or 0)
         out_token = int(row.get("out_token") or 0)
         tokens = f"in: {in_token} / out: {out_token}"
+        machine_sort = _text(row.get("machine"))
+        model_sort = _text(row.get("model"))
+        precision_sort = _text(row.get("precision"))
+        mode_sort = _text(row.get("exec_mode"))
+        regression_sort = regression_pct if regression_pct is not None else ""
+        baseline_sort = _text(row.get("baseline_value"))
+        current_sort = _text(row.get("current_value"))
+        machine_attr = f' data-sort="{machine_sort}"'
+        model_attr = f' data-sort="{model_sort}"'
+        precision_attr = f' data-sort="{precision_sort}"'
+        tokens_attr = f' data-sort="{in_token * 1000000 + out_token}"'
+        mode_attr = f' data-sort="{mode_sort}"'
+        regression_attr = f' data-sort="{regression_sort}"'
+        baseline_attr = f' data-sort="{baseline_sort}"'
+        current_attr = f' data-sort="{current_sort}"'
         rendered.append(
             "<tr>"
-            f'<td data-sort="{_text(row.get("machine"))}">{_text(row.get("machine"))}</td>'
-            f'<td data-sort="{_text(row.get("model"))}">{_text(row.get("model"))}</td>'
-            f'<td data-sort="{_text(row.get("precision"))}">{_text(row.get("precision"))}</td>'
-            f'<td class="num" data-sort="{in_token * 1000000 + out_token}">{_text(tokens)}</td>'
-            f'<td data-sort="{_text(row.get("exec_mode"))}">{_text(latency_mode(row.get("exec_mode")))}</td>'
-            f'<td class="num" data-sort="{regression_pct if regression_pct is not None else ""}">{_text(change)}</td>'
-            f'<td class="num" data-sort="{_text(row.get("baseline_value"))}">{_text(baseline)}</td>'
-            f'<td class="num" data-sort="{_text(row.get("current_value"))}">{_text(current)}</td>'
-            f'<td>{_artifact_links(viewer_base_url, row, html_report_base_url)}</td>'
+            f'{_td(machine_sort, attrs=machine_attr)}'
+            f'{_td(model_sort, attrs=model_attr)}'
+            f'{_td(precision_sort, attrs=precision_attr)}'
+            f'{_td(_text(tokens), numeric=True, attrs=tokens_attr)}'
+            f'{_td(_text(latency_mode(row.get("exec_mode"))), attrs=mode_attr)}'
+            f'{_td(_text(change), numeric=True, attrs=regression_attr)}'
+            f'{_td(_text(baseline), numeric=True, attrs=baseline_attr)}'
+            f'{_td(_text(current), numeric=True, attrs=current_attr)}'
+            f'{_td(_artifact_links(viewer_base_url, row, html_report_base_url))}'
             "</tr>"
         )
     return "".join(rendered)
@@ -247,14 +278,14 @@ def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
     if issues:
         issue_section = f"""
         <h2>Issues Requiring Attention</h2>
-        <table><thead><tr><th>Machine</th><th>Models</th><th>Attention reason</th><th>Last good</th><th>Raw log</th></tr></thead>
+        <table style="{_TABLE_STYLE}"><thead><tr>{_th("Machine")}{_th("Models")}{_th("Attention reason")}{_th("Last good")}{_th("Raw log")}</tr></thead>
         <tbody>{_issue_rows(issues, viewer_base_url, html_report_base_url)}</tbody></table>
         """
     regression_section = ""
     if regressions:
         regression_section = f"""
         <h2>Performance Regressions</h2>
-        <table id="performance-regressions"><thead><tr><th data-sort-type="text">Machine</th><th data-sort-type="text">Model</th><th data-sort-type="text">Precision</th><th data-sort-type="number">Tokens</th><th data-sort-type="text">Mode</th><th data-sort-type="number">Regression</th><th data-sort-type="number">Baseline</th><th data-sort-type="number">Current</th><th>Report</th></tr></thead>
+        <table id="performance-regressions" style="{_TABLE_STYLE}"><thead><tr>{_th("Machine", attrs=' data-sort-type="text"')}{_th("Model", attrs=' data-sort-type="text"')}{_th("Precision", attrs=' data-sort-type="text"')}{_th("Tokens", attrs=' data-sort-type="number"')}{_th("Mode", attrs=' data-sort-type="text"')}{_th("Regression", attrs=' data-sort-type="number"')}{_th("Baseline", attrs=' data-sort-type="number"')}{_th("Current", attrs=' data-sort-type="number"')}{_th("Report")}</tr></thead>
         <tbody>{_regression_rows(regressions, viewer_base_url, html_report_base_url)}</tbody></table>
         """
 
@@ -275,7 +306,7 @@ Completed: <strong>{_text(summary.get("completed_machines"))}/{_text(summary.get
 Failed machines: <strong>{_text(summary.get("failed_machines"))}</strong> · 
 Purpose: {_text(selection.get("purpose"))}</div>
 <h2>Machine Summary</h2>
-<table><thead><tr><th>Machine</th><th>Status</th><th>Execution time</th><th>Duration</th><th>OpenVINO</th><th>Series</th><th>Regression</th><th>Artifacts</th></tr></thead>
+<table style="{_TABLE_STYLE}"><thead><tr>{_th("Machine")}{_th("Status")}{_th("Execution time")}{_th("Duration")}{_th("OpenVINO")}{_th("Series")}{_th("Regression")}{_th("Artifacts")}</tr></thead>
 <tbody>{_machine_rows(machines, viewer_base_url, html_report_base_url)}</tbody></table>
 {issue_section}
 {regression_section}

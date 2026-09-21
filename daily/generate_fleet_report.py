@@ -11,9 +11,12 @@ import logging
 import os
 import re
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from common.delivery import send_mail
@@ -235,6 +238,118 @@ def wait_for_digest(config: FleetConfig, ov_build: str,
         time.sleep(min(config.poll_interval_seconds, max(0.0, deadline - time.monotonic())))
 
 
+def _canonicalize(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _canonicalize(item) for key, item in sorted(value.items())}
+    if isinstance(value, list):
+        items = [_canonicalize(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    return value
+
+
+def _effective_report_url(row: dict[str, Any], base_url: str) -> str:
+    direct = str(row.get("html_report_url") or "")
+    parsed = urlparse(direct)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return direct
+    base = urlparse(base_url)
+    report_file = str(row.get("report_file") or "")
+    machine = str(row.get("machine") or "")
+    match = re.fullmatch(r"daily\.(\d{8}_\d{4})\.summary\.json", report_file)
+    if base.scheme not in {"http", "https"} or not base.netloc or not machine or match is None:
+        return ""
+    stamp = match.group(1)
+    return (
+        f"{base_url.rstrip('/')}/daily2/{quote(machine, safe='')}/"
+        f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
+    )
+
+
+def _rendered_duration(value: object) -> str:
+    try:
+        return f"{max(0, int(float(value or 0))) // 60}m"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _rendered_digest(digest: dict[str, Any], html_report_base_url: str) -> dict[str, Any]:
+    machine_fields = (
+        "machine", "run_id", "status", "ts", "duration_sec", "ov_version",
+        "series_total", "series_skipped", "series_success", "series_failed",
+        "html_report_url",
+    )
+    issue_fields = (
+        "machine", "model", "precision", "outcome",
+    )
+    regression_fields = (
+        "machine", "model", "precision", "in_token", "out_token",
+        "exec_mode", "improvement_pct", "baseline_value", "current_value",
+        "unit", "html_report_url",
+    )
+    machine_by_name = {
+        str(machine.get("machine")): machine
+        for machine in digest.get("machines", [])
+        if isinstance(machine, dict)
+    }
+    rendered_issues = []
+    for issue in digest.get("functional_issues", []):
+        if not isinstance(issue, dict):
+            continue
+        rendered_issues.append({
+            field: issue.get(field) for field in issue_fields
+        } | {
+            "last_good_html_report_url": (
+                issue.get("last_good_html_report_url")
+                if issue.get("last_good_run_id") and _effective_report_url(
+                    {"html_report_url": issue.get("last_good_html_report_url")}, ""
+                ) else ""
+            ),
+        })
+    rendered_regressions = []
+    for regression in digest.get("top_regressions", []):
+        if not isinstance(regression, dict):
+            continue
+        merged = {**machine_by_name.get(str(regression.get("machine")), {}), **regression}
+        rendered_regressions.append(merged)
+
+    return {
+        "selection": {
+            key: digest.get("selection", {}).get(key)
+            for key in ("ov_build", "purpose")
+        },
+        "summary": {
+            key: digest.get("summary", {}).get(key)
+            for key in ("status", "expected_machines", "completed_machines", "failed_machines")
+        },
+        "machines": [
+            {
+                **{field: machine.get(field) for field in machine_fields},
+                "performance": {
+                    "regressed": (
+                        machine.get("performance", {}).get("regressed", 0)
+                        if isinstance(machine.get("performance"), dict) else 0
+                    ),
+                },
+                "duration_sec": _rendered_duration(machine.get("duration_sec")),
+                "html_report_url": _effective_report_url(machine, html_report_base_url),
+                "ts": str(machine.get("ts") or "")[:16],
+            }
+            for machine in digest.get("machines", [])
+            if isinstance(machine, dict)
+        ],
+        "functional_issues": rendered_issues,
+        "top_regressions": [
+            {
+                **{field: regression.get(field) for field in regression_fields},
+                "html_report_url": _effective_report_url(regression, html_report_base_url),
+            }
+            for regression in rendered_regressions
+            if isinstance(regression, dict)
+        ],
+        "warnings": digest.get("warnings"),
+    }
+
+
 def _delivery_key(config: FleetConfig, ov_build: str, digest: dict[str, Any]) -> str:
     """Identity of what is about to be delivered.
 
@@ -242,15 +357,52 @@ def _delivery_key(config: FleetConfig, ov_build: str, digest: dict[str, Any]) ->
     current for a second night is re-tested, and that genuinely is a new
     report. Keying on the build would silently swallow it.
     """
-    run_ids = sorted(
-        str(m.get("run_id"))
-        for m in digest.get("machines", [])
-        if isinstance(m, dict) and m.get("run_id")
-    )
+    stable_digest = _rendered_digest(digest, config.html_report_base_url)
     identity = "\0".join(
-        [ov_build, config.purpose, config.triggered_by, *run_ids]
+        [
+            ov_build,
+            config.purpose,
+            config.triggered_by,
+            config.viewer_base_url,
+            json.dumps(_canonicalize(stable_digest), sort_keys=True, default=str),
+        ]
     )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+
+
+@contextmanager
+def _state_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_file.seek(0)
+            lock_file.write("0")
+            lock_file.flush()
+            lock_file.seek(0)
+            deadline = time.monotonic() + 180
+            while True:
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("timed out waiting for report state lock")
+                    time.sleep(0.1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _state(path: Path) -> dict[str, Any]:
@@ -261,6 +413,14 @@ def _state(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _remove_legacy_state(state: dict[str, Any], ov_build: str) -> None:
+    """Drop pre-fingerprint records so the upgrade resends once safely."""
+    old_name = f"daily-fleet.{ov_build}.html"
+    for key, value in list(state.items()):
+        if isinstance(value, dict) and Path(str(value.get("report", ""))).name == old_name:
+            del state[key]
 
 
 def _write_state(path: Path, state: dict[str, Any]) -> None:
@@ -320,48 +480,55 @@ def main() -> int:
                 client=client,
             )
         config.output_dir.mkdir(parents=True, exist_ok=True)
-        state_path = config.output_dir / ".fleet_delivery_state.json"
-        state = _state(state_path)
         delivery_key = _delivery_key(config, ov_build, digest)
         sha_suffix = f".{_slug(config.ov_sha)}" if config.ov_sha else ""
-        output = config.output_dir / f"{_slug(config.output_prefix)}.{_slug(config.purpose)}.{ov_build}{sha_suffix}.html"
-        output.write_text(
-            render_fleet_html(
-                digest, config.viewer_base_url, config.html_report_base_url,
-                title=config.report_title,
-            ), encoding="utf-8"
+        output = config.output_dir / (
+            f"{_slug(config.output_prefix)}.{_slug(config.purpose)}."
+            f"{ov_build}{sha_suffix}.{delivery_key}.html"
         )
-        log.info("wrote %s", output)
-        if args.dry_run:
-            return 0
+        state_path = config.output_dir / ".fleet_delivery_state.json"
+        with _state_lock(state_path):
+            state = _state(state_path)
+            if not args.dry_run and delivery_key in state and not args.force:
+                log.info("report already sent for build %s", ov_build)
+                return 0
 
-        if delivery_key in state and not args.force:
-            log.info("report already sent for build %s (same runs)", ov_build)
-            return 0
+            output.write_text(
+                render_fleet_html(
+                    digest, config.viewer_base_url, config.html_report_base_url,
+                    title=config.report_title,
+                ), encoding="utf-8"
+            )
+            log.info("wrote %s", output)
 
-        if not config.recipients:
-            raise ValueError("mail.recipients must not be empty when sending mail")
+            if args.dry_run:
+                return 0
 
-        summary = digest.get("summary") if isinstance(digest.get("summary"), dict) else {}
-        status = str(summary.get("status") or "unknown").upper()
-        sent = send_mail(
-            output,
-            ",".join(config.recipients),
-            f"{config.subject_prefix} [{status}] {config.purpose} build {ov_build}",
-            now_stamp=ov_build,
-            relay_server=config.relay_server,
-        )
-        if not sent:
-            return 3
-        state[delivery_key] = {
-            "ov_build": ov_build,
-            "ov_sha": config.ov_sha,
-            "purpose": config.purpose,
-            "triggered_by": config.triggered_by,
-            "report": str(output),
-            "sent_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        }
-        _write_state(state_path, state)
+            _remove_legacy_state(state, ov_build)
+
+            if not config.recipients:
+                raise ValueError("mail.recipients must not be empty when sending mail")
+
+            summary = digest.get("summary") if isinstance(digest.get("summary"), dict) else {}
+            status = str(summary.get("status") or "unknown").upper()
+            sent = send_mail(
+                output,
+                ",".join(config.recipients),
+                f"{config.subject_prefix} [{status}] {config.purpose} build {ov_build}",
+                now_stamp=ov_build,
+                relay_server=config.relay_server,
+            )
+            if not sent:
+                return 3
+            state[delivery_key] = {
+                "ov_build": ov_build,
+                "ov_sha": config.ov_sha,
+                "purpose": config.purpose,
+                "triggered_by": config.triggered_by,
+                "report": str(output),
+                "sent_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            }
+            _write_state(state_path, state)
         return 4 if status == "INCOMPLETE" else 0
     except (KeyError, TypeError, ValueError, McpError) as exc:
         log.error("fleet report failed: %s", exc)
