@@ -75,6 +75,13 @@ Update the following values:
 
 Only files ending in `.caddy` are active. Files ending in `.caddy.example` and `.local.caddy` are ignored by the import pattern or `.gitignore`.
 
+Current site configurations:
+
+| File | Purpose | Local URL |
+| --- | --- | --- |
+| `conf.d/wiki.caddy` | Serves the MkDocs Wiki static site from `../wiki/site/`. | `http://127.0.0.1:8080/` |
+| `conf.d/files.caddy` | Provides read-only directory browsing for selected `/mnt/hdd` folders. | `http://127.0.0.1:8081/` |
+
 ### `systemd/caddy.service`
 
 The unit currently assumes:
