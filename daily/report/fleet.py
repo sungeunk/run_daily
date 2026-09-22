@@ -67,6 +67,17 @@ def _details_link(viewer_base_url: str, row: Mapping[str, Any],
     return ""
 
 
+def _artifact_links(viewer_base_url: str, row: Mapping[str, Any],
+                    html_report_base_url: str) -> str:
+    links = [
+        link for link in (
+            _details_link(viewer_base_url, row, html_report_base_url),
+            _raw_log_link(html_report_base_url, row),
+        ) if link
+    ]
+    return "<br>".join(links)
+
+
 def _raw_log_link(base_url: str, row: Mapping[str, Any]) -> str:
     rawlog_path = str(row.get("rawlog_path") or "")
     prefix = "/var/www/html/"
@@ -120,7 +131,7 @@ def _machine_rows(machines: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'<td>{_text(row.get("ov_version") or "-")}</td>'
             f'<td class="num">{_text(series)}</td>'
             f'<td class="num">{regression_count}</td>'
-            f'<td>{_details_link(viewer_base_url, row, html_report_base_url)}</td>'
+            f'<td>{_artifact_links(viewer_base_url, row, html_report_base_url)}</td>'
             "</tr>"
         )
     return "".join(rows)
@@ -145,12 +156,14 @@ def _issue_rows(issues: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'<a href="{html.escape(last_good_url, quote=True)}" style="color:#075985">HTML report</a>'
             if issue.get("last_good_run_id") and last_good_url else ""
         )
+        raw_log_link = _raw_log_link(html_report_base_url, issue)
         rows.append(
             "<tr>"
             f'<td>{_text(issue.get("machine"))}</td>'
             f'<td>{_text(f"{model} / {precision}")}</td>'
             f'<td>{_text(attention_reason(issue.get("outcome")))}</td>'
             f'<td>{last_good_link}</td>'
+            f'<td>{raw_log_link}</td>'
             "</tr>"
         )
     return "".join(rows)
@@ -198,14 +211,15 @@ def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'<td class="num" data-sort="{regression_pct if regression_pct is not None else ""}">{_text(change)}</td>'
             f'<td class="num" data-sort="{_text(row.get("baseline_value"))}">{_text(baseline)}</td>'
             f'<td class="num" data-sort="{_text(row.get("current_value"))}">{_text(current)}</td>'
-            f'<td>{_details_link(viewer_base_url, row, html_report_base_url)}</td>'
+            f'<td>{_artifact_links(viewer_base_url, row, html_report_base_url)}</td>'
             "</tr>"
         )
     return "".join(rendered)
 
 
 def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
-                      html_report_base_url: str = "") -> str:
+                      html_report_base_url: str = "", *,
+                      title: str = "Daily GPU Fleet Summary") -> str:
     """Return a compact HTML email for one fleet digest."""
     summary = digest.get("summary") if isinstance(digest.get("summary"), Mapping) else {}
     selection = digest.get("selection") if isinstance(digest.get("selection"), Mapping) else {}
@@ -233,7 +247,7 @@ def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
     if issues:
         issue_section = f"""
         <h2>Issues Requiring Attention</h2>
-        <table><thead><tr><th>Machine</th><th>Models</th><th>Attention reason</th><th>Last good</th></tr></thead>
+        <table><thead><tr><th>Machine</th><th>Models</th><th>Attention reason</th><th>Last good</th><th>Raw log</th></tr></thead>
         <tbody>{_issue_rows(issues, viewer_base_url, html_report_base_url)}</tbody></table>
         """
     regression_section = ""
@@ -254,14 +268,14 @@ th,td{{border:1px solid #d1d5db;padding:7px;text-align:left;vertical-align:top}}
 th{{background:#f3f4f6}}th[data-sort-type]{{cursor:pointer;text-decoration:underline}}
 .summary{{margin:10px 0 18px;color:#4b5563}}
 </style></head><body>
-<h1>Daily GPU Fleet Summary {_status_dot(status)}</h1>
+<h1>{_text(title)} {_status_dot(status)}</h1>
 <div class="summary"><a href="{_text(viewer_base_url)}" style="color:#075985">Daily Viewer</a></div>
 <div class="summary">Build: <strong>{_text(selection.get("ov_build"))}</strong> ·
 Completed: <strong>{_text(summary.get("completed_machines"))}/{_text(summary.get("expected_machines"))}</strong> ·
 Failed machines: <strong>{_text(summary.get("failed_machines"))}</strong> · 
 Purpose: {_text(selection.get("purpose"))}</div>
 <h2>Machine Summary</h2>
-<table><thead><tr><th>Machine</th><th>Status</th><th>Execution time</th><th>Duration</th><th>OpenVINO</th><th>Series</th><th>Regression</th><th>HTML report</th></tr></thead>
+<table><thead><tr><th>Machine</th><th>Status</th><th>Execution time</th><th>Duration</th><th>OpenVINO</th><th>Series</th><th>Regression</th><th>Artifacts</th></tr></thead>
 <tbody>{_machine_rows(machines, viewer_base_url, html_report_base_url)}</tbody></table>
 {issue_section}
 {regression_section}

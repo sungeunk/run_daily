@@ -5,7 +5,13 @@ import argparse
 import pytest
 
 import generate_fleet_report
-from generate_fleet_report import _delivery_key, _digest_arguments, load_config
+from generate_fleet_report import (
+    _apply_cli_overrides,
+    _delivery_key,
+    _digest_arguments,
+    load_config,
+    _parse_ov_version,
+)
 from report.fleet import render_fleet_html
 
 pytestmark = pytest.mark.dev_only
@@ -143,6 +149,62 @@ def test_render_fleet_html_omits_untrusted_report_urls() -> None:
     assert ">HTML report</a>" not in rendered
 
 
+def test_render_fleet_html_supports_pr_title_and_raw_logs() -> None:
+    digest = {
+        "selection": {
+            "ov_build": "23164",
+            "purpose": "PR#38312 onednn 3.14 sungeunk",
+            "triggered_by": "sungeunk",
+        },
+        "summary": {
+            "status": "yellow",
+            "expected_machines": 1,
+            "completed_machines": 1,
+            "failed_machines": 0,
+        },
+        "machines": [{
+            "machine": "PTLH-02",
+            "run_id": "run-pr",
+            "status": "success",
+            "rawlog_path": "/var/www/html/daily2/PTLH-02/2026.09/daily.20260922_1540.raw",
+            "report_file": "daily.20260922_1540.summary.json",
+        }],
+        "functional_issues": [{
+            "machine": "PTLH-02",
+            "run_id": "run-pr",
+            "outcome": "failed",
+            "rawlog_path": "/var/www/html/daily2/PTLH-02/2026.09/daily.20260922_1540.raw",
+        }],
+        "top_regressions": [{
+            "machine": "PTLH-02",
+            "run_id": "run-pr",
+            "model": "gemma-3-4b-it",
+            "precision": "OV_FP16-4BIT_DEFAULT",
+            "in_token": 1024,
+            "out_token": 256,
+            "exec_mode": "1st",
+            "improvement_pct": -0.08,
+            "baseline_value": 180.0,
+            "current_value": 194.0,
+            "unit": "ms",
+        }],
+    }
+
+    rendered = render_fleet_html(
+        digest,
+        "http://viewer.local",
+        "http://reports.local",
+        title="PR GPU Fleet Review",
+    )
+
+    assert "PR GPU Fleet Review" in rendered
+    assert "Daily GPU Fleet Summary" not in rendered
+    assert "PR#38312 onednn 3.14 sungeunk" in rendered
+    assert "Artifacts</th>" in rendered
+    assert "Raw log</a>" in rendered
+    assert "http://reports.local/daily2/PTLH-02/2026.09/daily.20260922_1540.raw" in rendered
+
+
 def test_render_fleet_html_appends_to_existing_viewer_query() -> None:
     digest = {
         "summary": {},
@@ -175,6 +237,78 @@ def test_load_config_and_digest_arguments(tmp_path) -> None:
         assert arguments["purpose"] == "daily_pipeline timer"
         assert arguments["triggered_by"] == "timer"
         assert config.output_dir == (tmp_path / "../output/fleet").resolve()
+
+
+def test_ov_version_extracts_build_and_sha_and_ignores_suffix() -> None:
+        assert _parse_ov_version("2026.5.0-23164-749d332ac8b") == (
+            "23164", "749d332ac8b"
+        )
+        assert _parse_ov_version("2026.5.0-23164-749d332ac8b-PR38312") == (
+            "23164", "749d332ac8b"
+        )
+
+
+def test_ov_version_rejects_invalid_format() -> None:
+        with pytest.raises(ValueError, match="--ov-ver"):
+            _parse_ov_version("23164-749d332ac8b")
+
+
+def test_sha_override_is_forwarded_to_digest_arguments(tmp_path) -> None:
+        config_path = tmp_path / "fleet.json"
+        config_path.write_text("""{
+            "mcp_url": "http://mcp.local",
+            "viewer_base_url": "http://viewer.local",
+            "purpose": "PR#38312 onednn 3.14 sungeunk",
+            "triggered_by": "sungeunk",
+            "expected_machines": ["PTLH-02"]
+        }""", encoding="utf-8")
+
+        config = _apply_cli_overrides(
+            load_config(config_path),
+            argparse.Namespace(
+                purpose=None,
+                triggered_by=None,
+                ov_sha="749d332ac8b",
+                machines=None,
+                exclude_machine=[],
+                title=None,
+                output_prefix=None,
+            ),
+        )
+
+        arguments = _digest_arguments(config, "23164")
+
+        assert config.ov_sha == "749d332ac8b"
+        assert arguments["ov_sha"] == "749d332ac8b"
+
+
+def test_cli_overrides_build_pr_review_scope(tmp_path) -> None:
+        config_path = tmp_path / "fleet.json"
+        config_path.write_text("""{
+            "mcp_url": "http://mcp.local",
+            "viewer_base_url": "http://viewer.local",
+            "purpose": "daily_pipeline timer",
+            "triggered_by": "timer",
+            "expected_machines": ["PTLH-01", "PTLH-02", "LNL-03"]
+        }""", encoding="utf-8")
+
+        config = _apply_cli_overrides(
+            load_config(config_path),
+            argparse.Namespace(
+                purpose="PR#38312 onednn 3.14 sungeunk",
+                triggered_by="sungeunk",
+                machines=None,
+                exclude_machine=["PTLH-01"],
+                title="PR GPU Fleet Review",
+                output_prefix="pr-fleet",
+            ),
+        )
+
+        assert config.purpose == "PR#38312 onednn 3.14 sungeunk"
+        assert config.triggered_by == "sungeunk"
+        assert config.expected_machines == ("PTLH-02", "LNL-03")
+        assert config.report_title == "PR GPU Fleet Review"
+        assert config.output_prefix == "pr-fleet"
 
 
 def _config(tmp_path):

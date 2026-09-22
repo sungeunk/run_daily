@@ -255,6 +255,7 @@ def daily_results_daily_digest(
     top_regressions: int = 10,
     top_improvements: int = 5,
     html_report_base_url: str | None = None,
+    ov_sha: str | None = None,
 ) -> str:
     """Return one bounded cross-machine summary for one OpenVINO build.
 
@@ -267,6 +268,8 @@ def daily_results_daily_digest(
 
     Args:
         ov_build: Build number as stored in runs.ov_build, e.g. '23107'.
+        ov_sha: Optional exact OpenVINO commit SHA to distinguish custom builds
+            that reused the same build number.
         purpose: Exact purpose string, e.g. 'daily_pipeline timer'.
         triggered_by: Exact trigger identity, e.g. 'timer'.
         expected_machines: Machines the cycle should cover; any that produced
@@ -283,6 +286,7 @@ def daily_results_daily_digest(
             top_regressions=top_regressions,
             top_improvements=top_improvements,
             html_report_base_url=html_report_base_url,
+            ov_sha=ov_sha,
         )
         return _dump(digest)
     except (ValueError, duckdb.Error) as exc:

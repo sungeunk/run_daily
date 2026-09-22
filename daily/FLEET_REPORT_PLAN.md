@@ -274,13 +274,13 @@ CLI 인자는 최소한으로 유지한다.
 
 ```text
 --config PATH
---build BUILD_NUMBER
+--ov-ver OPENVINO_VERSION
 --dry-run
 --force
 ```
 
 - `--config`: JSON 설정 파일 경로. 기본 경로를 제공한다.
-- `--build`: 재생성이나 테스트가 필요할 때만 지정한다. 기본값은 조건에 맞는 run 중 가장 최근 timestamp를 가진 build다.
+- `--ov-ver`: `2026.5.0-23164-749d332ac8b` 형식의 OpenVINO 버전. 뒤에 붙는 PR/custom suffix는 무시하며, 생략하면 조건에 맞는 최신 build를 사용한다.
 - `--dry-run`: HTML만 생성하고 메일은 보내지 않는다.
 - `--force`: 이미 발송한 날짜를 다시 발송한다.
 

@@ -125,13 +125,14 @@ class TestRunKind:
 class TestDailyDigest:
     @staticmethod
     def _cycle_run(run_id: str, machine: str, ts, build: str,
-                   *, triggered_by: str = "timer"):
+                   *, triggered_by: str = "timer", sha: str = "abc"):
         rec = _record(0, value=100.0, triggered_by=triggered_by)
         rec.run_id = run_id
         rec.machine = machine
         rec.ts = ts
         rec.ov_build = build
-        rec.ov_version = f"2026.5.0-{build}-abc"
+        rec.ov_sha = sha
+        rec.ov_version = f"2026.5.0-{build}-{sha}"
         rec.purpose = "daily_pipeline timer"
         rec.total_tests = rec.passed_tests = 1
         rec.failed_tests = rec.error_tests = rec.skipped_tests = 0
@@ -174,6 +175,30 @@ class TestDailyDigest:
         assert rows["TEST-02"]["run_id"] == "run-midnight"
         assert rows["MISSING"]["status"] == "missing"
         assert rows[MACHINE]["viewer_query"] == "?run_id=run-late"
+
+    def test_digest_can_filter_same_build_by_sha(self, db: Path):
+        target = self._cycle_run("run-target", MACHINE,
+                                 datetime(2026, 1, 1, 23, 50), "23107",
+                                 sha="targetsha")
+        same_build_other_sha = self._cycle_run(
+            "run-other-sha", MACHINE,
+            datetime(2026, 1, 2, 23, 50), "23107", sha="othersha",
+        )
+        _write(db, [target, same_build_other_sha])
+
+        digest = q.daily_digest(
+            db,
+            ov_build="23107",
+            ov_sha="targetsha",
+            purpose="daily_pipeline timer",
+            triggered_by="timer",
+            expected_machines=[MACHINE],
+        )
+
+        rows = {row["machine"]: row for row in digest["machines"]}
+        assert digest["selection"]["ov_sha"] == "targetsha"
+        assert rows[MACHINE]["run_id"] == "run-target"
+        assert rows[MACHINE]["ov_sha"] == "targetsha"
 
     def test_retested_build_warns_once_instead_of_naming_every_machine(self, db: Path):
         """A build kept for a second night is re-tested fleet-wide, so every

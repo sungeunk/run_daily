@@ -110,7 +110,23 @@ python daily/generate_fleet_report.py --dry-run
 python daily/generate_fleet_report.py
 ```
 
-특정 build를 다시 생성할 때만 `--build <build-number>`를 사용한다. 기본값은
+PR/custom run을 메일 형태로 리뷰할 때는 동일 생성기를 쓰되 purpose와 실행자,
+제외할 머신, 제목을 CLI에서 덮어쓴다. `--dry-run --wait`는 메일을 보내지
+않고도 누락 머신을 기다린 뒤 HTML만 생성한다.
+
+```bash
+python daily/generate_fleet_report.py \
+  --purpose "PR#38312 onednn 3.14 sungeunk" \
+  --triggered-by sungeunk \
+  --exclude-machine PTLH-01 \
+  --title "PR GPU Fleet Review" \
+  --output-prefix pr-fleet \
+  --ov-ver 2026.5.0-23164-749d332ac8b-PR38312 \
+  --dry-run --wait
+```
+
+특정 OpenVINO 버전을 다시 생성할 때는 `--ov-ver <version>`을 사용한다. 버전
+뒤에 붙은 PR/custom suffix는 무시된다. `--ov-ver`를 생략하면 기본값은
 조건에 맞는 run 중 가장 최근 timestamp를 가진 build다. 이미 발송한 동일 run
 조합을 재발송하려면 `--force`를 추가한다. 자세한 설계는
 `daily/FLEET_REPORT_PLAN.md`를 참고한다.

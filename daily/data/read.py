@@ -1385,7 +1385,8 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
                  max_functional_issues: int = 20,
                  top_regressions: int | None = 10,
                  top_improvements: int = 5,
-                 html_report_base_url: str | None = None) -> dict:
+                 html_report_base_url: str | None = None,
+                 ov_sha: str | None = None) -> dict:
     """Build a bounded fleet summary for one OpenVINO build across the fleet.
 
     The cycle is identified by ``ov_build`` rather than by a calendar date:
@@ -1402,11 +1403,16 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
     ov_build = str(ov_build).strip()
     if not ov_build:
         raise ValueError("ov_build must not be empty")
+    ov_sha = str(ov_sha).strip() if ov_sha else None
     machines = list(dict.fromkeys(expected_machines))
     if not machines:
         raise ValueError("expected_machines must not be empty")
 
     placeholders = ",".join(["?"] * len(machines))
+    sha_clause = "AND COALESCE(r.ov_sha, '') = ?" if ov_sha else ""
+    params = [ov_build, *machines, purpose]
+    if ov_sha:
+        params.append(ov_sha)
     with _read_only(db_path) as con:
         selected = con.execute(f"""
             SELECT machine, run_id, ts, strftime(ts, '%Y%m%d_%H%M') AS stamp,
@@ -1419,10 +1425,11 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
             WHERE COALESCE(r.ov_build, '') = ?
               AND r.machine IN ({placeholders})
               AND COALESCE(r.purpose, '') = ?
+                            {sha_clause}
               AND NOT r.is_partial
               AND NOT r.excluded
             ORDER BY machine, ts DESC, ingested_at DESC
-        """, [ov_build, *machines, purpose]).fetchdf()
+                """, params).fetchdf()
 
         eligible_rows = [
             {
@@ -1634,6 +1641,7 @@ def daily_digest(db_path: Path, *, ov_build: str, purpose: str,
         "generated_at": dt.datetime.now(dt.timezone.utc),
         "selection": {
             "ov_build": ov_build,
+            "ov_sha": ov_sha,
             "purpose": purpose,
             "triggered_by": triggered_by,
         },

@@ -5,6 +5,8 @@
   "timezone": "Asia/Seoul",
   "purpose": "daily_pipeline timer",
   "triggered_by": "timer",
+  "report_title": "Daily GPU Fleet Summary",
+  "output_prefix": "daily-fleet",
   "expected_machines": [
     "ARLH-01",
     "BMG-02",

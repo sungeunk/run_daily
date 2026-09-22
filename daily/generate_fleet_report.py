@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -34,6 +34,7 @@ class FleetConfig:
     timezone: str
     purpose: str
     triggered_by: str
+    ov_sha: str | None
     expected_machines: tuple[str, ...]
     recipients: tuple[str, ...]
     subject_prefix: str
@@ -44,6 +45,8 @@ class FleetConfig:
     top_regressions: int | None
     top_improvements: int
     output_dir: Path
+    report_title: str
+    output_prefix: str
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:
@@ -66,6 +69,22 @@ def _optional_strings(value: object, name: str) -> tuple[str, ...]:
             isinstance(item, str) and item.strip() for item in value):
         raise ValueError(f"{name} must be a string array")
     return tuple(dict.fromkeys(item.strip() for item in value))
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-._")
+    return slug or "fleet"
+
+
+def _parse_ov_version(value: str) -> tuple[str, str]:
+    """Extract build and commit SHA from an OpenVINO version string.
+
+    PR/custom suffixes after the SHA are intentionally ignored.
+    """
+    match = re.fullmatch(r"\d+\.\d+\.\d+-(\d+)-([A-Za-z0-9]+)(?:-.+)?", value.strip())
+    if match is None:
+        raise ValueError("--ov-ver must look like 2026.5.0-23164-749d332ac8b")
+    return match.group(1), match.group(2)
 
 
 def load_config(path: Path) -> FleetConfig:
@@ -93,6 +112,7 @@ def load_config(path: Path) -> FleetConfig:
         timezone=timezone,
         purpose=str(root["purpose"]),
         triggered_by=str(root["triggered_by"]),
+        ov_sha=(str(root["ov_sha"]).strip() if root.get("ov_sha") else None),
         expected_machines=_strings(root.get("expected_machines"), "expected_machines"),
         recipients=_optional_strings(mail.get("recipients"), "mail.recipients"),
         subject_prefix=str(mail.get("subject_prefix", "Daily GPU")),
@@ -106,7 +126,37 @@ def load_config(path: Path) -> FleetConfig:
         ),
         top_improvements=max(0, int(report.get("top_improvements", 5))),
         output_dir=output_dir,
+        report_title=str(root.get("report_title", "Daily GPU Fleet Summary")),
+        output_prefix=str(root.get("output_prefix", "daily-fleet")),
     )
+
+
+def _apply_cli_overrides(config: FleetConfig, args: argparse.Namespace) -> FleetConfig:
+    updates: dict[str, object] = {}
+    if purpose := getattr(args, "purpose", None):
+        updates["purpose"] = purpose
+    if triggered_by := getattr(args, "triggered_by", None):
+        updates["triggered_by"] = triggered_by
+    if ov_sha := getattr(args, "ov_sha", None):
+        updates["ov_sha"] = ov_sha
+    if machines := getattr(args, "machines", None):
+        updates["expected_machines"] = tuple(dict.fromkeys(machines))
+    if exclude_machine := getattr(args, "exclude_machine", None):
+        excluded = set(exclude_machine)
+        updates["expected_machines"] = tuple(
+            machine for machine in updates.get("expected_machines", config.expected_machines)
+            if machine not in excluded
+        )
+    if title := getattr(args, "title", None):
+        updates["report_title"] = title
+    if output_prefix := getattr(args, "output_prefix", None):
+        updates["output_prefix"] = output_prefix
+    if not updates:
+        return config
+    updated = replace(config, **updates)
+    if not updated.expected_machines:
+        raise ValueError("expected_machines must not be empty after CLI overrides")
+    return updated
 
 
 def _call_json_tool(config: FleetConfig, name: str, arguments: dict[str, object], *, client=None):
@@ -143,7 +193,7 @@ def latest_build(config: FleetConfig, *, client=None) -> str:
 
 
 def _digest_arguments(config: FleetConfig, ov_build: str) -> dict[str, object]:
-    return {
+    arguments: dict[str, object] = {
         "ov_build": ov_build,
         "purpose": config.purpose,
         "triggered_by": config.triggered_by,
@@ -153,6 +203,9 @@ def _digest_arguments(config: FleetConfig, ov_build: str) -> dict[str, object]:
         "top_improvements": config.top_improvements,
         "html_report_base_url": config.html_report_base_url,
     }
+    if config.ov_sha:
+        arguments["ov_sha"] = config.ov_sha
+    return arguments
 
 
 def fetch_digest(config: FleetConfig, ov_build: str, *, client=None) -> dict[str, Any]:
@@ -222,9 +275,28 @@ def _parse_args() -> argparse.Namespace:
         "--config", type=Path,
         default=Path(os.environ.get("DAILY_FLEET_CONFIG", DEFAULT_CONFIG)),
     )
-    parser.add_argument("--build", help="OpenVINO build to report on (default: newest)")
+    parser.add_argument(
+        "--ov-ver",
+        help="OpenVINO version, e.g. 2026.5.0-23164-749d332ac8b; trailing PR suffix is ignored",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Write HTML without sending mail")
     parser.add_argument("--force", action="store_true", help="Send an already delivered cycle again")
+    parser.add_argument("--purpose", help="Override config purpose, e.g. a PR/custom run label")
+    parser.add_argument("--triggered-by", help="Override config trigger identity")
+    parser.add_argument(
+        "--machine", dest="machines", action="append",
+        help="Expected machine for this report; repeat to override config list",
+    )
+    parser.add_argument(
+        "--exclude-machine", action="append", default=[],
+        help="Remove a machine from the configured or overridden expected list",
+    )
+    parser.add_argument("--title", help="HTML report title override")
+    parser.add_argument("--output-prefix", help="Output file prefix override")
+    parser.add_argument(
+        "--wait", action="store_true",
+        help="Wait for missing machines even with --dry-run",
+    )
     return parser.parse_args()
 
 
@@ -233,22 +305,30 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     args = _parse_args()
     try:
-        config = load_config(args.config)
+        config = _apply_cli_overrides(load_config(args.config), args)
+        ov_build = None
+        if ov_ver := getattr(args, "ov_ver", None):
+            ov_build, ov_sha = _parse_ov_version(ov_ver)
+            config = replace(config, ov_sha=ov_sha)
         with McpHttpClient(config.mcp_url, timeout=30.0) as client:
-            ov_build = args.build or latest_build(config, client=client)
+            ov_build = ov_build or latest_build(config, client=client)
             # The key depends on which runs were selected, so it can only be
             # computed once the digest is in hand.
             digest = wait_for_digest(
-                config, ov_build, wait=not args.dry_run, client=client
+                config, ov_build,
+                wait=(getattr(args, "wait", False) or not args.dry_run),
+                client=client,
             )
         config.output_dir.mkdir(parents=True, exist_ok=True)
         state_path = config.output_dir / ".fleet_delivery_state.json"
         state = _state(state_path)
         delivery_key = _delivery_key(config, ov_build, digest)
-        output = config.output_dir / f"daily-fleet.{ov_build}.html"
+        sha_suffix = f".{_slug(config.ov_sha)}" if config.ov_sha else ""
+        output = config.output_dir / f"{_slug(config.output_prefix)}.{_slug(config.purpose)}.{ov_build}{sha_suffix}.html"
         output.write_text(
             render_fleet_html(
-                digest, config.viewer_base_url, config.html_report_base_url
+                digest, config.viewer_base_url, config.html_report_base_url,
+                title=config.report_title,
             ), encoding="utf-8"
         )
         log.info("wrote %s", output)
@@ -267,7 +347,7 @@ def main() -> int:
         sent = send_mail(
             output,
             ",".join(config.recipients),
-            f"{config.subject_prefix} [{status}] build {ov_build}",
+            f"{config.subject_prefix} [{status}] {config.purpose} build {ov_build}",
             now_stamp=ov_build,
             relay_server=config.relay_server,
         )
@@ -275,6 +355,7 @@ def main() -> int:
             return 3
         state[delivery_key] = {
             "ov_build": ov_build,
+            "ov_sha": config.ov_sha,
             "purpose": config.purpose,
             "triggered_by": config.triggered_by,
             "report": str(output),
