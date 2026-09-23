@@ -53,10 +53,14 @@ from data import write as w  # noqa: E402
 # ---------------------------------------------------------------------------
 
 DEFAULT_DB = _HERE.parents[1] / "daily_output" / platform.node() / "bench.duckdb"
-INGEST_SCRIPT = Path("/var/www/html/daily2/ingest_db.sh")
+INGEST_SCRIPT = Path(
+    os.environ.get("INGEST_SCRIPT", "/mnt/hdd/daily/data/ingest_db.sh")
+)
 # Same lock the script takes; held here so a concurrent refresh queues up
 # instead of racing the DuckDB write lock.
-INGEST_LOCK = Path("/var/www/html/daily2/.ingest.lock")
+INGEST_LOCK = Path(
+    os.environ.get("INGEST_LOCK_FILE", str(INGEST_SCRIPT.parent / ".ingest.lock"))
+)
 INGEST_WAIT_SEC = 60.0
 
 

@@ -1,6 +1,13 @@
 :8081 {
     encode gzip
 
+    @raw path *.raw
+    header @raw Content-Type "text/plain; charset=utf-8"
+
+    @parquet path *.parquet
+    header @parquet Content-Type "application/octet-stream"
+    header @parquet Content-Disposition "attachment"
+
     redir /daily /daily/ 308
     redir /daily2 /daily2/ 308
     redir /benchmarking_datasets /benchmarking_datasets/ 308

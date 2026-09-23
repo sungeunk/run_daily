@@ -9,7 +9,7 @@ web_server/
 ├── caddy/
 ├── files/
 ├── wiki/
-└── update-wiki.sh
+└── manage-web-services.sh
 ```
 
 ### Caddy
@@ -65,8 +65,59 @@ http://127.0.0.1:8081/model_cache_server/
 ```
 
 The file browser supports directory listings, downloads, and browser-native
-viewing of formats such as text and HTML. It does not provide upload, delete,
-authentication, or per-user access control.
+viewing of formats such as text and HTML. `.raw` files are served as
+`text/plain` and open directly in the browser. `.parquet` files are binary
+files, so they are served as downloads rather than rendered as text. The file
+browser does not provide upload, delete, authentication, or per-user access
+control.
+
+### Daily viewer
+
+The daily viewer runs on `dg2fizz` as a user-level Streamlit service. The
+Jenkins controller remains on `dg2ubuntu`; this service only hosts the viewer
+and reads the local daily data on `dg2fizz`.
+
+```text
+Browser -> Caddy :8091 -> Streamlit 127.0.0.1:8501
+						   -> /mnt/hdd/daily/data/daily_llm_benchmark.duckdb
+```
+
+The service unit is
+`caddy/systemd/daily-viewer.service`. It uses `uv` and the dependencies in
+`daily/requirements.txt`, and sets `DAILY_DB` explicitly so the viewer does
+not depend on the machine hostname.
+
+Install and start it as the `sungeunk` user:
+
+```bash
+mkdir -p ~/.config/systemd/user
+ln -sf /home/sungeunk/repo/run_daily/web_server/caddy/systemd/daily-viewer.service \
+	~/.config/systemd/user/daily-viewer.service
+systemctl --user daemon-reload
+systemctl --user enable --now daily-viewer.service
+systemctl --user status daily-viewer.service
+```
+
+Caddy exposes the viewer at `http://dg2fizz.ikor.intel.com:8091/` and proxies
+to the private Streamlit port `8501`. Reload Caddy after installing the route:
+
+```bash
+systemctl --user reload caddy.service
+```
+
+Useful checks:
+
+```bash
+curl http://127.0.0.1:8501/_stcore/health
+journalctl --user -u daily-viewer.service -f
+```
+
+The daily result database and backup files are stored under
+`/mnt/hdd/daily/data/`. The service uses
+`/mnt/hdd/daily/data/daily_llm_benchmark.duckdb` as `DAILY_DB`; update the unit
+if the ingestion job changes the filename. The service is intentionally
+limited to the `sungeunk` user and does not expose Streamlit directly on the
+network.
 
 ### Jenkins node
 
@@ -141,23 +192,37 @@ Jenkins controller and verify it before starting the service.
 
 ## Update the Wiki
 
-Run the update script from this directory:
+Run the service management script from this directory:
 
 ```bash
 cd /home/sungeunk/repo/run_daily/web_server
-./update-wiki.sh
+./manage-web-services.sh build-wiki
 ```
 
-The script performs these steps:
-
-1. Runs MkDocs with Python 3.12 through `uv`.
-2. Builds the site with `mkdocs build --strict`.
-3. Reloads the user-level Caddy service only after a successful build.
-
-To build the Wiki without reloading Caddy:
+The script also manages the user-level service units:
 
 ```bash
-./update-wiki.sh --no-reload
+./manage-web-services.sh install
+./manage-web-services.sh start
+./manage-web-services.sh restart
+./manage-web-services.sh status
+```
+
+`install` registers available Caddy and Daily viewer units. The Jenkins agent
+unit is registered only when a local unit file is present. The `all` command
+installs services, builds the Wiki, reloads Caddy, and starts registered
+services:
+
+```bash
+./manage-web-services.sh all
+```
+
+The script runs MkDocs with Python 3.12 through `uv` and reloads Caddy only
+after a successful build. Service logs can be followed with:
+
+```bash
+journalctl --user -u caddy.service -f
+journalctl --user -u daily-viewer.service -f
 ```
 
 If the build fails, Caddy is not reloaded and the previously published site

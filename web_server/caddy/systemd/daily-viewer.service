@@ -1,0 +1,18 @@
+[Unit]
+Description=Daily Streamlit viewer (sungeunk user)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/repo/run_daily
+Environment=DAILY_DB=/mnt/hdd/daily/data/daily_llm_benchmark.duckdb
+Environment=INGEST_SCRIPT=/mnt/hdd/daily/data/ingest_db.sh
+Environment=INGEST_LOCK_FILE=/mnt/hdd/daily/data/.ingest.lock
+Environment=STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ExecStart=/usr/local/bin/uv run --with-requirements %h/repo/run_daily/daily/requirements.txt streamlit run %h/repo/run_daily/daily/viewer/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

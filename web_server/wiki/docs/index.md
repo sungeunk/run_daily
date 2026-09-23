@@ -7,7 +7,7 @@ Use the navigation to find operational notes and procedures.
 | Web | URL |
 |---|---|
 | Jenkins(LLM daily) | [http://dg2ubuntu.ikor.intel.com:8080](http://dg2ubuntu.ikor.intel.com:8080) |
-| Daily result viewer | [http://dg2raptorlake.ikor.intel.com:8502](http://dg2raptorlake.ikor.intel.com:8502) |
+| Daily result viewer | [http://dg2fizz.ikor.intel.com:8091](http://dg2fizz.ikor.intel.com:8091) |
 | Model cache server(mirror) | [http://dg2fizz.ikor.intel.com:8081/model_cache_server](http://dg2fizz.ikor.intel.com:8081/model_cache_server) |
 | Daily result backup | [http://dg2fizz.ikor.intel.com:8081/daily](http://dg2fizz.ikor.intel.com:8081/daily) |
 | Benchmarking datasets(static models) | [http://dg2fizz.ikor.intel.com:8081/benchmarking_datasets](http://dg2fizz.ikor.intel.com:8081/benchmarking_datasets) |
