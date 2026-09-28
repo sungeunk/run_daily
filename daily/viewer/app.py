@@ -549,6 +549,36 @@ def _fleet_records(overview: pd.DataFrame) -> pd.DataFrame:
             return "🟢 success"
         return "⚪ unknown"
 
+    def _status_reason(idx: int) -> str:
+        """Why ``_status`` picked its colour, using the same conditions."""
+        row = overview.iloc[idx]
+        age = row["age_hours"]
+        age_text = "age unknown" if pd.isna(age) else f"{age / 24:.1f} days old"
+        expected = _count(row["expected_cases"])
+        success = _count(row["success_cases"])
+        skip = _count(row["skipped_cases"])
+        produced = f"{success} success + {skip} skip of {expected} expected cases"
+        if is_fail.iloc[idx]:
+            causes = []
+            failed = _count(row["failed_tests"])
+            errors = _count(row["error_tests"])
+            if failed + errors > 0:
+                causes.append(f"{failed} failed / {errors} error pytest tests")
+            if _count(row["total_tests"]) == 0 and not pd.isna(row["total_tests"]):
+                causes.append("pytest executed no tests (aborted during collection?)")
+            if success + skip < expected:
+                causes.append(f"incomplete run: {produced}")
+            return ("Latest run failed — " + "; ".join(causes or ["see run details"])
+                    + f" ({age_text}).")
+        if stale.iloc[idx]:
+            return (f"Latest run is clean but {age_text} (> 1 day without a "
+                    f"new run); {produced}.")
+        if success > 0:
+            return (f"Latest run is clean and fresh ({age_text}): no failed/"
+                    f"error tests; {produced}.")
+        return (f"Latest run produced no successful cases, so health cannot "
+                f"be judged ({age_text}).")
+
     def _text(value: object) -> str:
         return "" if value is None or pd.isna(value) else str(value)
 
@@ -562,10 +592,11 @@ def _fleet_records(overview: pd.DataFrame) -> pd.DataFrame:
         return str(build_url).rstrip("/") + "/consoleText"
 
     def _edge_record(row, kind: str, expected: int, status: str,
-                     device: str) -> dict:
+                     reason: str, device: str) -> dict:
         """One table row describing a machine's newest clean or failed run."""
         label = "🟢 last success" if kind == "last_success" else "🔴 last fail"
-        record = {"Machine": row.machine, "Status": status, "Run": label,
+        record = {"Machine": row.machine, "Status": status,
+                  "Status reason": reason, "Run": label,
                   "newest": False, "device": device, "Stamp": "never",
                   "report": None, "jenkins log": None, "Purpose": "",
                   "OV version": "",
@@ -598,8 +629,10 @@ def _fleet_records(overview: pd.DataFrame) -> pd.DataFrame:
     for i, row in enumerate(overview.itertuples(index=False)):
         expected = int(total.iloc[i])
         device = q.short_device_name(row.gpu_name)
+        reason = _status_reason(i)
         for kind in ("last_success", "last_fail"):
-            records.append(_edge_record(row, kind, expected, _status(i), device))
+            records.append(_edge_record(row, kind, expected, _status(i),
+                                        reason, device))
     return pd.DataFrame(records)
 
 
@@ -764,6 +797,7 @@ def _machine_card(machine: str, records: pd.DataFrame,
         head = group.iloc[0]
         st.markdown(f"##### {head['Status']} &nbsp; {machine} &nbsp; "
                     f"`{head['device']}`")
+        st.caption(f"Status: {head['Status reason']}")
 
         fails = (failing[failing["machine"] == machine]
                  if not failing.empty else failing)
@@ -1025,45 +1059,40 @@ def _tab_exclusions(cfg: dict) -> None:
     runs = cached_runs(machine, cfg["v"])
     if runs.empty:
         st.info(f"No runs for {machine}.")
-    else:
-        st.markdown(f"**Runs on {machine}**")
-        event = st.dataframe(
-            runs[["stamp", "ww", "ov_version", "purpose", "source_format"]],
-            width="stretch",
-            hide_index=True,
-            selection_mode="multi-row",
-            on_select="rerun",
-            key="exclusion_run_table",
-        )
-        sel = event.selection.rows if event and event.selection else []
-        reason = st.text_input("Reason (optional)", key="exclusion_reason")
-        if st.button("Exclude selected", disabled=not sel):
-            for i in sel:
-                row = runs.iloc[i]
-                w.add_exclusion(DB, row["run_id"], row["machine"],
-                                row["stamp"], reason)
-            st.cache_data.clear()
-            st.rerun()
-
-    st.divider()
-    st.markdown("**Currently excluded** (all machines)")
-    excluded = cached_exclusions(cfg["v"])
-    if excluded.empty:
-        st.caption("_None._")
         return
 
-    event2 = st.dataframe(
-        excluded[["machine", "stamp", "reason", "excluded_at"]],
+    excluded = cached_exclusions(cfg["v"])[["run_id", "reason"]]
+    runs = runs.merge(excluded, on="run_id", how="left", indicator=True)
+    runs["excluded"] = runs.pop("_merge") == "both"
+
+    st.markdown(f"**Runs on {machine}**")
+    event = st.dataframe(
+        runs[["stamp", "ww", "ov_version", "purpose", "excluded", "reason"]],
         width="stretch",
         hide_index=True,
         selection_mode="multi-row",
         on_select="rerun",
-        key="restore_run_table",
+        key="exclusion_run_table",
     )
-    sel2 = event2.selection.rows if event2 and event2.selection else []
-    if st.button("Restore selected", disabled=not sel2):
-        for i in sel2:
-            w.remove_exclusion(DB, excluded.iloc[i]["run_id"])
+    sel = event.selection.rows if event and event.selection else []
+    selected = runs.iloc[sel]
+    to_exclude = selected[~selected["excluded"]]
+    to_restore = selected[selected["excluded"]]
+
+    reason = st.text_input("Reason (required)", key="exclusion_reason")
+    if not reason.strip():
+        st.caption("Enter a reason to enable exclusion.")
+    col_ex, col_re = st.columns(2)
+    if col_ex.button("Exclude selected",
+                     disabled=to_exclude.empty or not reason.strip()):
+        for _, row in to_exclude.iterrows():
+            w.add_exclusion(DB, row["run_id"], row["machine"],
+                            row["stamp"], reason)
+        st.cache_data.clear()
+        st.rerun()
+    if col_re.button("Restore selected", disabled=to_restore.empty):
+        for run_id in to_restore["run_id"]:
+            w.remove_exclusion(DB, run_id)
         st.cache_data.clear()
         st.rerun()
 

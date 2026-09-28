@@ -170,8 +170,8 @@ def required_openvino_packages_list() -> list:
         'benchmark_app.zip', 'core.zip', 'core_c.zip', 'core_c_dev.zip',
         'core_dev.zip', 'cpp_samples.zip', 'cpu.zip', 'gpu.zip', 'ir.zip',
         'onnx.zip', 'openvino_req_files.zip', 'ovc.zip', 'paddle.zip',
-        'pyopenvino_python3.10.zip', 'pyopenvino_python3.11.zip',
-        'pyopenvino_python3.12.zip', 'pytorch.zip', 'setupvars.zip',
+        'pyopenvino_python3.11.zip', 'pyopenvino_python3.12.zip',
+        'pytorch.zip', 'setupvars.zip',
         'tbb.zip', 'tbb_dev.zip', 'tensorflow.zip', 'tensorflow_lite.zip',
     ]
     return REQUIRED_LIST
@@ -180,7 +180,7 @@ def required_genai_packages_list() -> list:
     """Returns a static list of required GenAI package filenames."""
     REQUIRED_LIST = [
         'openvino_tokenizers.zip', 'core_genai.zip', 'core_genai_dev.zip',
-        'pygenai_3_10.zip', 'pygenai_3_11.zip', 'pygenai_3_12.zip',
+        'pygenai_3_11.zip', 'pygenai_3_12.zip',
     ]
     return REQUIRED_LIST
 
