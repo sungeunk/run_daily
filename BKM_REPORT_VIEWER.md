@@ -1,12 +1,14 @@
-# Daily report services on dg2raptorlake
+# Daily report services on dg2fizz
 
 | Port | Service unit | What it is |
 |------|--------------|------------|
-| [8501](http://dg2raptorlake.ikor.intel.com:8501/) | `viewer_daily_report` | Legacy viewer (pickle/`.report` pipeline) |
-| [8502](http://dg2raptorlake.ikor.intel.com:8502/) | `viewer_daily_report3` | Current viewer (pytest `daily/` pipeline) |
-| [8090](http://dg2raptorlake.ikor.intel.com:8090/mcp) | `daily_results_mcp` | MCP server for agents (read-only, no auth) |
+| [8080](http://dg2fizz.ikor.intel.com:8080/) | `caddy.service` | Wiki |
+| [8081](http://dg2fizz.ikor.intel.com:8081/) | `caddy.service` | Result file browser |
+| [8091](http://dg2fizz.ikor.intel.com:8091/) | `daily-viewer.service` | Current viewer (pytest `daily/` pipeline) |
+| [8090](http://dg2fizz.ikor.intel.com:8090/mcp) | `daily-results-mcp.service` | MCP server for agents (read-only, no auth) |
 
-All three are `enabled` (auto-start on reboot). Service name == unit filename.
+All listed user services are enabled and start automatically through user
+lingering. Service names match their tracked unit filenames.
 
 ---
 
@@ -15,48 +17,52 @@ All three are `enabled` (auto-start on reboot). Service name == unit filename.
 After a reinstall, only the `run_daily` repo is needed. The DuckDB file is
 **not** restored — history starts empty and refills from the next ingest.
 
-1. Miniforge + the `daily` conda env (every unit hardcodes this interpreter path):
+1. Install `uv`:
    ```bash
-   curl -L -o /tmp/miniforge.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
-   bash /tmp/miniforge.sh -b -p /home/sungeunk/miniforge3
-   /home/sungeunk/miniforge3/bin/conda create -y -n daily python=3.11
+  curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-2. Dependencies (covers the pytest suite, both Streamlit viewers and the MCP server):
+  Install Caddy at `/home/sungeunk/.local/bin/caddy` as documented in
+  `web_server/caddy/README.md`.
+
+2. Verify the tracked requirements through `uv`:
    ```bash
    cd /home/sungeunk/repo/run_daily
-   /home/sungeunk/miniforge3/envs/daily/bin/python -m pip install -r daily/requirements.txt
+  uv run --with-requirements daily/requirements.txt python -c "import duckdb, streamlit"
    ```
 
 3. DB directory — the viewers and the MCP server all read
-   `/var/www/html/daily2/daily_llm_benchmark.duckdb`:
+  `/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`:
    ```bash
-   sudo mkdir -p /var/www/html/daily2
-   sudo chown sungeunk:www-data /var/www/html/daily2
-   sudo chmod 775 /var/www/html/daily2
+  sudo mkdir -p /mnt/hdd/daily/db
+  sudo chown sungeunk:devel /mnt/hdd/daily/db
+  sudo chmod 755 /mnt/hdd/daily/db
    ```
 
 4. Open the ports (ufw is active on this host):
    ```bash
-   sudo ufw allow 8501/tcp
-   sudo ufw allow 8502/tcp
-   sudo ufw allow 8090/tcp
+    sudo ufw allow 8080/tcp
+    sudo ufw allow 8081/tcp
+    sudo ufw allow 8090/tcp
+    sudo ufw allow 8091/tcp
    ```
 
-5. Register the three services from the sections below (each unit has to be
-   written to `/etc/systemd/system/` and enabled — only the MCP section shows
-   the `sudo tee` form, do the same for the two viewers), then verify:
+5. Register, enable, and start the tracked user services:
    ```bash
-   for s in viewer_daily_report viewer_daily_report3 daily_results_mcp; do
-     printf '%-24s %s / %s\n' "$s" "$(systemctl is-enabled $s)" "$(systemctl is-active $s)"
-   done
+  cd /home/sungeunk/repo/run_daily/web_server
+  ./manage-web-services.sh all
+  ./manage-web-services.sh status
    ```
 
-**Still missing after these steps** (not tracked in this repo, restore by hand):
+  Enable user lingering once so services start after reboot without an
+  interactive login:
 
-- `/var/www/html/daily2/ingest_db.sh` — the ingest hook `daily/viewer/app.py`
-  shells out to. Without it the viewer's refresh button does nothing and the
-  DB never gets new runs.
+  ```bash
+  sudo loginctl enable-linger sungeunk
+  ```
+
+**Still missing after these steps**:
+
 - The benchmark side itself (OpenVINO + GenAI runtime, models, prompts) if
   this host is also meant to *run* `daily/` pytest, not just serve results.
   `daily/requirements.txt` only covers the viewers, the MCP server and the
@@ -66,7 +72,7 @@ After a reinstall, only the `run_daily` repo is needed. The DuckDB file is
 
 ---
 
-# Legacy viewer (8501) — removed
+# Legacy viewer — retired on the old host
 
 The pickle/`.report`-based pipeline and its viewer were deleted once the
 `daily/` pytest suite covered every tab it offered (Excel Paste and
@@ -77,67 +83,64 @@ history if a question about a pre-migration run ever needs it:
 git log --diff-filter=D -- scripts/run_daily_report_viewer3.py
 ```
 
-The artefacts it read are untouched under `/var/www/html/daily/` — 19
-machines back to 2024-11, against the 9 the central DuckDB carries. Nothing
-writes there any more.
-
-Retire the service with:
-
-```bash
-sudo systemctl disable --now viewer_daily_report.service
-```
+The old service and `/var/www/html/daily/` artifacts belonged to the retired
+host and are not part of the `dg2fizz` deployment.
 
 ---
 
-# Daily pipeline viewer — pytest-based (8502)
+# Daily pipeline viewer — pytest-based (8091)
 
-http://dg2raptorlake.ikor.intel.com:8502/
+http://dg2fizz.ikor.intel.com:8091/
 
 Current pipeline (`daily/` pytest suite, see `daily/README.md`). Reads the
 same central DB the `daily_results` MCP tools query
-(`/var/www/html/daily2/daily_llm_benchmark.duckdb`) — see `daily/viewer/README.md`
+(`/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`) — see `daily/viewer/README.md`
 for the DuckDB schema and tab-by-tab breakdown (Excel/Trend/Regressions/Geomean/Noise).
 
 ## Settings
-dg2raptorlake
+dg2fizz
 src: /home/sungeunk/repo/run_daily/daily/viewer/app.py
-service file: /etc/systemd/system/viewer_daily_report3.service
+service file: /home/sungeunk/repo/run_daily/web_server/caddy/systemd/daily-viewer.service
 ```ini
 [Unit]
- Description=Daily report viewer3
+Description=Daily Streamlit viewer (sungeunk user)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
- User=sungeunk
- WorkingDirectory=/home/sungeunk/repo/run_daily/daily/viewer
- ExecStart=/home/sungeunk/miniforge3/envs/daily/bin/python -m streamlit run /home/sungeunk/repo/run_daily/daily/viewer/app.py --server.port 8502 -- --db /var/www/html/daily2/daily_llm_benchmark.duckdb
- Restart=always
+Type=simple
+WorkingDirectory=%h/repo/run_daily
+Environment=DAILY_DB=/mnt/hdd/daily/db/daily_llm_benchmark.duckdb
+Environment=INGEST_SCRIPT=/home/sungeunk/repo/run_daily/scripts/ingest_db.sh
+Environment=INGEST_LOCK_FILE=/mnt/hdd/daily/db/.ingest.lock
+Environment=STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ExecStart=/usr/local/bin/uv run --python 3.12 --with-requirements %h/repo/run_daily/daily/requirements.txt streamlit run %h/repo/run_daily/daily/viewer/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true
+Restart=on-failure
+RestartSec=5s
 
 [Install]
- WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
 ## Start service
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl stop viewer_daily_report3
-sudo systemctl start viewer_daily_report3
-sudo systemctl status viewer_daily_report3
-
-sudo systemctl restart viewer_daily_report3
+cd /home/sungeunk/repo/run_daily/web_server
+./manage-web-services.sh install
+systemctl --user restart daily-viewer.service
+systemctl --user status daily-viewer.service
 ```
 
 ---
 
 # Daily results MCP server (8090)
 
-http://dg2raptorlake.ikor.intel.com:8090/mcp
+http://dg2fizz.ikor.intel.com:8090/mcp
 
 Remote query surface for Copilot/Claude.
 Server source: `/home/sungeunk/repo/run_daily/daily/mcp_server/server.py` —
 a standalone Python MCP server (official `mcp` SDK, `MCPServer`) exposing 7
 `daily_results_*` tools over the `daily_llm_benchmark.duckdb` central DB.
-It reuses `daily/viewer/queries.py`, the same query layer the Streamlit
-viewer uses.
+It reuses `daily/data/read.py`, the same query layer the Streamlit viewer uses.
 
 **No authentication.** Anyone on the internal network can query it, so the
 server is hardened rather than trusted: the DuckDB connection is opened
@@ -162,37 +165,23 @@ trend" style questions) lives in the `openvino-gpu-plugin-skills` repo as
   `.vscode/mcp.json` spawns `server.py --transport stdio` per session.
 - Remote use: the network-mode service below (plain HTTP, internal network only).
 
-Dependencies live in the `daily` conda env — see Bootstrap above.
+Dependencies are resolved by `uv` from `daily/requirements.txt`.
 
-service file: `/etc/systemd/system/daily_results_mcp.service` — install with:
+The tracked user service is
+`web_server/caddy/systemd/daily-results-mcp.service`. Register and start it
+through the shared service manager:
+
 ```bash
-sudo tee /etc/systemd/system/daily_results_mcp.service > /dev/null <<'EOF'
-[Unit]
-Description=Daily results MCP server (standalone Python, no auth)
-After=network.target
-
-[Service]
-User=sungeunk
-WorkingDirectory=/home/sungeunk/repo/run_daily/daily/mcp_server
-ExecStart=/home/sungeunk/miniforge3/envs/daily/bin/python /home/sungeunk/repo/run_daily/daily/mcp_server/server.py --transport streamable-http --host 0.0.0.0 --port 8090
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now daily_results_mcp
+cd /home/sungeunk/repo/run_daily/web_server
+./manage-web-services.sh install
+./manage-web-services.sh start
 ```
 
 ## Start service
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl stop daily_results_mcp
-sudo systemctl start daily_results_mcp
-sudo systemctl status daily_results_mcp
-
-sudo systemctl restart daily_results_mcp
+systemctl --user restart daily-results-mcp.service
+systemctl --user status daily-results-mcp.service
+journalctl --user -u daily-results-mcp.service -f
 ```
 
 Remote teammate's `.vscode/mcp.json` (or Claude Code MCP config) — no
@@ -201,7 +190,7 @@ credentials needed:
 {
   "servers": {
     "daily_results": {
-      "url": "http://dg2raptorlake.ikor.intel.com:8090/mcp"
+      "url": "http://dg2fizz.ikor.intel.com:8090/mcp"
     }
   }
 }

@@ -4,7 +4,7 @@ Improvement backlog for the daily benchmark pipeline, DuckDB store, and the
 `daily_results` MCP server.
 
 All findings below were verified against the central DB
-(`/var/www/html/daily2/daily_llm_benchmark.duckdb`) and against the working
+(`/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`) and against the working
 tree at `4b83622` on 2026-09-14 unless the item is explicitly marked
 *(assumption)*. Completed items are not kept here — see the git history.
 

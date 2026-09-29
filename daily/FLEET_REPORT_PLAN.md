@@ -103,9 +103,9 @@ LIMIT 1
 ```json
 {
   "schema_version": 1,
-  "mcp_url": "http://dg2raptorlake.ikor.intel.com:8090/mcp",
-  "viewer_base_url": "http://dg2raptorlake.ikor.intel.com:8501",
-  "report_base_url": "http://dg2raptorlake.ikor.intel.com/daily2",
+  "mcp_url": "http://dg2fizz.ikor.intel.com:8090/mcp",
+  "viewer_base_url": "http://dg2fizz.ikor.intel.com:8091",
+  "html_report_base_url": "http://dg2fizz.ikor.intel.com:8081",
   "purpose": "daily_pipeline timer",
   "triggered_by": "scheduler",
   "expected_machines": [
@@ -122,7 +122,7 @@ LIMIT 1
   "mail": {
     "recipients": ["sungeun.kim@intel.com"],
     "subject_prefix": "Daily GPU",
-    "relay_server": "dg2raptorlake.ikor.intel.com"
+    "relay_server": "dg2fizz.ikor.intel.com"
   },
   "schedule": {
     "max_wait_minutes": 60,
@@ -405,7 +405,7 @@ MCP URL, 머신 목록, purpose, 실행자, 수신자, polling, 표시 개수 �
 - `daily/viewer/ingest/loader_new.py`
 - `daily/viewer/ingest/writer.py`
 - `daily/viewer/schema.sql`
-- `daily/viewer/queries.py`
+- `daily/data/read.py`
 - `daily/viewer/app.py`
 - `daily/mcp_server/server.py`
 - `daily/common/mcp_client.py`

@@ -6,6 +6,7 @@ nav:
   - Home: index.md
   - Web Services:
       - Jenkins: web_services/jenkins.md
+      - Daily Results MCP: web_services/daily-results-mcp.md
   - Operations:
       - Caddy: operations/caddy.md
 

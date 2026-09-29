@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 DAILY_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = Path("/var/www/html/daily2/daily_llm_benchmark.duckdb")
+DEFAULT_DB_PATH = Path("/mnt/hdd/daily/db/daily_llm_benchmark.duckdb")
 MAX_ROWS = 500
 
 if str(DAILY_DIR) not in sys.path:

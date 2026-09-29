@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # Default target server. The legacy scripts used the same host for both
 # publishing (``http://...``) and scp'ing (bare hostname), so we keep one
 # source of truth here and derive both from it.
-DEFAULT_BACKUP_HOST = 'dg2raptorlake.ikor.intel.com'
+DEFAULT_BACKUP_HOST = 'dg2fizz.ikor.intel.com'
 DEFAULT_BACKUP_USER = 'sungeunk'
 
 # Sender shown in the mail client. Overridable with ``DAILY_MAIL_FROM``.
@@ -45,7 +45,7 @@ DEFAULT_MAIL_FROM = f'jenkins <jenkins@{DEFAULT_BACKUP_HOST}>'
 # Remote directory under which every machine's artefacts live. Kept distinct
 # from the legacy ``/var/www/html/daily`` path so the new pytest-based pipeline
 # can coexist with the old one without mixing files.
-REMOTE_BASE_DIR = '/var/www/html/daily2'
+REMOTE_BASE_DIR = '/mnt/hdd/daily/data'
 
 _UNSAFE_NAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
 
@@ -261,7 +261,10 @@ def _resolve_host(relay_server: str | None) -> str:
 
     Precedence: explicit arg → ``MAIL_RELAY_SERVER`` env → ``DEFAULT_BACKUP_HOST``.
     """
-    return relay_server or os.environ.get('MAIL_RELAY_SERVER') or DEFAULT_BACKUP_HOST
+    host = relay_server or os.environ.get('MAIL_RELAY_SERVER') or DEFAULT_BACKUP_HOST
+    if '@' in host or '://' in host or '/' in host:
+        raise ValueError('mail relay must be a bare hostname')
+    return host
 
 
 def _build_html_email_message(recipients: str, subject: str, html_body: str) -> bytes:
@@ -288,11 +291,13 @@ def _build_html_email_message(recipients: str, subject: str, html_body: str) -> 
 def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     """Return the public URL for a backed-up artefact.
 
-    The scp target is ``<host>:/var/www/html/daily2/<node>/<YYYY.MM>/`` and the
-    relay exposes it at ``http://<host>/daily2/<node>/<YYYY.MM>/<file>``.
+    The scp target is ``<host>:/mnt/hdd/daily/data/<node>/<YYYY.MM>/`` and the
+    relay exposes it at ``http://<host>:8081/daily2/<node>/<YYYY.MM>/<file>``.
     """
     if base_url is None:
-        base_url = f'http://{_resolve_host(None)}'
+        base_url = os.environ.get('DAILY_REPORT_BASE_URL') or (
+            f'http://{_resolve_host(None)}:8081'
+        )
     return (f'{base_url.rstrip("/")}/daily2/'
             f'{backup_relative_dir(filename)}/{filename}')
 

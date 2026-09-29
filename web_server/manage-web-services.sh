@@ -10,8 +10,9 @@ readonly WIKI_REQUIREMENTS="${WIKI_DIR}/requirements.txt"
 readonly USER_UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 readonly CADDY_UNIT="${SCRIPT_DIR}/caddy/systemd/caddy.service"
 readonly VIEWER_UNIT="${SCRIPT_DIR}/caddy/systemd/daily-viewer.service"
-readonly JENKINS_UNIT="${SCRIPT_DIR}/caddy/systemd/jenkins-agent.service"
-readonly SERVICES=(caddy.service daily-viewer.service jenkins-agent.service)
+readonly MCP_UNIT="${SCRIPT_DIR}/caddy/systemd/daily-results-mcp.service"
+readonly SERVICES=(caddy.service daily-viewer.service daily-results-mcp.service)
+readonly UPGRADE_SERVICES=(daily-viewer.service daily-results-mcp.service)
 
 usage() {
     cat <<EOF
@@ -23,13 +24,13 @@ Commands:
   restart       Restart all registered services.
   status        Show the status of all registered services.
   build-wiki    Build the Wiki and reload Caddy after success.
-    all           Install services, start them, and build the Wiki.
+    all           Install services, restart them, and build the Wiki.
   -h, --help    Show this help message.
 
 Services:
   caddy.service
   daily-viewer.service
-  jenkins-agent.service (optional; unit is not stored in this repository)
+    daily-results-mcp.service
 EOF
 }
 
@@ -48,7 +49,7 @@ unit_source() {
     case "$1" in
         caddy.service) printf '%s\n' "$CADDY_UNIT" ;;
         daily-viewer.service) printf '%s\n' "$VIEWER_UNIT" ;;
-        jenkins-agent.service) printf '%s\n' "$JENKINS_UNIT" ;;
+        daily-results-mcp.service) printf '%s\n' "$MCP_UNIT" ;;
         *) return 1 ;;
     esac
 }
@@ -67,6 +68,15 @@ install_services() {
         printf 'Registered %s\n' "$service"
     done
     systemctl --user daemon-reload
+    for service in "${SERVICES[@]}"; do
+        if systemctl --user cat "$service" >/dev/null 2>&1; then
+            if systemctl --user enable "$service"; then
+                printf 'Enabled %s\n' "$service"
+            else
+                printf 'Warning: could not enable %s\n' "$service" >&2
+            fi
+        fi
+    done
 }
 
 start_services() {
@@ -84,6 +94,18 @@ start_services() {
 restart_services() {
     local service
     for service in "${SERVICES[@]}"; do
+        if systemctl --user cat "$service" >/dev/null 2>&1; then
+            systemctl --user restart "$service"
+            printf 'Restarted %s\n' "$service"
+        else
+            printf 'Skipping %s: service is not registered\n' "$service"
+        fi
+    done
+}
+
+restart_upgrade_services() {
+    local service
+    for service in "${UPGRADE_SERVICES[@]}"; do
         if systemctl --user cat "$service" >/dev/null 2>&1; then
             systemctl --user restart "$service"
             printf 'Restarted %s\n' "$service"
@@ -132,7 +154,7 @@ main() {
         build-wiki) build_wiki ;;
         all)
             install_services
-            start_services
+            restart_upgrade_services
             build_wiki
             ;;
         -h|--help) usage ;;

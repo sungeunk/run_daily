@@ -54,12 +54,12 @@ from data import write as w  # noqa: E402
 
 DEFAULT_DB = _HERE.parents[1] / "daily_output" / platform.node() / "bench.duckdb"
 INGEST_SCRIPT = Path(
-    os.environ.get("INGEST_SCRIPT", "/mnt/hdd/daily/data/ingest_db.sh")
+    os.environ.get("INGEST_SCRIPT", str(_HERE.parents[1] / "scripts" / "ingest_db.sh"))
 )
 # Same lock the script takes; held here so a concurrent refresh queues up
 # instead of racing the DuckDB write lock.
 INGEST_LOCK = Path(
-    os.environ.get("INGEST_LOCK_FILE", str(INGEST_SCRIPT.parent / ".ingest.lock"))
+    os.environ.get("INGEST_LOCK_FILE", "/mnt/hdd/daily/db/.ingest.lock")
 )
 INGEST_WAIT_SEC = 60.0
 
@@ -491,10 +491,10 @@ _STATE_ICON = {"stable": "🟢", "fluctuating": "🟡",
                "throttled": "🔴", "unknown": "⚪"}
 
 # Artefacts are published at
-# http://<relay>/daily2/<MACHINE>/<YYYY.MM>/daily.<stamp>.*
+# http://<relay>:8081/daily2/<MACHINE>/<YYYY.MM>/daily.<stamp>.*
 REPORT_BASE_URL = os.environ.get(
     "DAILY_REPORT_BASE_URL",
-    "http://dg2raptorlake.ikor.intel.com/daily2").rstrip("/")
+    "http://dg2fizz.ikor.intel.com:8081/daily2").rstrip("/")
 
 
 @st.cache_data(show_spinner=False)

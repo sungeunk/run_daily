@@ -13,7 +13,7 @@ SET VCPKG_PRIVATE_ROOT=%DAILY_ROOT%\vcpkg
 SET PYTHONIOENCODING=utf-8
 SET DEVICE=GPU
 SET MAIL_TO=nex.nswe.odt.runtime.kor@intel.com
-SET MAIL_RELAY_SERVER=sungeunk@dg2raptorlake.ikor.intel.com
+SET MAIL_RELAY_SERVER=dg2fizz.ikor.intel.com
 :: End (User definitions)
 ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 

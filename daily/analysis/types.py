@@ -54,7 +54,7 @@ class AnalysisConfig:
     min_baseline_points: int = 7
     history_window: int = 10
     fluctuation_sigma_scale: float = 1.5
-    mcp_url: str = "http://dg2raptorlake.ikor.intel.com:8090/mcp"
+    mcp_url: str = "http://dg2fizz.ikor.intel.com:8090/mcp"
     mcp_timeout_sec: float = 20.0
     reference_purpose_like: str = "%timer%"
     release_enabled: bool = True

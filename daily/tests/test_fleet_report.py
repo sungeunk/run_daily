@@ -132,6 +132,42 @@ def test_render_fleet_html_is_compact_and_links_failed_run() -> None:
     assert "bad &lt;output&gt;" not in rendered
 
 
+def test_render_fleet_html_links_raw_log_from_dg2fizz_storage() -> None:
+    digest = {
+        "summary": {},
+        "selection": {},
+        "machines": [{
+            "machine": "LNL-03",
+            "run_id": "run-1",
+            "status": "success",
+            "rawlog_path": "/mnt/hdd/daily/data/LNL-03/2026.09/daily.20260901_1143.raw",
+        }],
+    }
+
+    rendered = render_fleet_html(digest, "http://viewer.local", "http://dg2fizz:8081")
+
+    assert (
+        'href="http://dg2fizz:8081/daily2/LNL-03/2026.09/'
+        'daily.20260901_1143.raw"' in rendered
+    )
+
+
+def test_render_fleet_html_omits_unmatched_raw_log_path() -> None:
+    digest = {
+        "summary": {},
+        "selection": {},
+        "machines": [{
+            "machine": "LNL-03",
+            "status": "success",
+            "rawlog_path": "/tmp/daily.20260901_1143.raw",
+        }],
+    }
+
+    rendered = render_fleet_html(digest, "http://viewer.local", "http://dg2fizz:8081")
+
+    assert ">Raw log</a>" not in rendered
+
+
 def test_render_fleet_html_omits_untrusted_report_urls() -> None:
     digest = {
         "summary": {},

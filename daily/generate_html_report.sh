@@ -13,7 +13,7 @@
 #   ./generate_html_report.sh --history-window 15 --fluctuation-scale 2.0
 #
 # Environment overrides:
-#   CONDA_ENV      conda environment name (default: skills)
+#   UV_BIN         uv executable (default: /usr/local/bin/uv)
 #   MCP_URL        daily_results MCP endpoint
 
 set -euo pipefail
@@ -35,9 +35,13 @@ Any remaining arguments are passed through to generate_analysis_report.py.
 EOF
 }
 
-CONDA_ENV="${CONDA_ENV:-skills}"
+UV_BIN="${UV_BIN:-/usr/local/bin/uv}"
+REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
 MACHINE="${MACHINE_NAME:-}"
-MCP_URL="${MCP_URL:-http://dg2raptorlake.ikor.intel.com:8090/mcp}"
+MCP_URL="${MCP_URL:-http://dg2fizz.ikor.intel.com:8090/mcp}"
+
+[[ -x "$UV_BIN" ]] || { echo "uv not found at $UV_BIN" >&2; exit 127; }
+[[ -r "$REQUIREMENTS_FILE" ]] || { echo "requirements not found at $REQUIREMENTS_FILE" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -74,6 +78,6 @@ if [[ -n "$MACHINE" ]]; then
 fi
 
 PYTHONPATH="${SCRIPT_DIR}" \
-    conda run --no-capture-output -n "${CONDA_ENV}" python "${PYTHON_SCRIPT}" \
+    "$UV_BIN" run --with-requirements "$REQUIREMENTS_FILE" python "$PYTHON_SCRIPT" \
     "${PYTHON_ARGS[@]}" \
     "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"

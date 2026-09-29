@@ -328,28 +328,28 @@ All three are OR'd. `TRY_CAST` returns `NULL` for non-integer strings, which cle
 
 ```bash
 # Ingest all
-cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db ../daily_output/<machine>/bench.duckdb
+cd daily && uv run --with-requirements requirements.txt python -m data.ingest.cli --root /mnt/hdd/daily/data --db /mnt/hdd/daily/db/daily_llm_benchmark.duckdb
 
 # Ingest one (new format)
-cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
+cd daily && uv run --with-requirements requirements.txt python -m data.ingest.cli --input output/daily.<stamp>.summary.json
 
 # Ingest one
-cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.summary.json
+cd daily && uv run --with-requirements requirements.txt python -m data.ingest.cli --input /mnt/hdd/daily/data/LNL-03/<YYYY.MM>/daily.<stamp>.summary.json
 
 # Force re-ingest
 # (append --force to any of the above)
 
 # Reload profile only
-conda run -n daily python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
+uv run --with-requirements requirements.txt python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
 
 # Launch viewer
-cd daily && conda run -n daily streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
+cd daily && uv run --with-requirements requirements.txt streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
 
 # Alternative DB via env var
-DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
+DAILY_DB=/path/to/bench.duckdb uv run --with-requirements requirements.txt streamlit run viewer/app.py
 ```
 
-**Python env:** use conda env `daily` (`/home/sungeunk/miniforge3/envs/daily/bin/python`). System `python3` doesn't have duckdb/streamlit.
+**Python env:** use `uv` with `daily/requirements.txt`; no persistent conda environment is required.
 
 ---
 

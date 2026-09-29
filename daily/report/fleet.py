@@ -96,10 +96,19 @@ def _artifact_links(viewer_base_url: str, row: Mapping[str, Any],
 
 def _raw_log_link(base_url: str, row: Mapping[str, Any]) -> str:
     rawlog_path = str(row.get("rawlog_path") or "")
-    prefix = "/var/www/html/"
-    if not base_url or not rawlog_path.startswith(prefix):
+    prefixes = {
+        "/mnt/hdd/daily/data/": "daily2/",
+        "/var/www/html/daily2/": "daily2/",
+    }
+    matched = next(
+        ((prefix, url_prefix) for prefix, url_prefix in prefixes.items()
+         if rawlog_path.startswith(prefix)),
+        None,
+    )
+    if not base_url or matched is None:
         return ""
-    relative = quote(rawlog_path.removeprefix(prefix), safe="/")
+    prefix, url_prefix = matched
+    relative = quote(url_prefix + rawlog_path.removeprefix(prefix), safe="/")
     url = html.escape(f"{base_url.rstrip('/')}/{relative}", quote=True)
     return f'<a href="{url}" style="color:#075985">Raw log</a>'
 

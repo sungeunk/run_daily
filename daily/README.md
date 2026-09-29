@@ -61,7 +61,7 @@ cd daily && pytest tests/test_llm_benchmark.py -v
 ### 백업 & 메일 (cron 용)
 
 ```bash
-export MAIL_RELAY_SERVER=dg2raptorlake.ikor.intel.com
+export MAIL_RELAY_SERVER=dg2fizz.ikor.intel.com
 python daily/run.py \
     --backup \
     --mail sungeun.kim@intel.com \
@@ -70,12 +70,12 @@ python daily/run.py \
 
 | 플래그 | 동작 |
 |------|--------|
-| `--backup` | report + summary.json + raw log + pip-freeze 를 `$MAIL_RELAY_SERVER:/var/www/html/daily2/<hostname>/` 로 scp (기본 호스트: `dg2raptorlake.ikor.intel.com`) |
+| `--backup` | report + summary.json + raw log + pip-freeze 를 `$MAIL_RELAY_SERVER:/mnt/hdd/daily/data/<hostname>/` 로 SFTP (기본 호스트: `dg2fizz.ikor.intel.com`) |
 | `--mail <addrs>` | 텍스트 리포트 (HTML) 를 콤마 구분 수신자에게 메일 |
 | `--description` | 메일 제목에 쓰일 자유 텍스트 태그 |
 | `--pip-freeze` | `daily.<ts>.requirements.txt` 도 함께 작성 (`--backup`/`--mail` 사용 시 자동 활성) |
 
-`MAIL_RELAY_SERVER` 환경변수가 없으면 기본값 `dg2raptorlake.ikor.intel.com`
+`MAIL_RELAY_SERVER` 환경변수가 없으면 기본값 `dg2fizz.ikor.intel.com`
 을 사용. 다른 서버로 보내려면 환경변수로 오버라이드. Linux 에서는 메일
 자체는 로컬 `mail(1)` 로 발송.
 
@@ -144,7 +144,7 @@ conda run -n daily pytest daily/tests/test_viewer_pipeline.py \
 - 검증 범위: HTML 본문 생성 시 줄바꿈/특수문자 보존, 메일 명령 호출 시 본문 파이프 전달
 - 권장: Jenkins 에 별도 경량 stage/job 로 붙여서 수십 초 내 회귀 체크
 
-백업은 `/var/www/html/daily2/<hostname>/` 아래에 저장 — 기존
+백업은 `/mnt/hdd/daily/data/<hostname>/` 아래에 저장 — 기존
 `/var/www/html/daily/` (구 스크립트) 와 분리되어 파일이 섞이지 않음.
 `<hostname>` 디렉토리는 첫 백업 시 자동 생성 시도.
 
@@ -153,9 +153,9 @@ conda run -n daily pytest daily/tests/test_viewer_pipeline.py \
 ```bash
 # 릴레이 서버에서 root 권한으로 — <ssh_user> 는 각 클라이언트가
 # scp 할 때 사용하는 ssh 계정 이름 (예: sungeunk)
-sudo mkdir -p /var/www/html/daily2
-sudo chown <ssh_user>:www-data /var/www/html/daily2
-sudo chmod 775 /var/www/html/daily2
+sudo mkdir -p /mnt/hdd/daily/data
+sudo chown <ssh_user>:devel /mnt/hdd/daily/data
+sudo chmod 775 /mnt/hdd/daily/data
 ```
 
 - owner 를 ssh 사용자로 두면 클라이언트가 `<hostname>` 서브디렉토리를
@@ -185,7 +185,7 @@ source "$(cat ov_pkg/latest_ov_setup_file.txt)"
 # 2. 머신별 설정 (보통 ~/.bashrc 에 있지만, cron 잡이 login shell 에
 #    의존하지 않도록 여기서도 선언.)
 export DAILY_DEVICE=GPU.1
-export MAIL_RELAY_SERVER=dg2raptorlake.ikor.intel.com
+export MAIL_RELAY_SERVER=dg2fizz.ikor.intel.com
 
 # 3. 수트 실행 + 결과 전송.
 python daily/run.py \
@@ -221,7 +221,7 @@ cmd /c "`"$setupBat`" && set" | ForEach-Object {
 # 2. 머신별 설정 (한 번만 [System.Environment]::SetEnvironmentVariable 로
 #    영구 설정하거나, 이 스크립트를 자족적으로 쓰려면 여기서 반복 선언.)
 $env:DAILY_DEVICE = 'GPU.1'
-$env:MAIL_RELAY_SERVER = 'dg2raptorlake.ikor.intel.com'
+$env:MAIL_RELAY_SERVER = 'dg2fizz.ikor.intel.com'
 
 # 3. 수트 실행 + 결과 전송.
 python daily\run.py `

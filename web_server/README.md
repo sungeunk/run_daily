@@ -52,7 +52,8 @@ are defined in `caddy/conf.d/files.caddy`.
 
 | URL | Directory |
 | --- | --- |
-| `/daily/` | `/mnt/hdd/daily/` |
+| `/daily/` | `/mnt/hdd/daily/data/` |
+| `/daily2/` | `/mnt/hdd/daily/data/` |
 | `/benchmarking_datasets/` | `/mnt/hdd/jenkins/` |
 | `/model_cache_server/` | `/mnt/hdd/model/` |
 
@@ -79,7 +80,7 @@ and reads the local daily data on `dg2fizz`.
 
 ```text
 Browser -> Caddy :8091 -> Streamlit 127.0.0.1:8501
-						   -> /mnt/hdd/daily/data/daily_llm_benchmark.duckdb
+                           -> /mnt/hdd/daily/db/daily_llm_benchmark.duckdb
 ```
 
 The service unit is
@@ -112,12 +113,44 @@ curl http://127.0.0.1:8501/_stcore/health
 journalctl --user -u daily-viewer.service -f
 ```
 
-The daily result database and backup files are stored under
-`/mnt/hdd/daily/data/`. The service uses
-`/mnt/hdd/daily/data/daily_llm_benchmark.duckdb` as `DAILY_DB`; update the unit
-if the ingestion job changes the filename. The service is intentionally
+Daily result artifacts are stored under `/mnt/hdd/daily/data/`, while the
+database and its backups are stored under `/mnt/hdd/daily/db/`. The service
+uses `/mnt/hdd/daily/db/daily_llm_benchmark.duckdb` as `DAILY_DB`; update the
+unit if the ingestion job changes the filename. The service is intentionally
 limited to the `sungeunk` user and does not expose Streamlit directly on the
 network.
+
+### Daily results MCP
+
+The read-only MCP server runs as `daily-results-mcp.service` and exposes the
+same daily result database used by the Streamlit viewer:
+
+```text
+MCP client -> http://dg2fizz.ikor.intel.com:8090/mcp
+              -> /mnt/hdd/daily/db/daily_llm_benchmark.duckdb
+```
+
+The service unit is
+`caddy/systemd/daily-results-mcp.service`. It uses `uv`, binds to port `8090`,
+and opens DuckDB read-only. It is registered and managed by the same script:
+
+```bash
+./manage-web-services.sh install
+./manage-web-services.sh start
+./manage-web-services.sh restart
+./manage-web-services.sh status
+```
+
+Check the MCP service with:
+
+```bash
+systemctl --user status daily-results-mcp.service
+journalctl --user -u daily-results-mcp.service -f
+curl -i http://127.0.0.1:8090/mcp
+```
+
+The endpoint has no authentication and should only be reachable from the
+trusted internal network.
 
 ### Jenkins node
 
@@ -208,10 +241,10 @@ The script also manages the user-level service units:
 ./manage-web-services.sh status
 ```
 
-`install` registers available Caddy and Daily viewer units. The Jenkins agent
-unit is registered only when a local unit file is present. The `all` command
-installs services, builds the Wiki, reloads Caddy, and starts registered
-services:
+`install` registers and enables available Caddy, Daily viewer, and Daily
+Results MCP units so they start with the user systemd manager after reboot.
+The `all` command installs services, restarts them so updated unit settings take
+effect, builds the Wiki, and reloads Caddy:
 
 ```bash
 ./manage-web-services.sh all

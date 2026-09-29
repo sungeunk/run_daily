@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "mcp_url": "http://dg2raptorlake.ikor.intel.com:8090/mcp",
-  "viewer_base_url": "http://dg2raptorlake.ikor.intel.com:8502",
-  "html_report_base_url": "http://dg2raptorlake.ikor.intel.com:8081",
+  "mcp_url": "http://dg2fizz.ikor.intel.com:8090/mcp",
+  "viewer_base_url": "http://dg2fizz.ikor.intel.com:8091",
+  "html_report_base_url": "http://dg2fizz.ikor.intel.com:8081",
   "timezone": "Asia/Seoul",
   "purpose": "daily_pipeline timer",
   "triggered_by": "timer",
@@ -23,7 +23,7 @@
   "mail": {
     "recipients": ["you@example.com"],
     "subject_prefix": "Daily GPU",
-    "relay_server": "dg2raptorlake.ikor.intel.com"
+    "relay_server": "dg2fizz.ikor.intel.com"
   },
   "schedule": {
     "max_wait_minutes": 60,

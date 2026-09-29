@@ -46,6 +46,10 @@ from common.profiling import HWResourceTracker, ResourceStats, sizeof_fmt
 DEV_ONLY_TEST_FILES = frozenset({
     'test_analysis_report.py',
     'test_analysis_remote.py',
+    'test_data_layering.py',
+    'test_data_semantics.py',
+    'test_delivery.py',
+    'test_fleet_report.py',
     'test_llm_parser.py',
     'test_machine_phases.py',
     'test_perf_infer_series.py',
@@ -70,7 +74,7 @@ def pytest_ignore_collect(collection_path, config) -> bool | None:
 def _default_model_dir() -> str:
     import platform
     if platform.system() == 'Linux':
-        return '/var/www/html/models/daily'
+        return '/mnt/hdd/model/ov-share-13.sclab.intel.com/cv_bench_cache'
     return 'c:/dev/models/daily'
 
 
@@ -85,7 +89,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help='Target OpenVINO device (override: $DAILY_DEVICE)')
     group.addoption('--model-dir', default=_default_model_dir(),
                     help='Root directory for models')
-    group.addoption('--model-date', default='WW35_llm-optimum_2026.4.0-22930-RC1',
+    group.addoption('--model-date', default='WW24_llm-optimum_2026.3.0-22130',
                     help='Model cache subdirectory under --model-dir')
     group.addoption('--cache-dir', default=None,
                     help='OpenVINO cache directory (defaults to <repo>/llm-cache)')

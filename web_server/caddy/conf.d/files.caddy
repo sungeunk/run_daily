@@ -8,18 +8,27 @@
     header @parquet Content-Type "application/octet-stream"
     header @parquet Content-Disposition "attachment"
 
+    @private path \
+        /daily/ingest_db.sh \
+        /daily2/ingest_db.sh \
+        /daily/.ingest.lock \
+        /daily2/.ingest.lock \
+        /daily/*.duckdb* \
+        /daily2/*.duckdb*
+    respond @private 404
+
     redir /daily /daily/ 308
     redir /daily2 /daily2/ 308
     redir /benchmarking_datasets /benchmarking_datasets/ 308
     redir /model_cache_server /model_cache_server/ 308
 
     handle_path /daily/* {
-        root * /mnt/hdd/daily
+        root * /mnt/hdd/daily/data
         file_server browse
     }
 
     handle_path /daily2/* {
-        root * /var/www/html/daily2
+        root * /mnt/hdd/daily/data
         file_server browse
     }
 

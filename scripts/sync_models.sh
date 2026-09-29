@@ -1,2 +1,6 @@
-#!/bin/bash
-rsync -avzhP sungeunk@dg2raptorlake.ikor.intel.com:/var/www/html/models/daily/ /c/dev/models/daily/
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+rsync -avzhP \
+	sungeunk@dg2fizz.ikor.intel.com:/mnt/hdd/model/ov-share-13.sclab.intel.com/cv_bench_cache/ \
+	/c/dev/models/daily/

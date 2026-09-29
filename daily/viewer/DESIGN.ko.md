@@ -323,28 +323,28 @@ else                                -> no match
 
 ```bash
 # 전체 ingest
-cd daily && conda run -n daily python -m viewer.ingest.cli --root /var/www/html/daily --db ../daily_output/<machine>/bench.duckdb
+cd daily && uv run --with-requirements requirements.txt python -m data.ingest.cli --root /mnt/hdd/daily/data --db /mnt/hdd/daily/db/daily_llm_benchmark.duckdb
 
 # 단일 파일 ingest (new format)
-cd daily && conda run -n daily python -m viewer.ingest.cli --input output/daily.<stamp>.summary.json
+cd daily && uv run --with-requirements requirements.txt python -m data.ingest.cli --input output/daily.<stamp>.summary.json
 
 # 단일 파일 ingest
-cd daily && conda run -n daily python -m viewer.ingest.cli --input /var/www/html/daily/LNL-02/daily.<stamp>.summary.json
+cd daily && uv run --with-requirements requirements.txt python -m data.ingest.cli --input /mnt/hdd/daily/data/LNL-03/<YYYY.MM>/daily.<stamp>.summary.json
 
 # 강제 re-ingest
 # 위 명령에 --force 추가
 
 # Profile만 다시 로드
-conda run -n daily python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
+uv run --with-requirements requirements.txt python -m viewer.ingest.cli --root /dev/null --profile viewer/profiles/default.yaml
 
 # Viewer 실행
-cd daily && conda run -n daily streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
+cd daily && uv run --with-requirements requirements.txt streamlit run viewer/app.py -- --db ../daily_output/<machine>/bench.duckdb
 
 # env var로 다른 DB 지정
-DAILY_DB=/path/to/bench.duckdb conda run -n daily streamlit run viewer/app.py
+DAILY_DB=/path/to/bench.duckdb uv run --with-requirements requirements.txt streamlit run viewer/app.py
 ```
 
-**Python env:** conda env `daily`를 사용합니다. (`/home/sungeunk/miniforge3/envs/daily/bin/python`) System `python3`에는 duckdb/streamlit이 없습니다.
+**Python env:** `daily/requirements.txt`와 `uv`를 사용하며, 영구 conda 환경은 필요하지 않습니다.
 
 ---
 

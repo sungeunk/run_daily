@@ -81,6 +81,7 @@ Current site configurations:
 | --- | --- | --- |
 | `conf.d/wiki.caddy` | Serves the MkDocs Wiki static site from `../wiki/site/`. | `http://127.0.0.1:8080/` |
 | `conf.d/files.caddy` | Provides read-only directory browsing for selected `/mnt/hdd` folders. | `http://127.0.0.1:8081/` |
+| `conf.d/daily-viewer.caddy` | Proxies the public Daily viewer endpoint to local Streamlit. | `http://127.0.0.1:8091/` |
 
 ### `systemd/caddy.service`
 

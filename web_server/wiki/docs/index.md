@@ -8,6 +8,7 @@ Use the navigation to find operational notes and procedures.
 |---|---|
 | Jenkins(LLM daily) | [http://dg2ubuntu.ikor.intel.com:8080](http://dg2ubuntu.ikor.intel.com:8080) |
 | Daily result viewer | [http://dg2fizz.ikor.intel.com:8091](http://dg2fizz.ikor.intel.com:8091) |
+| Daily results MCP | [http://dg2fizz.ikor.intel.com:8090/mcp](http://dg2fizz.ikor.intel.com:8090/mcp) |
 | Model cache server(mirror) | [http://dg2fizz.ikor.intel.com:8081/model_cache_server](http://dg2fizz.ikor.intel.com:8081/model_cache_server) |
 | Daily result backup | [http://dg2fizz.ikor.intel.com:8081/daily](http://dg2fizz.ikor.intel.com:8081/daily) |
 | Benchmarking datasets(static models) | [http://dg2fizz.ikor.intel.com:8081/benchmarking_datasets](http://dg2fizz.ikor.intel.com:8081/benchmarking_datasets) |

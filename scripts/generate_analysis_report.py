@@ -283,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument(
-        '--mcp-url', type=str, default='http://dg2raptorlake.ikor.intel.com:8090/mcp',
+        '--mcp-url', type=str, default='http://dg2fizz.ikor.intel.com:8090/mcp',
         help='Streamable-HTTP endpoint for the daily_results MCP server.',
     )
     ap.add_argument(
