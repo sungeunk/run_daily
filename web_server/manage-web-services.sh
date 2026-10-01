@@ -140,8 +140,13 @@ build_wiki() {
             --with-requirements "$WIKI_REQUIREMENTS" \
             mkdocs build --strict
     )
-    systemctl --user reload caddy.service
-    printf 'Wiki build completed and Caddy reloaded\n'
+    if systemctl --user is-active --quiet caddy.service; then
+        systemctl --user reload caddy.service
+        printf 'Wiki build completed and Caddy reloaded\n'
+    else
+        systemctl --user start caddy.service
+        printf 'Wiki build completed and Caddy started\n'
+    fi
 }
 
 main() {

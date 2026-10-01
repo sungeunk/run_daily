@@ -1,5 +1,5 @@
 @echo off
-set ping_ip=dg2raptorlake.ikor.intel.com
+set ping_ip=dg2fizz.ikor.intel.com
 set failure_count=0
 set ok_count=4
 set timeout_secs=30

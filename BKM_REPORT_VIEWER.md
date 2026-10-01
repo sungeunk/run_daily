@@ -20,6 +20,7 @@ After a reinstall, only the `run_daily` repo is needed. The DuckDB file is
 1. Install `uv`:
    ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
+  sudo ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv
    ```
 
   Install Caddy at `/home/sungeunk/.local/bin/caddy` as documented in
