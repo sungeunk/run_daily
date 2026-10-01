@@ -216,7 +216,20 @@ def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
         improvement = row.get("improvement_pct")
         try:
             regression_pct = -float(improvement) * 100
-            change = f"{regression_pct:.1f}% regression"
+            if regression_pct > 0:
+                change_color = "#b91c1c"
+                change_label = "regression"
+            elif regression_pct < 0:
+                change_color = "#15803d"
+                change_label = "improvement"
+            else:
+                change_color = "#6b7280"
+                change_label = "no change"
+            change = (
+                f'<span title="{change_label}" aria-label="{change_label}" '
+                f'style="color:{change_color};font-weight:600">'
+                f'{regression_pct:.1f}%</span>'
+            )
         except (TypeError, ValueError):
             regression_pct = None
             change = "-"
@@ -248,7 +261,7 @@ def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'{_td(precision_sort, attrs=precision_attr)}'
             f'{_td(_text(tokens), numeric=True, attrs=tokens_attr)}'
             f'{_td(_text(latency_mode(row.get("exec_mode"))), attrs=mode_attr)}'
-            f'{_td(_text(change), numeric=True, attrs=regression_attr)}'
+            f'{_td(change, numeric=True, attrs=regression_attr)}'
             f'{_td(_text(baseline), numeric=True, attrs=baseline_attr)}'
             f'{_td(_text(current), numeric=True, attrs=current_attr)}'
             f'{_td(_artifact_links(viewer_base_url, row, html_report_base_url))}'

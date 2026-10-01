@@ -112,7 +112,9 @@ def test_render_fleet_html_is_compact_and_links_failed_run() -> None:
     assert ">2</td>" in rendered
     assert "in: 32 / out: 128" in rendered
     assert "Second token latency" in rendered
-    assert "12.5% regression" in rendered
+    assert '>12.5%</span>' in rendered
+    assert 'title="regression"' in rendered
+    assert 'style="color:#b91c1c;font-weight:600"' in rendered
     assert "100.000 ms" in rendered
     assert "112.500 ms" in rendered
     assert "Performance Regressions" in rendered
