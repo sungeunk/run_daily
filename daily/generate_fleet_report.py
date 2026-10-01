@@ -455,7 +455,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-prefix", help="Output file prefix override")
     parser.add_argument(
         "--wait", action="store_true",
-        help="Wait for missing machines even with --dry-run",
+        help="Wait for missing machines before generating the report",
     )
     return parser.parse_args()
 
@@ -476,7 +476,7 @@ def main() -> int:
             # computed once the digest is in hand.
             digest = wait_for_digest(
                 config, ov_build,
-                wait=(getattr(args, "wait", False) or not args.dry_run),
+                wait=getattr(args, "wait", False),
                 client=client,
             )
         config.output_dir.mkdir(parents=True, exist_ok=True)

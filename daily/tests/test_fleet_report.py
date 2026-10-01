@@ -464,7 +464,9 @@ def test_dry_run_reuses_one_mcp_session(tmp_path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(generate_fleet_report, "McpHttpClient", Client)
     monkeypatch.setattr(
         generate_fleet_report, "_parse_args",
-        lambda: argparse.Namespace(config=config_path, build=None, dry_run=True, force=False),
+        lambda: argparse.Namespace(
+            config=config_path, build=None, dry_run=True, force=False
+        ),
     )
 
     assert generate_fleet_report.main() == 0
