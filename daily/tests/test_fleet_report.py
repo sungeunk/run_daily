@@ -154,6 +154,31 @@ def test_render_fleet_html_links_raw_log_from_dg2fizz_storage() -> None:
     )
 
 
+def test_render_fleet_html_keeps_mail_lines_below_limit() -> None:
+    machine = {
+        "machine": "ARLH-01", "status": "success",
+        "report_file": "daily.20261005_2049.summary.json",
+        "rawlog_path": "/mnt/hdd/daily/data/ARLH-01/2026.10/daily.20261005_2049.raw",
+    }
+    digest = {
+        "summary": {}, "selection": {},
+        "machines": [machine] * 10,
+        "top_regressions": [{
+            "machine": "ARLH-01", "model": "gemma-3-4b-it",
+            "precision": "OV_FP16-4BIT_DEFAULT", "exec_mode": "1st",
+            "improvement_pct": -0.18,
+        }] * 10,
+    }
+
+    rendered = render_fleet_html(
+        digest, "http://dg2fizz.ikor.intel.com:8091",
+        "http://dg2fizz.ikor.intel.com:8081",
+    )
+
+    assert max(len(line.encode("utf-8")) for line in rendered.splitlines()) < 998
+    assert rendered.count("daily.20261005_2049.raw") == 20
+
+
 def test_render_fleet_html_omits_unmatched_raw_log_path() -> None:
     digest = {
         "summary": {},

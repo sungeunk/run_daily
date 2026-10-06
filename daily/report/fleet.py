@@ -19,11 +19,11 @@ _HEADER_STYLE = f"{_CELL_STYLE};background:#f3f4f6"
 def _td(value: object, *, numeric: bool = False, attrs: str = "") -> str:
     style = _NUM_CELL_STYLE if numeric else _CELL_STYLE
     class_attr = ' class="num"' if numeric else ""
-    return f'<td{class_attr} style="{style}"{attrs}>{value}</td>'
+    return f'<td{class_attr} style="{style}"{attrs}>{value}</td>\n'
 
 
 def _th(value: str, *, attrs: str = "") -> str:
-    return f'<th style="{_HEADER_STYLE}"{attrs}>{value}</th>'
+    return f'<th style="{_HEADER_STYLE}"{attrs}>{value}</th>\n'
 
 
 def _text(value: object) -> str:
@@ -159,7 +159,7 @@ def _machine_rows(machines: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'{_td(_artifact_links(viewer_base_url, row, html_report_base_url))}'
             "</tr>"
         )
-    return "".join(rows)
+    return "\n".join(rows)
 
 
 def _issue_rows(issues: Sequence[Mapping[str, Any]], viewer_base_url: str,
@@ -191,7 +191,7 @@ def _issue_rows(issues: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'{_td(raw_log_link)}'
             "</tr>"
         )
-    return "".join(rows)
+    return "\n".join(rows)
 
 
 def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
@@ -267,7 +267,7 @@ def _regression_rows(rows: Sequence[Mapping[str, Any]], viewer_base_url: str,
             f'{_td(_artifact_links(viewer_base_url, row, html_report_base_url))}'
             "</tr>"
         )
-    return "".join(rendered)
+    return "\n".join(rendered)
 
 
 def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
