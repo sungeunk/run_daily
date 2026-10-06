@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
+from dataclasses import replace
+from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -499,3 +503,57 @@ def test_dry_run_reuses_one_mcp_session(tmp_path, monkeypatch: pytest.MonkeyPatc
     assert generate_fleet_report.main() == 0
     assert Client.instances == 1
     assert calls == ["daily_results_list_builds", "daily_results_daily_digest"]
+
+
+@pytest.mark.parametrize(
+    "already_sent,force,dry_run,incomplete,render_fails,mail_sent,expected",
+    [
+        (True, False, False, False, False, True, 5),
+        (True, True, False, False, False, True, 0),
+        (False, False, False, False, False, True, 0),
+        (False, False, False, True, False, True, 4),
+        (False, False, False, False, True, True, 2),
+        (False, False, False, False, False, False, 3),
+        (True, True, False, False, False, False, 3),
+        (True, False, True, False, False, True, 0),
+    ],
+)
+def test_delivery_exit_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    already_sent: bool,
+    force: bool,
+    dry_run: bool,
+    incomplete: bool,
+    render_fails: bool,
+    mail_sent: bool,
+    expected: int,
+) -> None:
+    config = replace(_config(tmp_path), output_dir=tmp_path / "output")
+    digest = {"summary": {"status": "INCOMPLETE" if incomplete else "GREEN"}}
+    delivery_key = _delivery_key(config, "23107", digest)
+    state = {delivery_key: {"ov_build": "23107"}} if already_sent else {}
+    render = Mock(return_value="<html>report</html>")
+    if render_fails:
+        render.side_effect = ValueError("report generation failed")
+    send = Mock(return_value=mail_sent)
+    write_state = Mock()
+    monkeypatch.setattr(
+        generate_fleet_report, "_parse_args",
+        lambda: argparse.Namespace(config=tmp_path / "fleet.json", dry_run=dry_run, force=force),
+    )
+    monkeypatch.setattr(generate_fleet_report, "load_config", lambda _path: config)
+    monkeypatch.setattr(generate_fleet_report, "McpHttpClient", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(generate_fleet_report, "latest_build", lambda *_args, **_kwargs: "23107")
+    monkeypatch.setattr(generate_fleet_report, "wait_for_digest", lambda *_args, **_kwargs: digest)
+    monkeypatch.setattr(generate_fleet_report, "_state", lambda _path: state)
+    monkeypatch.setattr(generate_fleet_report, "_write_state", write_state)
+    monkeypatch.setattr(generate_fleet_report, "render_fleet_html", render)
+    monkeypatch.setattr(generate_fleet_report, "send_mail", send)
+
+    assert generate_fleet_report.main() == expected
+    skipped = already_sent and not force and not dry_run
+    assert render.call_count == int(not skipped)
+    assert send.call_count == int(not skipped and not dry_run and not render_fails)
+    assert write_state.call_count == int(not skipped and not dry_run and not render_fails and mail_sent)
+    assert len(list(config.output_dir.glob("*.html"))) == int(not skipped and not render_fails)

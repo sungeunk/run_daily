@@ -461,7 +461,9 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    """Generate one report and optionally deliver it."""
+    """Return 0 for success/dry-run, 2 for errors, 3 for mail failure,
+    4 for incomplete delivery, or 5 when already delivered.
+    """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     args = _parse_args()
     try:
@@ -491,7 +493,7 @@ def main() -> int:
             state = _state(state_path)
             if not args.dry_run and delivery_key in state and not args.force:
                 log.info("report already sent for build %s", ov_build)
-                return 0
+                return 5
 
             output.write_text(
                 render_fleet_html(
