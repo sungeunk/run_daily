@@ -29,6 +29,7 @@ from email.utils import formatdate, make_msgid
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 from common.paths import machine_name, relative_dir
 from common.urls import DEFAULT_BACKUP_HOST, DEFAULT_DAILY_REPORT_BASE_URL
@@ -529,9 +530,15 @@ def scp_backup(files: Iterable[Path], *, relay_server: str | None = None
 
                     remote_path = f'{remote_dir}/{f.name}'
                     log.info('backup: %s -> %s:%s/', f.name, relay, remote_dir)
+                    temporary_path = f'{remote_path}.{uuid4().hex}.upload'
                     try:
-                        sftp.put(str(f), remote_path)
+                        sftp.put(str(f), temporary_path)
+                        sftp.posix_rename(temporary_path, remote_path)
                     except (OSError, paramiko.SFTPError) as exc:
+                        try:
+                            sftp.remove(temporary_path)
+                        except (OSError, paramiko.SFTPError):
+                            pass
                         log.error('backup: upload failed for %s: %s', f, exc)
                         continue
                     uploaded.append(f)

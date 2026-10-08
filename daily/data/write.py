@@ -18,6 +18,7 @@ import duckdb
 
 from .ingest.writer import (connect, ensure_schema, load_display_profile,
                             upsert_run)
+from .locking import database_lock
 
 __all__ = ["connect", "ensure_schema", "upsert_run", "load_display_profile",
            "add_exclusion", "remove_exclusion"]
@@ -26,9 +27,7 @@ __all__ = ["connect", "ensure_schema", "upsert_run", "load_display_profile",
 # ---------------------------------------------------------------------------
 # Manual run exclusions (viewer's Exclusions tab)
 #
-# A short-lived read-write connection: the ingest writer is the only other
-# thing that opens the file for writing, and it never runs concurrently with
-# a user clicking a button in the UI.
+# Manual edits share the refresh lock so snapshot replacement preserves them.
 # ---------------------------------------------------------------------------
 
 _RUN_EXCLUSIONS_DDL = """
@@ -58,7 +57,7 @@ def add_exclusion(db_path: Path, run_id: str, machine: str, stamp: str,
             f"a reason is required to exclude run {run_id!r} "
             "(it is the only audit trail for a shifted baseline)"
         )
-    with duckdb.connect(str(db_path), read_only=False) as con:
+    with database_lock(db_path), duckdb.connect(str(db_path), read_only=False) as con:
         con.execute(_RUN_EXCLUSIONS_DDL)
         con.execute("""
             INSERT INTO run_exclusions (run_id, machine, stamp, reason)
@@ -70,6 +69,6 @@ def add_exclusion(db_path: Path, run_id: str, machine: str, stamp: str,
 
 def remove_exclusion(db_path: Path, run_id: str) -> None:
     """Restore a previously excluded run."""
-    with duckdb.connect(str(db_path), read_only=False) as con:
+    with database_lock(db_path), duckdb.connect(str(db_path), read_only=False) as con:
         con.execute(_RUN_EXCLUSIONS_DDL)
         con.execute("DELETE FROM run_exclusions WHERE run_id = ?", [run_id])

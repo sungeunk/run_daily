@@ -20,6 +20,7 @@ that case we fall back to the filename.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import platform
@@ -31,7 +32,7 @@ from typing import Iterable
 from data import (INFER_EXEC_MODES, TOKEN_EXEC_MODES, classify_run_kind,
                   expected_cases, parse_triggered_by)
 
-from ._common import (file_hash, parse_stamp_from_name, run_id_of,
+from ._common import (parse_stamp_from_name, run_id_of,
                       split_ov_version, workweek_of)
 from .record import IssueRow, MonitorRow, PerfRow, PhaseStatRow, RunRecord
 
@@ -312,10 +313,12 @@ def _monitor_row(test: dict, metrics: dict) -> MonitorRow | None:
     )
 
 
-def load_summary(path: Path) -> RunRecord:
+def load_summary(path: Path, *, content: bytes | None = None) -> RunRecord:
     """Parse a summary.json into a RunRecord (raw tokens preserved)."""
     path = Path(path)
-    summary = json.loads(path.read_text(encoding="utf-8"))
+    if content is None:
+        content = path.read_bytes()
+    summary = json.loads(content.decode("utf-8"))
     meta = _extract_meta_from_summary(summary)
 
     # Timestamp: prefer the stamp from meta, fall back to filename, then mtime.
@@ -398,7 +401,7 @@ def load_summary(path: Path) -> RunRecord:
         build_url=(meta.get("build_url") or None),
         source_path=str(path),
         rawlog_path=str(rawlog) if (rawlog := _raw_log_candidate(path)) else None,
-        file_hash=file_hash(path),
+        file_hash=hashlib.sha256(content).hexdigest()[:24],
         devices=devices,
         analysis=(summary.get("analysis")
                   if isinstance(summary.get("analysis"), dict) else None),

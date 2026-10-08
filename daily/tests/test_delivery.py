@@ -11,6 +11,43 @@ from common.delivery import (
 pytestmark = pytest.mark.dev_only
 
 
+@pytest.mark.parametrize("fail_publish", [False, True])
+def test_backup_publishes_atomically(tmp_path: Path, monkeypatch, fail_publish: bool) -> None:
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    import sys
+
+    from common import delivery
+
+    path = tmp_path / "daily.20261008_1200.summary.json"
+    path.write_text("{}")
+    events = []
+
+    def put(local, remote):
+        events.append(("put", local, remote))
+
+    def rename(source, destination):
+        events.append(("rename", source, destination))
+        if fail_publish:
+            raise OSError("publish failed")
+
+    sftp = SimpleNamespace(put=put, posix_rename=rename,
+                           remove=lambda remote: events.append(("remove", remote)))
+    client = SimpleNamespace(open_sftp=lambda: nullcontext(sftp))
+    monkeypatch.setitem(sys.modules, "paramiko", SimpleNamespace(SFTPError=OSError, SSHException=OSError))
+    monkeypatch.setattr(delivery, "_open_ssh_client", lambda *args: nullcontext(client))
+    monkeypatch.setattr(delivery, "_ensure_remote_directory", lambda *args: None)
+
+    uploaded = delivery.scp_backup([path], relay_server="reports.example.com")
+
+    assert events[0][0] == "put"
+    assert events[0][2].endswith(".upload")
+    assert events[1] == ("rename", events[0][2], events[0][2].rsplit(".", 2)[0])
+    assert uploaded == ([] if fail_publish else [path])
+    if fail_publish:
+        assert events[2] == ("remove", events[0][2])
+
+
 def test_default_backup_targets_dg2fizz_file_browser(monkeypatch) -> None:
     monkeypatch.delenv("MAIL_RELAY_SERVER", raising=False)
 

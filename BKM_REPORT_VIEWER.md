@@ -102,6 +102,61 @@ same central DB the `daily_results` MCP tools query
 and `web_server/README.md` for the viewer and deployment details.
 
 ## Settings
+### Incremental database refresh
+
+`Refresh database` invokes `scripts/ingest_db.sh`, which runs
+`python -u -m data.ingest.refresh`. It scans summary fingerprints first and
+parses/writes only new or changed sources. Unchanged refreshes do not copy or
+replace the database. Changed refreshes retain the copy-on-write temporary
+database and atomic publication; any ingestion failure leaves the live DB intact.
+
+The first refresh after this upgrade reprocesses existing summaries to initialize
+source tracking. Later refreshes also detect processing-code/schema changes,
+profile changes, source-path changes, and late-arriving raw-log files. Full-tree
+discovery and content hashing still occur; this is not a filesystem watcher.
+Deleted source files do not delete historical database records.
+
+If two active source paths resolve to the same run ID, refresh fails with both
+paths in the error and does not publish the temporary DB, even with `--force`.
+Remove the duplicate from the scanned tree or correct its run identity before
+retrying. This prevents repeated refreshes from alternating between copies.
+
+Normal and explicit forced refreshes:
+
+```bash
+./scripts/ingest_db.sh
+./scripts/ingest_db.sh --force
+./scripts/ingest_db.sh --profile /path/to/profile.yaml
+```
+
+`DAILY_DATA_ROOT`, `DAILY_DB_FILE`, and `INGEST_LOCK_FILE` override the source
+root, target DB, and shared lock. The viewer passes its selected DB and lock
+explicitly. Refresh and manual exclusion edits share this lock; concurrent
+refresh requests rescan after acquiring it and can complete without rebuilding.
+Lock selection is `--lock-file`, then `INGEST_LOCK_FILE`, then `.ingest.lock`
+beside the final resolved DB path. Overriding `--db` on the shell command line
+therefore also changes the default lock location.
+The default lock timeout is 60 seconds (`--lock-timeout`); timeout exits with 75.
+Direct `data.ingest.cli` remains for per-machine local DBs; do not use it to
+write the live central DB, bypassing the refresh lock/publication protocol.
+
+The viewer streams progress and shows updated/skipped counts plus stage timings
+for lock wait, scan, copy, schema/profile, hashing, parsing, writing, checkpoint,
+publication, and total refresh work. Process/uv startup is outside these timings.
+Cache keys include DB identity and query-code version independently; no-op
+refreshes no longer clear every cached query. Each query function retains at
+most 32 cached argument/version combinations, evicting least-recently-used
+entries. This bounds entry count, not total memory bytes. The viewer validates
+all result fields before displaying subprocess output; malformed results are
+reported as refresh errors rather than uncaught page exceptions.
+
+Artifact delivery now uploads to a unique `.upload` name and publishes using
+the SFTP `posix-rename` extension. The Linux relay must support this extension;
+on failure the previous final file remains and temporary upload cleanup is attempted.
+Older agents that upload directly to final filenames can still cause a refresh
+to fail on partially written JSON; retry after their upload completes.
+
+### Service configuration
 dg2fizz
 src: /home/sungeunk/repo/run_daily/daily/viewer/app.py
 service file: /home/sungeunk/repo/run_daily/web_server/caddy/systemd/daily-viewer.service

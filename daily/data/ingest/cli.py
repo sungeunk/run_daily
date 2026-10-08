@@ -9,7 +9,7 @@ Usage::
     # Single file.
     python -m data.ingest.cli --input output/daily.20260421_2234.summary.json
 
-Files already present in ``runs.file_hash`` are skipped unless --force.
+Unchanged sources are skipped before parsing unless --force is requested.
 """
 
 from __future__ import annotations
@@ -22,10 +22,9 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from .loader_new import load_summary
-from .writer import (already_ingested, connect, ensure_schema,
+from .writer import (connect, ensure_schema,
                      load_display_profile, profile_exists,
-                     profile_name_from_yaml, upsert_run)
+                     profile_name_from_yaml)
 
 log = logging.getLogger("ingest")
 
@@ -74,30 +73,15 @@ def ingest_files(files: list[tuple[Path, str]], db_path: Path,
                  machine_override: str | None = None
                  ) -> tuple[int, int, list[tuple[Path, str]]]:
     """Ingest a list of (path, format) pairs. Returns (added, skipped, failures)."""
+    from .refresh import ingest_into
+
     con = connect(db_path)
-    ensure_schema(con)
-
-    added = skipped = 0
-    failures: list[tuple[Path, str]] = []
-    total = len(files)
-    for idx, (path, fmt) in enumerate(files, start=1):
-        try:
-            if fmt != "new":
-                raise ValueError(f"unknown format {fmt!r}")
-            rec = load_summary(path)
-
-            if not force and already_ingested(con, rec.file_hash):
-                skipped += 1
-            else:
-                upsert_run(con, rec)
-                added += 1
-            _progress(idx, total, f"added={added} skipped={skipped} | {path.name}")
-        except Exception as e:  # noqa: BLE001 — we want to keep going
-            failures.append((path, str(e)))
-            _progress(idx, total, f"FAIL {path.name}: {e}")
-    print()
-    con.close()
-    return added, skipped, failures
+    try:
+        ensure_schema(con)
+        return ingest_into(con, files, force=force, progress=_progress)
+    finally:
+        print()
+        con.close()
 
 
 def discover(root: Path, *, fmt: str) -> list[tuple[Path, str]]:

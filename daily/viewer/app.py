@@ -27,12 +27,9 @@ The machine is chosen per tab, not in the sidebar.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import os
 import platform
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pandas as pd
@@ -48,6 +45,7 @@ if str(_HERE.parent) not in sys.path:
 from data import read as q  # noqa: E402
 from data import write as w  # noqa: E402
 from common.urls import DEFAULT_DAILY_REPORT_BASE_URL  # noqa: E402
+from viewer.refresh import CACHE_MAX_ENTRIES, CacheVersion, cache_version, run_refresh  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config / connection
@@ -57,14 +55,6 @@ DEFAULT_DB = _HERE.parents[1] / "daily_output" / platform.node() / "bench.duckdb
 INGEST_SCRIPT = Path(
     os.environ.get("INGEST_SCRIPT", str(_HERE.parents[1] / "scripts" / "ingest_db.sh"))
 )
-# Same lock the script takes; held here so a concurrent refresh queues up
-# instead of racing the DuckDB write lock.
-INGEST_LOCK = Path(
-    os.environ.get("INGEST_LOCK_FILE", "/mnt/hdd/daily/db/.ingest.lock")
-)
-INGEST_WAIT_SEC = 60.0
-
-
 def _resolve_db_path() -> Path:
     """Streamlit consumes its own CLI flags, so we read our DB path from env
     or from ``-- --db <path>`` (pytest-style)."""
@@ -81,6 +71,7 @@ def _resolve_db_path() -> Path:
 
 
 DB = _resolve_db_path()
+INGEST_LOCK = Path(os.environ.get("INGEST_LOCK_FILE", str(DB.resolve().parent / ".ingest.lock")))
 
 
 # ---------------------------------------------------------------------------
@@ -94,122 +85,71 @@ def _db_version() -> float:
         return 0.0
 
 
-def _cache_version() -> float:
+def _cache_version() -> CacheVersion:
     """Cache key: cached frames must also drop when the query code changes,
     not only when the DB is rebuilt."""
-    return max(_db_version(), Path(q.__file__).stat().st_mtime)
-
-
-def _wait_for_ingest_lock(handle, progress, timeout: float = INGEST_WAIT_SEC) -> bool:
-    """Take the ingestion lock, queueing behind a concurrent refresh."""
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            if time.monotonic() >= deadline:
-                return False
-            progress.progress(15, text="Preparing database refresh...")
-            time.sleep(2)
+    return cache_version(DB, Path(q.__file__))
 
 
 def _refresh_database() -> None:
-    """Rebuild the daily benchmark DB and invalidate cached query results."""
+    """Incrementally refresh the DB and report progress without UI-held locks."""
     if not INGEST_SCRIPT.is_file() or not os.access(INGEST_SCRIPT, os.X_OK):
         st.error(f"Ingestion script is unavailable: {INGEST_SCRIPT}")
         return
 
-    progress = st.progress(5, text="Starting database refresh...")
     with st.status("Refreshing database...", expanded=True) as status:
+        latest = st.empty()
         try:
-            lock = INGEST_LOCK.open("a+")
-        except OSError as exc:
+            result = run_refresh(INGEST_SCRIPT, DB, INGEST_LOCK, latest.text)
+        except (OSError, RuntimeError, ValueError) as exc:
             status.update(label="Database refresh failed", state="error")
-            progress.empty()
-            st.error(f"Cannot open ingestion lock {INGEST_LOCK}: {exc}")
+            st.error(str(exc))
             return
-
-        with lock:
-            version_before = _db_version()
-            if not _wait_for_ingest_lock(lock, progress):
-                status.update(label="Database refresh timed out", state="error")
-                progress.empty()
-                st.error("The database was not updated: refresh timed out after "
-                         f"{int(INGEST_WAIT_SEC)} seconds. Please try again.")
-                return
-
-            if _db_version() > version_before:
-                message = "Database is already up to date — reloaded."
-            else:
-                st.write("Running ingestion script")
-                progress.progress(25, text="Ingesting daily benchmark artifacts...")
-                result = subprocess.run(
-                    [str(INGEST_SCRIPT)],
-                    cwd=INGEST_SCRIPT.parent,
-                    capture_output=True,
-                    check=False,
-                    text=True,
-                    env={**os.environ, "INGEST_LOCK_HELD": "1"},
-                )
-
-                if result.returncode != 0:
-                    status.update(label="Database refresh failed", state="error")
-                    progress.empty()
-                    st.error(f"Ingestion failed with exit code {result.returncode}.")
-                    output = "\n".join(part for part in (result.stdout, result.stderr)
-                                       if part)
-                    if output:
-                        st.code(output, language="text")
-                    return
-                message = "Database refresh completed."
-
-            progress.progress(90, text="Reloading cached data...")
-            st.cache_data.clear()
-            status.update(label="Database refresh completed", state="complete")
-
-    progress.progress(100, text="Database is up to date")
+        message = "Database refresh completed." if result["changed"] else "No changed artifacts; database unchanged."
+        message += f" Updated: {result['added']}; skipped: {result['skipped']}."
+        message += " " + ", ".join(f"{name}={elapsed:.2f}s" for name, elapsed in result["timings"].items())
+        status.update(label="Database refresh completed", state="complete")
     st.session_state["db_refresh_message"] = message
     st.rerun()
 
 
-@st.cache_data(show_spinner=False)
-def cached_machines(_v: float) -> list[str]:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_machines(version: CacheVersion) -> list[str]:
     return q.list_machines(DB)
 
 
-@st.cache_data(show_spinner=False)
-def cached_runs(machine: str, _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_runs(machine: str, version: CacheVersion) -> pd.DataFrame:
     return q.list_runs(DB, machine)
 
 
-@st.cache_data(show_spinner=False)
-def cached_excel(run_ids: tuple[str, ...], profile: str, _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_excel(run_ids: tuple[str, ...], profile: str, version: CacheVersion) -> pd.DataFrame:
     return q.build_excel_matrix(DB, list(run_ids), profile)
 
 
-@st.cache_data(show_spinner=False)
-def cached_extra_rows(run_ids: tuple[str, ...], profile: str, _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_extra_rows(run_ids: tuple[str, ...], profile: str, version: CacheVersion) -> pd.DataFrame:
     return q.extra_rows(DB, list(run_ids), profile)
 
 
-@st.cache_data(show_spinner=False)
-def cached_success_counts(run_ids: tuple[str, ...], _v: float) -> dict[str, int]:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_success_counts(run_ids: tuple[str, ...], version: CacheVersion) -> dict[str, int]:
     return q.success_counts(DB, list(run_ids))
 
 
-@st.cache_data(show_spinner=False)
-def cached_legacy_geomean_summary(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_legacy_geomean_summary(run_ids: tuple[str, ...], version: CacheVersion) -> pd.DataFrame:
     return q.legacy_geomean_summary(DB, list(run_ids))
 
 
-@st.cache_data(show_spinner=False)
-def cached_profiles(_v: float) -> list[str]:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_profiles(version: CacheVersion) -> list[str]:
     return q.list_profiles(DB)
 
 
-@st.cache_data(show_spinner=False)
-def cached_exclusions(_v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_exclusions(version: CacheVersion) -> pd.DataFrame:
     return q.list_exclusions(DB)
 
 
@@ -218,18 +158,18 @@ def cached_exclusions(_v: float) -> pd.DataFrame:
 # Every analysis tab resolves its scope through these so the run set, run kind
 # and model selection stay consistent across the app.
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_cohort(machine: str, limit: int, run_kinds: tuple[str, ...],
-                  min_series: int, _v: float) -> pd.DataFrame:
+                  min_series: int, version: CacheVersion) -> pd.DataFrame:
     return q.recent_runs(DB, machine, limit=limit, run_kinds=run_kinds,
                          min_success_series=min_series)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_series_runs(machine: str, model: str, precision: str,
                        in_token: int, out_token: int, exec_mode: str,
                        runs_n: int, run_kinds: tuple[str, ...],
-                       min_series: int, _v: float) -> pd.DataFrame:
+                       min_series: int, version: CacheVersion) -> pd.DataFrame:
     return q.series_history_for_runs(DB, machine, model=model,
                                      precision=precision, in_token=in_token,
                                      out_token=out_token, exec_mode=exec_mode,
@@ -237,46 +177,46 @@ def cached_series_runs(machine: str, model: str, precision: str,
                                      min_success_series=min_series)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_geomean_matrix(machines: tuple[str, ...], limit: int,
                           run_kinds: tuple[str, ...], min_series: int,
-                          models: tuple[str, ...], _v: float,
+                          models: tuple[str, ...], version: CacheVersion,
                           as_of_ts=None) -> pd.DataFrame:
     return q.geomean_matrix(DB, machines, limit=limit, run_kinds=run_kinds,
                             min_success_series=min_series,
                             models=models or None, as_of_ts=as_of_ts)
 
 
-@st.cache_data(show_spinner=False)
-def cached_machine_health(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_machine_health(run_ids: tuple[str, ...], version: CacheVersion) -> pd.DataFrame:
     return q.machine_health_for_runs(DB, run_ids)
 
 
-@st.cache_data(show_spinner=False)
-def cached_phase_stats(run_ids: tuple[str, ...], _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_phase_stats(run_ids: tuple[str, ...], version: CacheVersion) -> pd.DataFrame:
     return q.phase_stats_for_runs(DB, run_ids)
 
 
-@st.cache_data(show_spinner=False)
-def cached_run_detail(run_id: str, _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_run_detail(run_id: str, version: CacheVersion) -> pd.DataFrame:
     return q.run_detail(DB, run_id)
 
 
-@st.cache_data(show_spinner=False)
-def cached_run_issues(run_id: str, _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_run_issues(run_id: str, version: CacheVersion) -> pd.DataFrame:
     return q.functional_issues_for_runs(DB, (run_id,))
 
 
-@st.cache_data(show_spinner=False)
-def cached_run_analysis(run_id: str, _v: float) -> pd.DataFrame:
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
+def cached_run_analysis(run_id: str, version: CacheVersion) -> pd.DataFrame:
     return q.analysis_for_run(DB, run_id)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_trend_compare(machine: str, run_a: str, run_b: str,
                          history_n: int, run_kinds: tuple[str, ...],
                          models: tuple[str, ...], min_series: int,
-                         _v: float) -> pd.DataFrame:
+                         version: CacheVersion) -> pd.DataFrame:
     return q.compare_runs_with_trend(DB, machine, run_a, run_b,
                                      history_runs_n=history_n,
                                      run_kinds=run_kinds,
@@ -498,34 +438,34 @@ REPORT_BASE_URL = os.environ.get(
 ).rstrip("/")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_machines_overview(machines: tuple[str, ...],
                              run_kinds: tuple[str, ...], history_runs: int,
-                             _v: float, as_of_ts=None) -> pd.DataFrame:
+                             version: CacheVersion, as_of_ts=None) -> pd.DataFrame:
     return q.machines_overview(DB, machines or None, run_kinds=run_kinds,
                                history_runs=history_runs, as_of_ts=as_of_ts)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_failing_models(machines: tuple[str, ...],
                           run_kinds: tuple[str, ...], history_runs: int,
-                          _v: float, as_of_ts=None) -> pd.DataFrame:
+                          version: CacheVersion, as_of_ts=None) -> pd.DataFrame:
     return q.failing_models_overview(DB, machines or None, run_kinds=run_kinds,
                                      history_runs=history_runs,
                                      as_of_ts=as_of_ts)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_env_changes(machines: tuple[str, ...], run_kinds: tuple[str, ...],
-                       history_runs: int, _v: float,
+                       history_runs: int, version: CacheVersion,
                        as_of_ts=None) -> pd.DataFrame:
     return q.environment_changes(DB, machines or None, run_kinds=run_kinds,
                                  history_runs=history_runs, as_of_ts=as_of_ts)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=CACHE_MAX_ENTRIES)
 def cached_build_points(machines: tuple[str, ...],
-                        run_kinds: tuple[str, ...], _v: float) -> pd.DataFrame:
+                        run_kinds: tuple[str, ...], version: CacheVersion) -> pd.DataFrame:
     return q.build_points(DB, machines or None, run_kinds=run_kinds)
 
 
