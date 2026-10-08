@@ -158,6 +158,15 @@ def test_render_fleet_html_links_raw_log_from_dg2fizz_storage() -> None:
     )
 
 
+def test_raw_log_link_rejects_legacy_daily_root() -> None:
+    from report.fleet import _raw_log_link
+
+    assert _raw_log_link(
+        "http://dg2fizz:8081",
+        {"rawlog_path": "/var/www/html/daily/LNL-03/daily.20260901_1143.raw"},
+    ) == ""
+
+
 def test_render_fleet_html_keeps_mail_lines_below_limit() -> None:
     machine = {
         "machine": "ARLH-01", "status": "success",

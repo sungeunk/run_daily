@@ -22,7 +22,7 @@ from data import stats
 
 from .baseline import find_last_known_good
 from .functional import aggregate_functional
-from .remote import fetch_reference, fetch_release
+from .remote import SeriesValues, fetch_reference, fetch_release
 from .types import (
     AnalysisConfig,
     AnalysisResult,
@@ -30,10 +30,13 @@ from .types import (
     BaselineInfo,
     BisectDelta,
     ComparisonRow,
+    FunctionalResult,
     ModelSummary,
     OverallStatus,
     PerformanceResult,
+    ReleaseInfo,
     SeriesKey,
+    OutputQualityResult,
 )
 from .verdict import improvement_pct, make_comparison_row, verdict_from_pct
 
@@ -144,23 +147,44 @@ def analyze_run(
             top_regressions=top_regressions,
             current_run=_build_current_run_info(rec),
             release=release_info,
+            release_status=release_comparison_status(functional, rows, release_info, config),
+            baseline_release_status=baseline_release_comparison_status(
+                baseline_info, reference.values, release_info, release_values, config,
+            ),
             last_known_good=last_known_good,
             bisect_delta=bisect_delta,
             rows=rows,
         )
 
-        # Best-effort persistence for green-only baseline and downstream tabs.
-        from .persistence import write_analysis_to_db, write_analysis_to_summary
-
-        write_analysis_to_summary(summary_json, result, config=config)
-
+        from .persistence import write_analysis_to_db
         write_analysis_to_db(
             con,
             rec.run_id,
             result,
             threshold_pct=config.pct_threshold,
         )
-        return result
+
+    # Generated-output checks are advisory and may read archived artifacts
+    # over HTTP. Run them after closing DuckDB so network delays do not hold a
+    # database connection or prevent the core analysis from being persisted.
+    try:
+        from .output_quality import quality_for_runs
+
+        result.output_quality = quality_for_runs(
+            config, str(rec.machine or ""), rec.ts.strftime("%Y%m%d_%H%M"),
+            baseline_info.stamp if baseline_info.status == "found" else None,
+            release_info.stamp if release_info.status == "found" else None,
+            summary=summary, local_dir=summary_json.parent,
+        )
+    except Exception as exc:
+        log.warning("Output-quality checks failed; continuing analysis persistence: %s", exc)
+        result.output_quality = OutputQualityResult(
+            detail="Output-quality checks failed; see the run log for details."
+        )
+
+    from .persistence import write_analysis_to_summary
+    write_analysis_to_summary(summary_json, result, config=config)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -581,10 +605,67 @@ def _changed(current: str | None, previous: str | None) -> bool | None:
     return current != previous
 
 
+def baseline_release_comparison_status(
+    baseline: BaselineInfo,
+    baseline_values: SeriesValues,
+    release: ReleaseInfo | None,
+    release_values: SeriesValues,
+    config: AnalysisConfig,
+) -> OverallStatus | None:
+    """Compare baseline performance against release without current-run inputs."""
+    if release is not None and release.status == "disabled":
+        return None
+    if baseline.status != "found" or release is None or release.status != "found":
+        return "gray"
+    rows = build_comparison_rows(
+        baseline_values,
+        config=config,
+        reference_values=release_values,
+        history_map={},
+    )
+    performance = _aggregate_performance(rows)
+    if performance.regressed > 0:
+        return "yellow"
+    if performance.improved + performance.same > 0:
+        return "green"
+    return "gray"
+
+
+def release_comparison_status(
+    functional: FunctionalResult,
+    rows: list[ComparisonRow],
+    release: ReleaseInfo | None,
+    config: AnalysisConfig,
+) -> OverallStatus | None:
+    """Classify the fixed release comparison without daily-history noise gates."""
+    if release is not None and release.status == "disabled":
+        return None
+    if functional.issue_count > 0:
+        return "red"
+    if release is None or release.status != "found":
+        return "gray"
+
+    verdicts = [
+        verdict_from_pct(row.release_improvement_pct, config)
+        for row in rows
+        if row.release_value is not None and math.isfinite(row.release_value)
+        and math.isfinite(row.current_value)
+        and row.release_improvement_pct is not None and math.isfinite(row.release_improvement_pct)
+    ]
+    performance = PerformanceResult(
+        compared=len(verdicts),
+        improved=verdicts.count("improved"),
+        same=verdicts.count("same"),
+        regressed=verdicts.count("regressed"),
+        unavailable=len(rows) - len(verdicts),
+    )
+    return _overall_status(functional, performance, release)
+
+
 def _overall_status(
     functional: "FunctionalResult",
     performance: PerformanceResult,
-    baseline: BaselineInfo,
+    baseline: BaselineInfo | ReleaseInfo,
 ) -> OverallStatus:
     # Functional failures take priority over performance signals.
     if functional.issue_count > 0:

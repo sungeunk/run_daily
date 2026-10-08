@@ -14,53 +14,55 @@ lingering. Service names match their tracked unit filenames.
 
 # Bootstrap (rebuilding this machine from scratch)
 
-After a reinstall, only the `run_daily` repo is needed. The DuckDB file is
-**not** restored — history starts empty and refills from the next ingest.
+After a reinstall, restore the `run_daily` repo and mount the daily data disk.
+The DuckDB and its backups live outside the repository under
+`/mnt/hdd/daily/db/`; preserve or restore that directory to retain history.
 
 1. Install `uv`:
-   ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  sudo ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv
-   ```
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+sudo ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv
+```
 
-  Install Caddy at `/home/sungeunk/.local/bin/caddy` as documented in
-  `web_server/caddy/README.md`.
+Install Caddy at `/home/sungeunk/.local/bin/caddy` as documented in
+`web_server/caddy/README.md`.
 
 2. Verify the tracked requirements through `uv`:
-   ```bash
-   cd /home/sungeunk/repo/run_daily
-  uv run --with-requirements daily/requirements.txt python -c "import duckdb, streamlit"
-   ```
+```bash
+cd /home/sungeunk/repo/run_daily
+uv run --with-requirements daily/requirements.txt python -c "import duckdb, streamlit"
+```
 
 3. DB directory — the viewers and the MCP server all read
-  `/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`:
-   ```bash
-  sudo mkdir -p /mnt/hdd/daily/db
-  sudo chown sungeunk:devel /mnt/hdd/daily/db
-  sudo chmod 755 /mnt/hdd/daily/db
-   ```
+`/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`:
+```bash
+sudo install -d -o sungeunk -g devel -m 0755 /mnt/hdd/daily/db
+```
 
-4. Open the ports (ufw is active on this host):
-   ```bash
-    sudo ufw allow 8080/tcp
-    sudo ufw allow 8081/tcp
-    sudo ufw allow 8090/tcp
-    sudo ufw allow 8091/tcp
-   ```
+4. Open the web ports (ufw is active on this host):
+```bash
+sudo ufw allow 8080/tcp
+sudo ufw allow 8081/tcp
+sudo ufw allow 8091/tcp
+```
+
+MCP port `8090` has no authentication. Add a UFW allow rule for the approved
+internal client CIDR only; do not open it to all sources with
+`ufw allow 8090/tcp`.
 
 5. Register, enable, and start the tracked user services:
-   ```bash
-  cd /home/sungeunk/repo/run_daily/web_server
-  ./manage-web-services.sh all
-  ./manage-web-services.sh status
-   ```
+```bash
+cd /home/sungeunk/repo/run_daily/web_server
+./manage-web-services.sh all
+./manage-web-services.sh status
+```
 
-  Enable user lingering once so services start after reboot without an
-  interactive login:
+Enable user lingering once so services start after reboot without an
+interactive login:
 
-  ```bash
-  sudo loginctl enable-linger sungeunk
-  ```
+```bash
+sudo loginctl enable-linger sungeunk
+```
 
 **Still missing after these steps**:
 
@@ -95,33 +97,16 @@ http://dg2fizz.ikor.intel.com:8091/
 
 Current pipeline (`daily/` pytest suite, see `daily/README.md`). Reads the
 same central DB the `daily_results` MCP tools query
-(`/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`) — see `daily/viewer/README.md`
-for the DuckDB schema and tab-by-tab breakdown (Excel/Trend/Regressions/Geomean/Noise).
+(`/mnt/hdd/daily/db/daily_llm_benchmark.duckdb`). See
+`web_server/wiki/docs/web_services/daily-results-mcp.md` for the MCP service
+and `web_server/README.md` for the viewer and deployment details.
 
 ## Settings
 dg2fizz
 src: /home/sungeunk/repo/run_daily/daily/viewer/app.py
 service file: /home/sungeunk/repo/run_daily/web_server/caddy/systemd/daily-viewer.service
-```ini
-[Unit]
-Description=Daily Streamlit viewer (sungeunk user)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=%h/repo/run_daily
-Environment=DAILY_DB=/mnt/hdd/daily/db/daily_llm_benchmark.duckdb
-Environment=INGEST_SCRIPT=/home/sungeunk/repo/run_daily/scripts/ingest_db.sh
-Environment=INGEST_LOCK_FILE=/mnt/hdd/daily/db/.ingest.lock
-Environment=STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
-ExecStart=/usr/local/bin/uv run --python 3.12 --with-requirements %h/repo/run_daily/daily/requirements.txt streamlit run %h/repo/run_daily/daily/viewer/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true
-Restart=on-failure
-RestartSec=5s
-
-[Install]
-WantedBy=default.target
-```
+The tracked user unit is authoritative. Register and update it through
+`manage-web-services.sh`; do not create a separate system-level unit.
 
 ## Start service
 ```bash

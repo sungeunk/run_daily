@@ -83,6 +83,15 @@ Current site configurations:
 | `conf.d/files.caddy` | Provides read-only directory browsing for selected `/mnt/hdd` folders. | `http://127.0.0.1:8081/` |
 | `conf.d/daily-viewer.caddy` | Proxies the public Daily viewer endpoint to local Streamlit. | `http://127.0.0.1:8091/` |
 
+The Daily Results MCP server listens directly on port `8090` through
+`daily-results-mcp.service`; it is not a Caddy site. Because it has no
+authentication, restrict that port to trusted internal clients.
+
+`conf.d/files.caddy` keeps its sensitive-path `respond 404` matcher inside an
+ordered `route` block before the `handle_path` file servers. Keep this order
+when editing the routes; otherwise the terminal file handlers can serve the
+ingestion hook or database files before the deny matcher runs.
+
 ### `systemd/caddy.service`
 
 The unit currently assumes:
@@ -95,14 +104,13 @@ If the user, repository location, or binary location changes, update `ExecStart`
 
 ## Enable and start the user service
 
-From this directory, install the tracked unit and enable it for the `sungeunk` login session:
+From `web_server/`, register the tracked units as user services. The manager
+creates symlinks to the repository units, reloads systemd, and enables them:
 
 ```bash
-mkdir -p "$HOME/.config/systemd/user"
-cp systemd/caddy.service "$HOME/.config/systemd/user/caddy.service"
-systemctl --user daemon-reload
-systemctl --user enable --now caddy.service
-systemctl --user status caddy.service
+./manage-web-services.sh install
+./manage-web-services.sh start
+./manage-web-services.sh status
 ```
 
 To make the service start when the user is not logged in, system-wide lingering must be enabled. That normally requires an administrator:

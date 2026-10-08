@@ -26,6 +26,17 @@ SeriesValues = dict[SeriesKeyTuple, tuple[float, str | None]]
 SeriesHistory = dict[SeriesKeyTuple, list[float]]
 _PERF_PAGE_SIZE = 200
 _PERF_KEY_COLUMNS = ("run_id", "model", "precision", "in_token", "out_token", "exec_mode")
+RELEASE_PURPOSE = "release 2026.4.1 sungeunk"
+RELEASE_RUN_IDS: dict[str, str] = {
+    "ARLH-01": "30279de834dff769b37d",
+    "BMG-02": "1b61ca5c7852f6f214fb",
+    "LNL-03": "628790e78ba912a57cf4",
+    "LNL-04": "8858d0ce98af522cb516",
+    "MTL-01": "33e9b494774c17a7e3e4",
+    "PTLH-01": "8457ade1a27346425a2d",
+    "PTLH-02": "b51d0c2354d5cc702acb",
+    "RAPTOR-ELLY": "de945770b25dbb7c43ab",
+}
 
 
 class ReferenceResult:
@@ -109,7 +120,7 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord", *, client=None) ->
 
 
 def fetch_release(config: AnalysisConfig, machine: str | None, *, client=None) -> tuple[ReleaseInfo, SeriesValues]:
-    """Return the newest release run for *machine* and its per-series values."""
+    """Return the pinned release run for *machine*, without candidate selection."""
     if not config.release_enabled:
         return ReleaseInfo(status="disabled"), {}
 
@@ -118,10 +129,15 @@ def fetch_release(config: AnalysisConfig, machine: str | None, *, client=None) -
         return ReleaseInfo(status="not_found", source_url=url,
                            detail="current run has no machine name"), {}
 
+    run_id = RELEASE_RUN_IDS.get(machine)
+    if run_id is None:
+        return ReleaseInfo(status="not_found", machine=machine, source_url=url,
+                           detail=f"no pinned run for {RELEASE_PURPOSE!r} on {machine}"), {}
+
     from common.mcp_client import McpError
 
     try:
-        runs = _run_sql(config, _latest_release_sql(machine, config.release_purpose_like), client)
+        runs = _run_sql(config, _pinned_release_sql(machine, run_id, config.release_purpose_like), client)
     except McpError as exc:
         return ReleaseInfo(status="unavailable", machine=machine,
                            source_url=url, detail=str(exc)), {}
@@ -132,7 +148,9 @@ def fetch_release(config: AnalysisConfig, machine: str | None, *, client=None) -
                 status="not_found",
                 machine=machine,
                 source_url=url,
-                detail=f"no run on {machine} with purpose like {config.release_purpose_like!r}",
+                run_id=run_id,
+                detail=(f"pinned release run {run_id} on {machine} is missing, excluded, "
+                    f"partial, or does not match {config.release_purpose_like!r}"),
             ),
             {},
         )
@@ -146,6 +164,9 @@ def fetch_release(config: AnalysisConfig, machine: str | None, *, client=None) -
                            source_url=url, detail=str(exc)), {}
 
     values, _ = _split_perf(perf_rows, newest_run_id=run_id, order=[run_id])
+    if not values:
+        return ReleaseInfo(status="not_found", run_id=run_id, machine=machine, source_url=url,
+                           detail=f"pinned release run {run_id} has no usable performance data"), {}
     return (
         ReleaseInfo(
             status="found",
@@ -193,14 +214,16 @@ def _reference_runs_sql(config: AnalysisConfig, rec: "RunRecord") -> str:
     )
 
 
-def _latest_release_sql(machine: str, purpose_like: str) -> str:
+def _pinned_release_sql(machine: str, run_id: str, purpose_like: str) -> str:
     return (
         "SELECT run_id, strftime(ts, '%Y%m%d_%H%M') AS stamp, "
         "COALESCE(ov_version, '') AS ov_version, machine "
-        "FROM runs "
+        "FROM runs_with_flags "
         f"WHERE machine = {_quote(machine)} "
+        f"AND run_id = {_quote(run_id)} "
+        f"AND lower(trim(COALESCE(purpose, ''))) = {_quote(RELEASE_PURPOSE)} "
         f"AND lower(COALESCE(purpose, '')) LIKE lower({_quote(purpose_like)}) "
-        "ORDER BY ts DESC LIMIT 1"
+        "AND NOT is_partial AND NOT excluded"
     )
 
 

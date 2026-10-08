@@ -3,15 +3,15 @@
 
 Selects a run from the central daily_results server (latest by default, or an
 explicit --run-id/--stamp), then renders HTML using the history-based
-fluctuation-guard analysis engine. It never reads a local DuckDB or benchmark
-report artefact.
+fluctuation-guard analysis engine. Output-quality checks additionally read
+archived summaries, raw logs, and generated images. It never reads a local DuckDB.
 
 The output file is always a *new* file (never overwrites an existing one).
 
 Usage::
 
-    # default: select the latest central run
-    python scripts/generate_analysis_report.py
+    # default: select the latest central run (includes optional image checks)
+    daily/generate_html_report.sh
 
     # pick a past run by run ID (or by timestamp)
     python scripts/generate_analysis_report.py --run-id <run-id>
@@ -40,11 +40,16 @@ Quick re-run alias (runs from any directory)::
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -230,10 +235,12 @@ def _analyze_run_from_mcp(config, run: dict, *, client=None):
         _aggregate_performance,
         _overall_status,
         _top_regressions,
+        baseline_release_comparison_status,
         build_comparison_rows,
+        release_comparison_status,
     )
     from analysis.remote import _run_sql, fetch_reference, fetch_release, fetch_series_values
-    from analysis.types import AnalysisResult
+    from analysis.types import AnalysisResult, OutputQualityResult
 
     rec = SimpleNamespace(
         run_id=str(run['run_id']),
@@ -260,6 +267,20 @@ def _analyze_run_from_mcp(config, run: dict, *, client=None):
     top_regressions = _top_regressions(rows, config.top_regressions)
     overall_status = _overall_status(functional, performance, reference.info)
 
+    try:
+        from analysis.output_quality import quality_for_runs
+
+        output_quality = quality_for_runs(
+            config, rec.machine, rec.ts.strftime("%Y%m%d_%H%M"),
+            reference.info.stamp if reference.info.status == "found" else None,
+            release_info.stamp if release_info.status == "found" else None,
+        )
+    except Exception as exc:
+        log.warning("Output-quality checks failed; continuing report generation: %s", exc)
+        output_quality = OutputQualityResult(
+            detail="Output-quality checks failed; see the run log for details."
+        )
+
     return AnalysisResult(
         overall_status=overall_status,
         baseline=reference.info,
@@ -270,6 +291,11 @@ def _analyze_run_from_mcp(config, run: dict, *, client=None):
         rows=rows,
         current_run=current_run,
         release=release_info,
+        release_status=release_comparison_status(functional, rows, release_info, config),
+        baseline_release_status=baseline_release_comparison_status(
+            reference.info, reference.values, release_info, release_values, config,
+        ),
+        output_quality=output_quality,
     )
 
 
@@ -278,6 +304,11 @@ def _analyze_run_from_mcp(config, run: dict, *, client=None):
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
+    if str(DAILY_DIR) not in sys.path:
+        sys.path.insert(0, str(DAILY_DIR))
+    from analysis.types import AnalysisConfig
+
+    defaults = AnalysisConfig()
     ap = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -322,14 +353,30 @@ def main(argv: list[str] | None = None) -> int:
         '--write-daily-html', action='store_true',
         help='Also overwrite daily.<machine>.<stamp>.html in out-dir.',
     )
+    ap.add_argument(
+        '--output-text-iou-threshold', type=float,
+        default=os.environ.get('DAILY_OUTPUT_TEXT_IOU_THRESHOLD', defaults.output_text_iou_threshold),
+        help='Output text similarity warning threshold (override: $DAILY_OUTPUT_TEXT_IOU_THRESHOLD).',
+    )
+    ap.add_argument(
+        '--output-image-ssim-threshold', type=float,
+        default=os.environ.get('DAILY_OUTPUT_IMAGE_SSIM_THRESHOLD', defaults.output_image_ssim_threshold),
+        help='Output image SSIM warning threshold (override: $DAILY_OUTPUT_IMAGE_SSIM_THRESHOLD).',
+    )
+    ap.add_argument(
+        '--output-artifact-base-url',
+        default=os.environ.get('DAILY_OUTPUT_ARTIFACT_BASE_URL', defaults.output_artifact_base_url),
+        help='HTTP base URL for archived artifacts (override: $DAILY_OUTPUT_ARTIFACT_BASE_URL).',
+    )
     args = ap.parse_args(argv)
-
-    # Ensure daily package is importable when invoked from outside the repo.
-    if str(DAILY_DIR) not in sys.path:
-        sys.path.insert(0, str(DAILY_DIR))
+    if not (0 <= args.output_text_iou_threshold <= 1 and 0 <= args.output_image_ssim_threshold <= 1):
+        ap.error('Output quality thresholds must be between 0 and 1')
+    if args.output_artifact_base_url:
+        parsed_artifact_url = urlparse(args.output_artifact_base_url)
+        if parsed_artifact_url.scheme not in {"http", "https"} or not parsed_artifact_url.netloc:
+            ap.error('--output-artifact-base-url must be an HTTP(S) URL or empty')
 
     from analysis.report import render_analysis_html
-    from analysis.types import AnalysisConfig
 
     cfg = AnalysisConfig(
         history_window=args.history_window,
@@ -337,6 +384,9 @@ def main(argv: list[str] | None = None) -> int:
         pct_threshold=args.pct_threshold,
         mcp_url=args.mcp_url,
         reference_purpose_like=args.baseline_purpose or "%timer%",
+        output_text_iou_threshold=args.output_text_iou_threshold,
+        output_image_ssim_threshold=args.output_image_ssim_threshold,
+        output_artifact_base_url=args.output_artifact_base_url,
     )
 
     print('[report] mode     : mcp-only')

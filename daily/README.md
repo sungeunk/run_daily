@@ -256,6 +256,127 @@ powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
   찍고 스킵. `--mail` 은 Linux 에서 `mail(1)` PATH 에, Windows 에서는
   릴레이 SSH 접근이 필요.
 
+## Pinned Release Baseline
+
+Per-machine analysis reports use the fixed `RELEASE_RUN_IDS` mapping in
+`analysis/remote.py`. No candidate ranking or latest-release selection runs
+during report generation. The additional `--release-purpose-like` filter may
+reject a pinned run but never chooses a replacement. Missing pins, unavailable
+data, partial runs, or excluded runs do not fall back to another release.
+
+The pins below were selected once on 2026-10-07 through the read-only
+`daily_results` MCP API, matching purpose `release 2026.4.1 sungeunk`.
+All candidates use OpenVINO `2026.4.1-22982-e213a147257-releases/2026/4`.
+There were four runs per machine; every selected run has the maximum available
+valid performance coverage for its machine.
+
+Selection used the lowest geometric mean of normalized measurements on series
+shared by all four runs: `value / best_value` for latency (`ms`, `s`) and
+`best_value / value` for throughput (`FPS`). Series match by model, precision,
+input/output tokens, execution mode, and unit. Nonpositive/nonfinite values
+were excluded. The `1st-infer` and `2nd-infer` diagnostics were excluded from
+ranking to avoid counting the same token work twice, but remain available for
+comparison. Scores are observed performance rankings, not statistical claims;
+small differences, especially on MTL-01, may be measurement noise.
+
+| Machine | Pinned run ID | Run timestamp | Shared ranking series | Score (lower is better) |
+| --- | --- | --- | ---: | ---: |
+| ARLH-01 | `30279de834dff769b37d` | 2026-10-05 21:34 | 77 | 1.012081 |
+| BMG-02 | `1b61ca5c7852f6f214fb` | 2026-10-05 10:36 | 73 | 1.003369 |
+| LNL-03 | `628790e78ba912a57cf4` | 2026-10-05 21:39 | 81 | 1.007556 |
+| LNL-04 | `8858d0ce98af522cb516` | 2026-10-05 10:24 | 81 | 1.007174 |
+| MTL-01 | `33e9b494774c17a7e3e4` | 2026-10-05 11:51 | 73 | 1.016423 |
+| PTLH-01 | `8457ade1a27346425a2d` | 2026-10-05 10:32 | 85 | 1.004132 |
+| PTLH-02 | `b51d0c2354d5cc702acb` | 2026-10-05 10:33 | 77 | 1.009268 |
+| RAPTOR-ELLY | `de945770b25dbb7c43ab` | 2026-10-05 21:03 | 81 | 1.004151 |
+
+`dg2alderlake` has no matching release run and intentionally has no pin.
+New daily series absent from a pinned release retain `n/a` comparisons.
+To adopt another release, query and review its candidates once, then explicitly
+update both `RELEASE_PURPOSE` and `RELEASE_RUN_IDS` and this selection record.
+Existing HTML files are not rewritten automatically.
+
+The HTML header shows independent `Current vs Baseline` and `Current vs Release`
+statuses. The baseline status retains its existing daily-history noise gates.
+The release status uses the configured percentage threshold (5% by default)
+without daily-history noise adjustment: functional failures are RED, any
+release-relative performance regression is YELLOW, valid comparisons without
+regressions are GREEN, and no valid comparison is GRAY. Disabling the release
+comparison hides its status. The existing `overall_status` remains the baseline
+status; the additional analysis result field is `release_status`.
+
+The third header status, `Baseline vs Release`, compares the baseline run's
+performance directly against the pinned release, using the same percentage
+threshold without daily-history noise adjustment. It uses the original baseline
+and release series, independent of current-run values or functional failures.
+Regressions are YELLOW, valid comparisons without regressions are GREEN, and
+missing or incompatible comparisons are GRAY. Disabling release comparisons
+hides this badge too. Its analysis result field is `baseline_release_status`.
+
+Focused regression check (in an environment with the daily test dependencies):
+
+```bash
+PYTHONPATH=daily python -m pytest -q --dev-only daily/tests/test_analysis_remote.py daily/tests/test_analysis_report.py
+```
+
+## Generated Output Quality
+
+Both `daily/run.py` and `scripts/generate_analysis_report.py` inspect generated
+outputs and place **Output Quality Checks** between **Failed Tests** and
+**Top Regressions**. The table lists warnings and unavailable checks, with
+current/baseline/release excerpts or embedded image previews. Output Status and
+its counts describe current-output checks only: missing current artifacts remain
+UNAVAILABLE, but missing reference artifacts or comparison metadata do not
+overwrite a successful current-output inspection. Each comparison has its own
+condition label and low-similarity warning. Quality findings are advisory and do
+not change performance status badges.
+
+- Text: empty output, replacement/control characters, repeated punctuation
+  (12 copies), repeated words/phrases (8 copies), and character 3-gram Jaccard
+  IoU after Unicode NFKC, case, and whitespace normalization.
+- Images: decode failures, nearly constant/blank or fully transparent output,
+  and RGB SSIM on previews bounded to 256 pixels per side. Different original
+  dimensions are not silently resized into comparable results.
+- Scores compare current output separately with the selected baseline and
+  pinned release. Low scores are review warnings, not proof of incorrect output.
+  Legitimate stochastic output can differ.
+- New benchmark runs retain generated text, iteration identity, and a fingerprint
+  of prompt file contents, benchmark entry script, explicit generation options,
+  and loaded configuration contents. Image matching also checks recorded image
+  dimensions, steps, and batch size. Multimodal inputs without captured media
+  fingerprints remain unavailable for similarity comparisons.
+- Historical text is recovered from the raw log section belonging to the exact
+  test command. Warm-up output stays labeled `warm-up`; it is never relabeled as
+  the fastest measured iteration. Old runs lacking input/settings fingerprints
+  receive standalone anomaly checks and reference-only similarity scores labeled
+  `Unverified conditions`. Known unequal fingerprints are labeled
+  `Different conditions`, also reference only. Neither proves a regression under
+  identical inputs. Low scores still receive a separate review warning.
+  Scores stay `N/A` only when outputs are missing or comparison cannot be computed
+  (for example, incompatible image dimensions or a missing SSIM dependency).
+  Do not infer historical prompt contents from today's prompt files.
+- Artifacts are loaded by machine and run timestamp from the local archive or
+  the configured archive URL, with size limits. Images use the staged
+  `daily.<stamp>.image.*.png` copies, not arbitrary original paths from a summary.
+  The MCP API remains the source of run selection and performance data.
+
+CLI options on both report entry points:
+
+```text
+--output-text-iou-threshold 0.3
+--output-image-ssim-threshold 0.9
+--output-artifact-base-url http://dg2fizz.ikor.intel.com:8081/daily2
+```
+
+Thresholds are in [0, 1]. Image inspection requires Pillow and SSIM requires
+scikit-image, declared in the optional `daily/requirements-output-quality.txt`
+so always-on viewer and MCP services avoid installing image-analysis packages.
+The `daily/generate_html_report.sh` wrapper installs these optional dependencies.
+Benchmark environments can install them when image quality comparison is
+needed; missing dependencies produce unavailable checks. Findings are saved
+under `analysis.output_quality` in the daily summary without duplicating preview
+data.
+
 ## 산출물
 
 모두 `--output-dir` 아래 생성 (기본: `<repo>/output`):

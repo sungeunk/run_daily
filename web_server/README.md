@@ -91,11 +91,8 @@ not depend on the machine hostname.
 Install and start it as the `sungeunk` user:
 
 ```bash
-mkdir -p ~/.config/systemd/user
-ln -sf /home/sungeunk/repo/run_daily/web_server/caddy/systemd/daily-viewer.service \
-	~/.config/systemd/user/daily-viewer.service
-systemctl --user daemon-reload
-systemctl --user enable --now daily-viewer.service
+./manage-web-services.sh install
+systemctl --user start daily-viewer.service
 systemctl --user status daily-viewer.service
 ```
 

@@ -37,11 +37,13 @@ EOF
 
 UV_BIN="${UV_BIN:-/usr/local/bin/uv}"
 REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
+OUTPUT_QUALITY_REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements-output-quality.txt"
 MACHINE="${MACHINE_NAME:-}"
 MCP_URL="${MCP_URL:-http://dg2fizz.ikor.intel.com:8090/mcp}"
 
 [[ -x "$UV_BIN" ]] || { echo "uv not found at $UV_BIN" >&2; exit 127; }
 [[ -r "$REQUIREMENTS_FILE" ]] || { echo "requirements not found at $REQUIREMENTS_FILE" >&2; exit 1; }
+[[ -r "$OUTPUT_QUALITY_REQUIREMENTS_FILE" ]] || { echo "output-quality requirements not found at $OUTPUT_QUALITY_REQUIREMENTS_FILE" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -78,6 +80,9 @@ if [[ -n "$MACHINE" ]]; then
 fi
 
 PYTHONPATH="${SCRIPT_DIR}" \
-    "$UV_BIN" run --with-requirements "$REQUIREMENTS_FILE" python "$PYTHON_SCRIPT" \
+    "$UV_BIN" run \
+    --with-requirements "$REQUIREMENTS_FILE" \
+    --with-requirements "$OUTPUT_QUALITY_REQUIREMENTS_FILE" \
+    python "$PYTHON_SCRIPT" \
     "${PYTHON_ARGS[@]}" \
     "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"

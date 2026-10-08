@@ -47,6 +47,7 @@ if str(_HERE.parent) not in sys.path:
 
 from data import read as q  # noqa: E402
 from data import write as w  # noqa: E402
+from common.urls import DEFAULT_DAILY_REPORT_BASE_URL  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Config / connection
@@ -493,8 +494,8 @@ _STATE_ICON = {"stable": "🟢", "fluctuating": "🟡",
 # Artefacts are published at
 # http://<relay>:8081/daily2/<MACHINE>/<YYYY.MM>/daily.<stamp>.*
 REPORT_BASE_URL = os.environ.get(
-    "DAILY_REPORT_BASE_URL",
-    "http://dg2fizz.ikor.intel.com:8081/daily2").rstrip("/")
+    "DAILY_REPORT_BASE_URL", DEFAULT_DAILY_REPORT_BASE_URL
+).rstrip("/")
 
 
 @st.cache_data(show_spinner=False)

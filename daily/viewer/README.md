@@ -1,4 +1,10 @@
-# Daily LLM Viewer
+# Daily LLM Viewer (Legacy Notes)
+
+> This file describes the earlier `viewer.ingest`/`/var/www/html/daily`
+> pipeline and is retained for historical schema notes. It is not the current
+> dg2fizz deployment guide. For the active Streamlit service, database path,
+> and refresh workflow, see `../../web_server/README.md` and
+> `../../web_server/wiki/docs/web_services/daily-results-mcp.md`.
 
 Pipeline: `/var/www/html/daily/<MACHINE>/daily.*.{summary.json|pickle,.report}`
 → `ingest/cli.py` → `bench.duckdb` → `streamlit run app.py`.

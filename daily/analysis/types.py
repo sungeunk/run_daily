@@ -7,7 +7,11 @@ All modules within ``daily/analysis`` import from here; nothing outside
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Literal
+from urllib.parse import urlparse
+
+from common.urls import DEFAULT_DAILY_REPORT_BASE_URL
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +44,10 @@ class AnalysisConfig:
         mcp_timeout_sec:     Per-request timeout for the MCP calls.
         reference_purpose_like: SQL LIKE pattern matched against
                              ``runs.purpose`` to recognise a scheduled run.
-        release_enabled:     When True, also show the newest release build as
+        release_enabled:     When True, also show the pinned release build as
                              a third column next to the reference.
-        release_purpose_like: SQL LIKE pattern that recognises a release run.
+        release_purpose_like: Additional SQL LIKE filter on the pinned release;
+                     never selects a different run when it mismatches.
     """
 
     pct_threshold: float = 0.05
@@ -59,6 +64,19 @@ class AnalysisConfig:
     reference_purpose_like: str = "%timer%"
     release_enabled: bool = True
     release_purpose_like: str = "%release%"
+    output_text_iou_threshold: float = 0.3
+    output_image_ssim_threshold: float = 0.9
+    output_artifact_base_url: str = DEFAULT_DAILY_REPORT_BASE_URL
+
+    def __post_init__(self) -> None:
+        for name in ("output_text_iou_threshold", "output_image_ssim_threshold"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError("Output quality thresholds must be between 0 and 1")
+        if self.output_artifact_base_url:
+            parsed = urlparse(self.output_artifact_base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("output_artifact_base_url must be an HTTP(S) URL or empty")
 
 
 # ---------------------------------------------------------------------------
@@ -255,3 +273,31 @@ class AnalysisResult:
     release: ReleaseInfo | None = None
     last_known_good: BaselineInfo | None = None
     bisect_delta: BisectDelta | None = None
+    release_status: OverallStatus | None = None
+    baseline_release_status: OverallStatus | None = None
+    output_quality: OutputQualityResult | None = None
+
+
+@dataclass
+class OutputQualityRow:
+    model: str
+    precision: str
+    prompt: str
+    kind: str
+    status: Literal["pass", "warning", "unavailable"]
+    reasons: list[str] = field(default_factory=list)
+    baseline_score: float | None = None
+    release_score: float | None = None
+    current_preview: str = ""
+    baseline_preview: str = ""
+    release_preview: str = ""
+    baseline_comparison: Literal["verified", "unverified", "different", "unavailable"] = "unavailable"
+    release_comparison: Literal["verified", "unverified", "different", "unavailable"] = "unavailable"
+    baseline_warning: bool = False
+    release_warning: bool = False
+
+
+@dataclass
+class OutputQualityResult:
+    rows: list[OutputQualityRow] = field(default_factory=list)
+    detail: str = ""

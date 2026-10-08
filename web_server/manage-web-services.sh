@@ -24,7 +24,7 @@ Commands:
   restart       Restart all registered services.
   status        Show the status of all registered services.
   build-wiki    Build the Wiki and reload Caddy after success.
-    all           Install services, restart them, and build the Wiki.
+    all           Install services, restart upgraded app services, and build the Wiki.
   -h, --help    Show this help message.
 
 Services:

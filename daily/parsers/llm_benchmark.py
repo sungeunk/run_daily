@@ -248,6 +248,8 @@ def parse_json_report(report_json_path: Path | str) -> list[LlmDataItem]:
             'out_token': best_row.get('infer_count', best_row.get('output_size', 0)),
             'perf': best_perf,
         }
+        if isinstance(best_row.get('generated_text'), str):
+            item['generated_text'] = best_row['generated_text']
         infer_perf = _row_values(best_row, INFER_PERF_FIELDS)
         if infer_perf:
             item['infer_perf'] = infer_perf

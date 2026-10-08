@@ -27,6 +27,7 @@ from common.config import DailyConfig
 from common.fs_utils import convert_path
 from common.llm_benchmark_skip import get_skip_reason
 from common.machine_monitor import summarize_window
+from common.output_capture import generated_texts, generation_fingerprint
 from data import expected_series_for_llm
 from parsers.llm_benchmark import parse_json_report, phase_windows
 
@@ -169,6 +170,12 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
     json_report_path = output_dir / f'llm_bench_{case.test_id}_{timestamp}.json'
     
     cmd = _build_cmd(daily_config, case, json_report_path)
+    output_fingerprint = generation_fingerprint(
+        _prompt_path(daily_config, case), str(daily_config.llm_bench_script),
+        {"out_tokens": daily_config.out_token_length, "iterations": daily_config.benchmark_iter_num,
+         "chat_template": case.apply_chat_template, "task": case.task, "prompt_permutation": False},
+        str(daily_config.wa_config_path),
+    )
     # Attach metadata even on failure so the report builder can still render
     # a row for this case. We overwrite with the full payload on success.
     record_metrics({
@@ -218,6 +225,8 @@ def test_llm_benchmark(case: BenchmarkCase, daily_config: DailyConfig,
         'duration_sec': result.duration_sec,
         'machine': result.machine,
         'machine_phases': machine_phases,
+        'generation_fingerprint': output_fingerprint,
+        'generated_outputs': generated_texts(result.output),
         'data': data,
         'raw_report': raw_report,
     })

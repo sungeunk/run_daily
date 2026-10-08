@@ -3,7 +3,8 @@
 Usage::
 
     # Scan a directory and ingest whatever it finds.
-    python -m data.ingest.cli --root /var/www/html/daily --db bench.duckdb
+    python -m data.ingest.cli --root /mnt/hdd/daily/data \
+        --db /mnt/hdd/daily/db/daily_llm_benchmark.duckdb
 
     # Single file.
     python -m data.ingest.cli --input output/daily.20260421_2234.summary.json

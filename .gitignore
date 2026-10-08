@@ -9,4 +9,5 @@ logs/
 *.duckdb.wal
 daily_output/
 daily/fleet_report.json
+daily/generate_fleet_report.py.bak.*
 .workspace/

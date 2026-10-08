@@ -32,6 +32,7 @@ import sys
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 DAILY_DIR = Path(__file__).resolve().parent
@@ -560,7 +561,30 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
                    default=os.environ.get('DAILY_RELEASE_PURPOSE_LIKE',
                                           release_defaults.release_purpose_like),
                    help="SQL LIKE pattern matched against runs.purpose to find release runs")
-    return p.parse_known_args()
+    p.add_argument(
+        '--output-text-iou-threshold', type=float,
+        default=os.environ.get('DAILY_OUTPUT_TEXT_IOU_THRESHOLD', release_defaults.output_text_iou_threshold),
+        help='Output text similarity warning threshold (override: $DAILY_OUTPUT_TEXT_IOU_THRESHOLD).',
+    )
+    p.add_argument(
+        '--output-image-ssim-threshold', type=float,
+        default=os.environ.get('DAILY_OUTPUT_IMAGE_SSIM_THRESHOLD', release_defaults.output_image_ssim_threshold),
+        help='Output image SSIM warning threshold (override: $DAILY_OUTPUT_IMAGE_SSIM_THRESHOLD).',
+    )
+    p.add_argument(
+        '--output-artifact-base-url',
+        default=os.environ.get('DAILY_OUTPUT_ARTIFACT_BASE_URL', release_defaults.output_artifact_base_url),
+        help='HTTP base URL for archived artifacts (override: $DAILY_OUTPUT_ARTIFACT_BASE_URL).',
+    )
+    args, remaining = p.parse_known_args()
+    if not (0 <= args.output_text_iou_threshold <= 1 and 0 <= args.output_image_ssim_threshold <= 1):
+        p.error('Output quality thresholds must be between 0 and 1')
+    artifact_url = args.output_artifact_base_url
+    if artifact_url:
+        parsed = urlparse(artifact_url)
+        if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+            p.error('--output-artifact-base-url must be an HTTP(S) URL or empty')
+    return args, remaining
 
 
 def _image_assets(staged_images: dict[str, Path], root: Path,
@@ -622,12 +646,16 @@ def _analysis_config(args: argparse.Namespace):
         from analysis.types import AnalysisConfig
     except ImportError:
         return None
+    defaults = AnalysisConfig()
 
     return AnalysisConfig(
         mcp_url=args.mcp_url,
         reference_purpose_like=args.reference_purpose_like,
         release_enabled=args.release,
         release_purpose_like=args.release_purpose_like,
+        output_text_iou_threshold=getattr(args, 'output_text_iou_threshold', defaults.output_text_iou_threshold),
+        output_image_ssim_threshold=getattr(args, 'output_image_ssim_threshold', defaults.output_image_ssim_threshold),
+        output_artifact_base_url=getattr(args, 'output_artifact_base_url', defaults.output_artifact_base_url),
     )
 
 
@@ -659,7 +687,6 @@ def _run_analysis(html_report: Path, summary_json: Path, root: Path,
         from data.ingest.cli import discover, ingest_files
         from analysis.engine import analyze_run
         from analysis.report import write_analysis_html
-        from analysis.persistence import write_analysis_to_summary
 
         files = discover(root, fmt='auto')
         if files:
@@ -677,7 +704,6 @@ def _run_analysis(html_report: Path, summary_json: Path, root: Path,
 
         result = analyze_run(summary_json, db_path, analysis_config)
         _warn_on_mcp_failure(result)
-        write_analysis_to_summary(summary_json, result)
 
         summary_data = json.loads(summary_json.read_text(encoding='utf-8'))
         image_assets = _image_assets(staged_images or {}, root,

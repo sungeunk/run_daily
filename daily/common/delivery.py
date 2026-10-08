@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from common.paths import machine_name, relative_dir
+from common.urls import DEFAULT_BACKUP_HOST, DEFAULT_DAILY_REPORT_BASE_URL
 
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,6 @@ log = logging.getLogger(__name__)
 # Default target server. The legacy scripts used the same host for both
 # publishing (``http://...``) and scp'ing (bare hostname), so we keep one
 # source of truth here and derive both from it.
-DEFAULT_BACKUP_HOST = 'dg2fizz.ikor.intel.com'
 DEFAULT_BACKUP_USER = 'sungeunk'
 
 # Sender shown in the mail client. Overridable with ``DAILY_MAIL_FROM``.
@@ -81,10 +81,17 @@ def stage_report_images(summary: dict, output_dir: Path, stamp: str
     """
     staged: dict[str, Path] = {}
     for test in summary.get('tests', []):
-        metrics = test.get('metrics') or {}
-        if metrics.get('test_type') != 'image_generation':
+        if not isinstance(test, dict) or test.get('outcome') == 'skipped':
             continue
-        for idx, entry in enumerate(metrics.get('data') or []):
+        metrics = test.get('metrics') or {}
+        if not isinstance(metrics, dict) or metrics.get('test_type') != 'image_generation':
+            continue
+        entries = metrics.get('data')
+        if not isinstance(entries, list):
+            continue
+        for idx, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                continue
             source = entry.get('image_path')
             if not source or source in staged:
                 continue
@@ -295,11 +302,8 @@ def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     relay exposes it at ``http://<host>:8081/daily2/<node>/<YYYY.MM>/<file>``.
     """
     if base_url is None:
-        base_url = os.environ.get('DAILY_REPORT_BASE_URL') or (
-            f'http://{_resolve_host(None)}:8081'
-        )
-    return (f'{base_url.rstrip("/")}/daily2/'
-            f'{backup_relative_dir(filename)}/{filename}')
+        base_url = os.environ.get('DAILY_REPORT_BASE_URL') or DEFAULT_DAILY_REPORT_BASE_URL
+    return f'{base_url.rstrip("/")}/{backup_relative_dir(filename)}/{filename}'
 
 
 def jenkins_console_url() -> str:

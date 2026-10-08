@@ -6,8 +6,46 @@ from pathlib import Path
 import pytest
 
 from parsers.llm_benchmark import parse_json_report
+from common.output_capture import generated_texts, generation_fingerprint
 
 pytestmark = pytest.mark.dev_only
+
+
+def test_generated_outputs_keep_newlines_iterations_and_eof() -> None:
+    records = generated_texts(
+        "[ INFO ] [warm-up][P0] Generated: First\nsecond line\n"
+        "[ INFO ] [1][P0] Generated: Actual\nlast line"
+    )
+    assert records == [
+        {"prompt_idx": 0, "iteration": "warm-up", "generated_text": "First\nsecond line", "truncated": False},
+        {"prompt_idx": 0, "iteration": "1", "generated_text": "Actual\nlast line", "truncated": False},
+    ]
+
+
+def test_generation_fingerprint_tracks_inputs(tmp_path: Path) -> None:
+    prompt = tmp_path / "prompt.jsonl"
+    script = tmp_path / "bench.py"
+    prompt.write_text('{"prompt": "hello"}\n', encoding="utf-8")
+    script.write_text("pass\n", encoding="utf-8")
+    original = generation_fingerprint(str(prompt), str(script), {"seed": 42})
+    assert original
+    assert original == generation_fingerprint(str(prompt), str(script), {"seed": 42})
+    assert original != generation_fingerprint(str(prompt), str(script), {"seed": 43})
+    prompt.write_text('{"prompt": "changed"}\n', encoding="utf-8")
+    assert original != generation_fingerprint(str(prompt), str(script), {"seed": 42})
+    prompt.write_text('{"prompt": "hello", "image": "unknown.png"}\n', encoding="utf-8")
+    assert generation_fingerprint(str(prompt), str(script), {}) is None
+    assert generation_fingerprint("missing.jsonl", str(script), {}) is None
+
+
+@pytest.mark.parametrize("text", ["Normal generated answer.", "", "!!!!!!!!!!!!"])
+def test_parse_json_report_preserves_selected_text(tmp_path: Path, text: str) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({"perfdata": {"results": [
+        {"iteration": 1, "prompt_idx": 0, "first_latency": 10.0, "generated_text": text},
+        {"iteration": 2, "prompt_idx": 0, "first_latency": 20.0, "generated_text": "other"},
+    ]}}), encoding="utf-8")
+    assert parse_json_report(report_path)[0]["generated_text"] == text
 
 
 def test_parse_json_report_uses_fastest_iteration(tmp_path: Path) -> None:

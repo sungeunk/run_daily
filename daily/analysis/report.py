@@ -263,6 +263,63 @@ def _mcp_banner(result: AnalysisResult) -> str:
     )
 
 
+def _render_output_quality(result: AnalysisResult) -> str:
+    quality = result.output_quality
+    rows = quality.rows if quality else []
+    counts = {status: sum(row.status == status for row in rows) for status in ("pass", "warning", "unavailable")}
+    detail = quality.detail if quality else "Output quality checks were not run."
+    table_rows: list[str] = []
+    comparison_warnings = sum(row.baseline_warning + row.release_warning for row in rows)
+    for row in rows:
+        if row.status == "pass" and not row.reasons and not row.baseline_warning and not row.release_warning:
+            continue
+        previews: list[str] = []
+        for label, preview in (("Current", row.current_preview), ("Baseline", row.baseline_preview), ("Release", row.release_preview)):
+            if not preview:
+                continue
+            if row.kind == "image" and preview.startswith("data:image/jpeg;base64,"):
+                content = f'<img alt="{label} output" src="{html.escape(preview, quote=True)}" width="128" style="max-width:100%;height:auto" />'
+            else:
+                content = f'<pre style="white-space:pre-wrap;overflow-wrap:anywhere;max-width:420px;margin:4px 0">{html.escape(preview)}</pre>'
+            previews.append(f'<details><summary>{label}</summary>{content}</details>')
+        metric = "IoU" if row.kind == "text" else "SSIM"
+        score_cells: list[str] = []
+        for label in ("baseline", "release"):
+            score = getattr(row, f"{label}_score")
+            condition = getattr(row, f"{label}_comparison")
+            low_similarity = getattr(row, f"{label}_warning")
+            condition_text = {
+                "verified": "Matched conditions",
+                "unverified": "Unverified conditions; reference only",
+                "different": "Different conditions; reference only",
+                "unavailable": "Comparison unavailable",
+            }.get(condition, "Comparison unavailable")
+            measurement = f"{score:.3f}" if score is not None else "N/A"
+            warning_text = '<div style="color:#a05a00">Low similarity</div>' if low_similarity else ""
+            score_cells.append(
+                f'<td data-comparison-condition="{condition}">{metric} {measurement}'
+                f'<div class="muted" style="font-size:11px">{condition_text}</div>{warning_text}</td>'
+            )
+        reason = "<br>".join(html.escape(item) for item in row.reasons)
+        table_rows.append(
+            f'<tr data-quality-status="{row.status}"><td>{html.escape(row.model)}<br>{html.escape(row.precision)}</td>'
+            f'<td>{html.escape(row.prompt)}</td><td>{html.escape(row.kind)}</td><td>{row.status.upper()}</td>'
+            f'{"".join(score_cells)}'
+            f'<td style="overflow-wrap:anywhere">{reason}</td><td>{"".join(previews)}</td></tr>'
+        )
+    if not table_rows:
+        message = detail or ("No output quality warnings in inspected outputs." if rows else "No outputs available; quality not verified.")
+        table_rows.append(f'<tr><td colspan="8">{html.escape(message)}</td></tr>')
+    return (
+        '<section style="margin:18px 0" id="output-quality-checks"><h2>Output Quality Checks</h2>'
+        f'<div class="muted" style="margin-bottom:8px">Output checks: {len(rows)} | PASS: {counts["pass"]} | '
+        f'WARNING: {counts["warning"]} | UNAVAILABLE: {counts["unavailable"]} | Low similarity: {comparison_warnings}</div>'
+        '<div style="overflow-x:auto"><table><thead><tr><th>Model / Precision</th><th>Prompt / Iteration</th>'
+        '<th>Output</th><th>Output Status</th><th>vs Baseline</th><th>vs Release</th><th>Findings</th><th>Preview</th>'
+        f'</tr></thead><tbody>{"".join(table_rows)}</tbody></table></div></section>'
+    )
+
+
 def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
                          image_assets: dict[str, dict] | None = None,
                          baseline_meta: dict | None = None) -> str:
@@ -279,6 +336,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
 
     image_gallery = _render_image_gallery(summary, image_assets,
                                           result.baseline.stamp)
+    output_quality_table = _render_output_quality(result)
 
     improved_rows = sorted(
         [r for r in result.rows if r.verdict == "improved" and r.improvement_pct is not None],
@@ -321,7 +379,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             release_text = (f"{rel.stamp or ''} / {rel.ov_version or 'unknown'} "
                             f"({rel.matched_count} series)")
         elif rel.status == "not_found":
-            release_text = "no release run published yet"
+            release_text = rel.detail or "no release run published yet"
         else:
             release_text = f"unavailable ({rel.detail or 'query failed'})"
         release_row = f'<tr><td class="k">Release</td><td>{html.escape(release_text)}</td></tr>'
@@ -345,12 +403,24 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             "Environment matches the baseline run.</div>"
         )
 
-    badge = {
+    badges = {
         "green":  ("GREEN",  "#18794e"),
         "yellow": ("YELLOW", "#a05a00"),
         "red":    ("RED",    "#b42318"),
         "gray":   ("GRAY",   "#475467"),
-    }.get(result.overall_status, (result.overall_status.upper(), "#475467"))
+    }
+    badge = badges.get(result.overall_status, (result.overall_status.upper(), "#475467"))
+    release_status_html = "".join(
+        '<div class="comparison-status">'
+        f'<div class="muted" style="font-size:12px;margin-bottom:4px">{label}</div>'
+        f'<span class="badge" data-comparison="{comparison}" data-status="{status}" '
+        f'style="background:{badges.get(status, (str(status).upper(), "#475467"))[1]};font-size:16px;padding:6px 18px">'
+        f'{badges.get(status, (str(status).upper(), "#475467"))[0]}</span></div>'
+        for label, comparison, status in (
+            ("Current vs Release", "release", result.release_status or "gray"),
+            ("Baseline vs Release", "baseline-release", result.baseline_release_status or "gray"),
+        )
+    ) if rel is None or rel.status != "disabled" else ""
 
     generated_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -541,7 +611,13 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             <h1>Daily Analysis Report</h1>
             <div class="muted" style="font-size:12px">Generated {generated_at}</div>
         </div>
-        <span class="badge" style="background:{badge[1]};font-size:16px;padding:6px 18px">{badge[0]}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:16px">
+            <div class="comparison-status">
+                <div class="muted" style="font-size:12px;margin-bottom:4px">Current vs Baseline</div>
+                <span class="badge" data-comparison="baseline" data-status="{result.overall_status}" style="background:{badge[1]};font-size:16px;padding:6px 18px">{badge[0]}</span>
+            </div>
+            {release_status_html}
+        </div>
     </div>
 
     {mcp_banner}
@@ -595,6 +671,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             </table>
         </div>
     </div>
+
+    {output_quality_table}
 
     <!-- Top Regressions -->
     <div class="card" style="margin-bottom:14px">

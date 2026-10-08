@@ -70,7 +70,13 @@ def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:
 @pytest.mark.parametrize('case', CASES, ids=lambda c: c.test_id)
 def test_benchmark_image_generation(case: ImageGenCase, daily_config: DailyConfig,
                                     run_subprocess, record_metrics):
+    from common.output_capture import generation_fingerprint
+
     cmd = _build_cmd(daily_config, case)
+    output_fingerprint = generation_fingerprint(
+        _prompt_path(daily_config, case), str(daily_config.llm_bench_script),
+        {"prompt_index": case.prompt_index, "iterations": 1, "genai": True},
+    )
     record_metrics({
         'test_type': 'image_generation',
         'model': case.model,
@@ -91,6 +97,7 @@ def test_benchmark_image_generation(case: ImageGenCase, daily_config: DailyConfi
         'returncode': result.returncode,
         'duration_sec': result.duration_sec,
         'machine': result.machine,
+        'generation_fingerprint': output_fingerprint,
         'data': data,
     })
 

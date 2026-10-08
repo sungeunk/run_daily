@@ -246,6 +246,8 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
     b = result.baseline
     payload = {
         "overall_status": result.overall_status,
+        "release_status": result.release_status,
+        "baseline_release_status": result.baseline_release_status,
         "baseline": {
             "status": b.status,
             "run_id": b.run_id,
@@ -302,6 +304,15 @@ def _result_to_dict(result: AnalysisResult, config: "AnalysisConfig | None" = No
             "source_url": rel.source_url,
             "matched_count": rel.matched_count,
             "detail": rel.detail,
+        }
+
+    if result.output_quality is not None:
+        payload["output_quality"] = {
+            "detail": result.output_quality.detail,
+            "rows": [
+                {key: value for key, value in asdict(row).items() if not key.endswith("_preview")}
+                for row in result.output_quality.rows
+            ],
         }
 
     # Include config snapshot for reproducibility

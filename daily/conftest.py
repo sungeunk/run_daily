@@ -46,6 +46,9 @@ from common.profiling import HWResourceTracker, ResourceStats, sizeof_fmt
 DEV_ONLY_TEST_FILES = frozenset({
     'test_analysis_report.py',
     'test_analysis_remote.py',
+    'test_analysis_engine.py',
+    'test_generate_analysis_report.py',
+    'test_output_quality.py',
     'test_data_layering.py',
     'test_data_semantics.py',
     'test_delivery.py',
