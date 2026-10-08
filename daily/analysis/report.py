@@ -453,7 +453,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         ("In / Out",   "Input token count / Output token count used in the benchmark run"),
         ("Mode",       "Execution mode: 'latency' = single-request, 'throughput' = concurrent batches"),
         ("Current",    "Measured value from today's run (unit shown alongside the number)"),
-        ("Reference",  "Value of the most recent timer-scheduled run on this machine"),
+        ("Reference",  "Value of the most recent successful timer-scheduled run with performance data on this machine"),
         ("Delta",      "Relative change vs reference (+% = improved, -% = regressed). "
                        "Grayed-out 'fluct' badge means the delta is within historical noise — treated as same."),
         ("Release",    "Value of the newest published release build for this machine, read from the "
@@ -467,7 +467,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         ("CV",         "Coefficient of Variation = σ / mean.  ≤5% (green) = stable, "
                        "5–10% (orange) = moderate noise, >10% (red) = high noise — be cautious with verdicts"),
         ("Ref Source", "How the reference value was chosen: "
-                       "'baseline' = latest timer-scheduled run, "
+                       "'baseline' = latest successful timer-scheduled run with performance data, "
                        "'no_baseline' / 'unit_mismatch' = nothing comparable was found"),
     ]
     if not show_release:
@@ -635,7 +635,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     <div class="card" style="margin-bottom:14px">
         <h2>Analysis Methodology</h2>
         <div style="font-size:13px;line-height:1.65;color:#374151">
-            <b>Reference</b> = the latest earlier timer-scheduled run on the same machine, matched by model, precision, input/output tokens, and mode. Historical runs provide noise statistics; they do not replace a missing reference.<br>
+            <b>Reference</b> = the latest earlier successful timer-scheduled run with performance data on the same machine, matched by model, precision, input/output tokens, and mode. Historical runs provide noise statistics; they do not replace a missing reference.<br>
             <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
             <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
         </div>

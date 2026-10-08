@@ -51,7 +51,7 @@ def _run_sql(config: AnalysisConfig, sql: str, client=None) -> list[dict]:
 
 
 def fetch_reference(config: AnalysisConfig, rec: "RunRecord", *, client=None) -> ReferenceResult:
-    """Return the newest scheduled run older than *rec*, plus its history.
+    """Return the newest successful scheduled run older than *rec*, plus its history.
 
     Paged queries pull the last ``config.history_window`` scheduled runs;
     the newest of them is the reference and all of them feed the sigma/CV
@@ -80,7 +80,7 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord", *, client=None) ->
                 status="not_found",
                 machine=machine,
                 source_url=url,
-                detail=(f"no earlier run on {machine} with purpose like "
+                detail=(f"no earlier successful run with performance data on {machine} with purpose like "
                         f"{config.reference_purpose_like!r}"),
             )
         )
@@ -102,7 +102,7 @@ def fetch_reference(config: AnalysisConfig, rec: "RunRecord", *, client=None) ->
         ov_version=newest.get("ov_version") or None,
         machine=newest.get("machine") or machine,
         source_url=url,
-        selection_reason=(f"newest of {len(run_ids)} run(s) on {machine} with purpose like "
+        selection_reason=(f"newest of {len(run_ids)} successful run(s) on {machine} with purpose like "
                           f"{config.reference_purpose_like!r} (daily_results)"),
     )
     return ReferenceResult(info, values, history)
@@ -185,6 +185,9 @@ def _reference_runs_sql(config: AnalysisConfig, rec: "RunRecord") -> str:
         f"WHERE machine = {_quote(rec.machine)} "
         f"AND lower(COALESCE(purpose, '')) LIKE lower({_quote(config.reference_purpose_like)}) "
         "AND NOT is_partial AND NOT excluded "
+        "AND total_tests > 0 AND passed_tests > 0 AND COALESCE(failed_tests, 0) = 0 "
+        "AND COALESCE(error_tests, 0) = 0 "
+        "AND EXISTS (SELECT 1 FROM perf WHERE perf.run_id = runs_with_flags.run_id) "
         f"{ts_clause}"
         f"ORDER BY ts DESC LIMIT {int(config.history_window)}"
     )

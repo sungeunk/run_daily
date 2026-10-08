@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 from analysis.engine import _aggregate_performance, _fetch_comparison_rows
-from analysis.remote import _fetch_perf_rows, fetch_reference, fetch_release
+from analysis.remote import _fetch_perf_rows, _reference_runs_sql, fetch_reference, fetch_release
 from analysis.types import AnalysisConfig
 from common.mcp_client import McpError
 
@@ -37,6 +37,42 @@ def _query(connection: duckdb.DuckDBPyConnection, sql: str) -> list[dict]:
     cursor = connection.execute(sql)
     columns = [column[0] for column in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchmany(500)]
+
+
+def test_reference_skips_failed_and_empty_timer_runs(
+    perf_db: duckdb.DuckDBPyConnection,
+) -> None:
+    perf_db.execute(
+        "CREATE TABLE runs_with_flags (run_id VARCHAR, machine VARCHAR, ts TIMESTAMP, "
+        "ov_version VARCHAR, purpose VARCHAR, is_partial BOOLEAN, excluded BOOLEAN, "
+        "total_tests INTEGER, passed_tests INTEGER, failed_tests INTEGER, error_tests INTEGER)"
+    )
+    perf_db.execute(
+        "INSERT INTO runs_with_flags VALUES "
+        "('good', 'machine', '2026-10-06 23:42:00', 'good-version', 'daily_pipeline timer', false, false, 37, 37, 0, 0), "
+        "('empty', 'machine', '2026-10-07 12:00:00', 'empty-version', 'daily_pipeline timer', false, false, 37, 37, 0, 0), "
+        "('skipped', 'machine', '2026-10-07 18:00:00', 'skipped-version', 'daily_pipeline timer', false, false, 37, 0, 0, 0), "
+        "('failed', 'machine', '2026-10-07 23:50:00', 'failed-version', 'daily_pipeline timer', false, false, 37, 13, 24, 0), "
+        "('manual', 'machine', '2026-10-08 08:00:00', 'manual-version', 'daily sungeunk', false, false, 37, 37, 0, 0)"
+    )
+    perf_db.execute(
+        "INSERT INTO perf VALUES "
+        "('good', 'model', 'FP16', 1024, 256, '2nd', 'ms', 10.0), "
+        "('skipped', 'model', 'FP16', 1024, 256, '2nd', 'ms', 15.0), "
+        "('failed', 'model', 'FP16', 1024, 256, '2nd', 'ms', 20.0), "
+        "('manual', 'model', 'FP16', 1024, 256, '2nd', 'ms', 30.0)"
+    )
+    config = AnalysisConfig()
+    record = SimpleNamespace(machine="machine", ts=datetime(2026, 10, 8, 9, 35))
+
+    class Client:
+        def run_sql(self, sql: str) -> list[dict]:
+            return _query(perf_db, sql)
+
+    assert [row["run_id"] for row in _query(perf_db, _reference_runs_sql(config, record))] == ["good"]
+    reference = fetch_reference(config, record, client=Client())
+    assert reference.info.run_id == "good"
+    assert reference.values[("model", "FP16", 1024, 256, "2nd")] == (10.0, "ms")
 
 
 @pytest.mark.parametrize("count", [0, 1, 199, 200, 201, 500, 600, 632])
