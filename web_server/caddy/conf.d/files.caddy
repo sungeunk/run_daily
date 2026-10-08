@@ -9,22 +9,14 @@
     header @parquet Content-Disposition "attachment"
 
     route {
-        @private path_regexp private (?i)^/(daily2?|benchmarking_datasets|model_cache_server)/(.*/)?(ingest_db[.]sh|[.]ingest[.]lock|[^/]*[.]duckdb[^/]*)(/.*)?$
+        @private path_regexp private (?i)^/(daily|benchmarking_datasets|model_cache_server)/(.*/)?(ingest_db[.]sh|[.]ingest[.]lock|[^/]*[.]duckdb[^/]*)(/.*)?$
         respond @private 404
 
         redir /daily /daily/ 308
-        redir /daily2 /daily2/ 308
         redir /benchmarking_datasets /benchmarking_datasets/ 308
         redir /model_cache_server /model_cache_server/ 308
 
         handle_path /daily/* {
-            root * /mnt/hdd/daily/data
-            file_server browse {
-                hide *[dD][uU][cC][kK][dD][bB]* [.][iI][nN][gG][eE][sS][tT].[lL][oO][cC][kK] [iI][nN][gG][eE][sS][tT]_[dD][bB].[sS][hH]
-            }
-        }
-
-        handle_path /daily2/* {
             root * /mnt/hdd/daily/data
             file_server browse {
                 hide *[dD][uU][cC][kK][dD][bB]* [.][iI][nN][gG][eE][sS][tT].[lL][oO][cC][kK] [iI][nN][gG][eE][sS][tT]_[dD][bB].[sS][hH]
@@ -43,6 +35,10 @@
             file_server browse {
                 hide *[dD][uU][cC][kK][dD][bB]* [.][iI][nN][gG][eE][sS][tT].[lL][oO][cC][kK] [iI][nN][gG][eE][sS][tT]_[dD][bB].[sS][hH]
             }
+        }
+
+        handle {
+            respond 404
         }
     }
 }

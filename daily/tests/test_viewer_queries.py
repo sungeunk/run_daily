@@ -1140,7 +1140,7 @@ class TestAnalysisIngest:
 
         assert len(digest["top_regressions"]) == 2
         assert digest["machines"][0]["html_report_url"] == (
-            "http://reports.local/daily2/TEST-01/2026.09/daily.20260913_2342.html"
+            "http://reports.local/daily/TEST-01/2026.09/daily.20260913_2342.html"
         )
 
     def test_digest_resolves_last_good_html_report_for_issue(self, db: Path):
@@ -1168,7 +1168,7 @@ class TestAnalysisIngest:
         issue = digest["functional_issues"][0]
         assert issue["last_good_run_id"] == "last-good"
         assert issue["last_good_html_report_url"] == (
-            "http://reports.local/daily2/TEST-01/2025.12/daily.20251231_2358.html"
+            "http://reports.local/daily/TEST-01/2025.12/daily.20251231_2358.html"
         )
 
 

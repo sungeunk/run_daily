@@ -352,7 +352,7 @@ not change performance status badges.
   `Unverified conditions`. Known unequal fingerprints are labeled
   `Different conditions`, also reference only. Neither proves a regression under
   identical inputs. Low scores still receive a separate review warning.
-  Scores stay `N/A` only when outputs are missing or comparison cannot be computed
+  Scores show `Not evaluated` with a specific reason when outputs are missing or comparison cannot be computed
   (for example, incompatible image dimensions or a missing SSIM dependency).
   Do not infer historical prompt contents from today's prompt files.
 - Artifacts are loaded by machine and run timestamp from the local archive or
@@ -365,15 +365,23 @@ CLI options on both report entry points:
 ```text
 --output-text-iou-threshold 0.3
 --output-image-ssim-threshold 0.9
---output-artifact-base-url http://dg2fizz.ikor.intel.com:8081/daily2
+--output-artifact-base-url http://dg2fizz.ikor.intel.com:8081/daily
 ```
 
 Thresholds are in [0, 1]. Image inspection requires Pillow and SSIM requires
-scikit-image, declared in the optional `daily/requirements-output-quality.txt`
-so always-on viewer and MCP services avoid installing image-analysis packages.
-The `daily/generate_html_report.sh` wrapper installs these optional dependencies.
-Benchmark environments can install them when image quality comparison is
-needed; missing dependencies produce unavailable checks. Findings are saved
+scikit-image, declared in `daily/requirements-output-quality.txt` and included by
+`daily/requirements.txt` so normal benchmark installations also compute SSIM.
+Existing benchmark environments must reinstall the daily requirements to pick
+up these dependencies; missing dependencies produce unavailable comparisons.
+Output Quality Checks combines text and image findings and lists only outputs
+whose status is not PASS, even when a PASS output has comparison warnings or
+missing reference data. The section is hidden when all inspected outputs pass.
+Web and email previews show up to 200 leading text characters or a 128px image
+directly, without links or folding. Each result has a full-width preview row below
+it, with Current, Baseline, and Release side by side in equal-width table cells.
+On screens up to 640px wide, previews stack vertically. Email thumbnails use inline CID attachments;
+image-bearing mail requires MIME-capable sendmail delivery (local on Linux or via
+the Windows SSH relay). Text is not extracted into separate files. Findings are saved
 under `analysis.output_quality` in the daily summary without duplicating preview
 data.
 

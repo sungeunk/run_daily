@@ -2,7 +2,7 @@
 """Artefact layout rules shared by the local output tree and the relay backup.
 
 A run's files live under ``<machine>/<YYYY.MM>`` on both sides, so the same
-relative path resolves locally and at ``http://<relay>/daily2/...``. The month
+relative path resolves locally and at ``http://<relay>:8081/daily/...``. The month
 comes from the run stamp rather than the wall clock, so a re-publish lands in
 the month the run happened.
 """

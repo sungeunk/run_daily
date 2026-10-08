@@ -153,7 +153,7 @@ def test_render_fleet_html_links_raw_log_from_dg2fizz_storage() -> None:
     rendered = render_fleet_html(digest, "http://viewer.local", "http://dg2fizz:8081")
 
     assert (
-        'href="http://dg2fizz:8081/daily2/LNL-03/2026.09/'
+        'href="http://dg2fizz:8081/daily/LNL-03/2026.09/'
         'daily.20260901_1143.raw"' in rendered
     )
 
@@ -278,7 +278,7 @@ def test_render_fleet_html_supports_pr_title_and_raw_logs() -> None:
     assert "PR#38312 onednn 3.14 sungeunk" in rendered
     assert "Artifacts</th>" in rendered
     assert "Raw log</a>" in rendered
-    assert "http://reports.local/daily2/PTLH-02/2026.09/daily.20260922_1540.raw" in rendered
+    assert "http://reports.local/daily/PTLH-02/2026.09/daily.20260922_1540.raw" in rendered
 
 
 def test_render_fleet_html_appends_to_existing_viewer_query() -> None:

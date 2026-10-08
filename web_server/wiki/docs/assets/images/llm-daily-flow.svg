@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1320" viewBox="0 0 1800 1320" role="img" aria-labelledby="title description">
+  <title id="title">LLM daily infrastructure and artifact flow</title>
+  <desc id="description">Jenkins on dg2ubuntu dispatches LLM tests to daily machines. Each machine generates run artifacts and, with --backup, uploads them by SFTP to dg2fizz. Caddy serves these artifacts. A separate ingest refresh updates the central DuckDB used by Streamlit and the read-only MCP service. Retained database backup scheduling is not verified.</desc>
+  <defs>
+    <marker id="arrow-control" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/></marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#087f6d"/></marker>
+    <style>
+      text { font-family: "DejaVu Sans", sans-serif; fill: #202b36; letter-spacing: 0; }
+      .title { font-size: 34px; font-weight: 700; }
+      .heading { font-size: 23px; font-weight: 700; }
+      .body { font-size: 19px; }
+      .small { font-size: 17px; fill: #4b5a65; }
+      .mono { font-family: "DejaVu Sans Mono", monospace; font-size: 17px; font-weight: 700; fill: #174d42; }
+      .endpoint { font-family: "DejaVu Sans Mono", monospace; font-size: 17px; fill: #2455a4; }
+      .path-bg { fill: #edf4f0; rx: 3; }
+      .tag { font-size: 15px; font-weight: 700; fill: #526371; }
+      .control { fill: none; stroke: #2563eb; stroke-width: 3; stroke-dasharray: 8 5; marker-end: url(#arrow-control); }
+      .data { fill: none; stroke: #087f6d; stroke-width: 3; marker-end: url(#arrow-data); }
+      .box { fill: #fff; stroke: #bccbd1; stroke-width: 1.5; rx: 6; }
+      .web { fill: #edf4ff; stroke: #3970bd; stroke-width: 2; }
+      .web-title { fill: #194d98; }
+      .web-label { font-size: 15px; font-weight: 700; fill: #194d98; }
+      .api { fill: #fff7e5; stroke: #b58a30; stroke-width: 2; }
+      .api-label { font-size: 15px; font-weight: 700; fill: #805e12; }
+    </style>
+  </defs>
+  <rect width="1800" height="1320" fill="#f5f8fa"/>
+  <text x="40" y="55" class="title">LLM Daily | Infrastructure &amp; Artifact Flow</text>
+  <text x="40" y="87" class="small">Repository-backed topology, 2026-10-08. Documented hosts and defaults; not a live service-health check.</text>
+
+  <rect x="40" y="120" width="390" height="140" class="box web"/>
+  <rect x="40" y="120" width="6" height="140" fill="#2563eb"/>
+  <text x="62" y="151" class="tag">CONTROLLER / dg2ubuntu</text>
+  <text x="368" y="151" class="web-label">WEB</text>
+  <text x="62" y="184" class="heading web-title">Jenkins :8080</text>
+  <text x="62" y="214" class="body">daily (LLM) - pipeline</text>
+  <text x="62" y="242" class="small">Select build, target machines, models</text>
+  <path d="M430 190 H500" class="control"/>
+
+  <rect x="500" y="120" width="1260" height="140" class="box"/>
+  <text x="522" y="151" class="tag">JENKINS AGENTS / DOCUMENTED LLM DAILY MACHINES</text>
+  <text x="522" y="185" class="heading">ARLH-01   BMG-02   LNL-03   LNL-04   MTL-01   PTLH-01   PTLH-02</text>
+  <text x="522" y="216" class="heading">RAPTOR-ELLY   dg2alderlake</text>
+  <text x="522" y="243" class="small">Per-machine OpenVINO runtime + model cache + target GPU; test execution stays on each agent.</text>
+  <path d="M545 260 V298 H315 V345" class="control"/>
+  <text x="55" y="327" class="small">Dispatch / run daily/run.py</text>
+
+  <rect x="650" y="285" width="1110" height="880" rx="6" fill="#edf7f3" stroke="#91b9ad" stroke-width="2"/>
+  <text x="675" y="320" class="heading">dg2fizz | Central artifacts, database &amp; web services</text>
+
+  <rect x="40" y="345" width="550" height="760" class="box"/>
+  <text x="64" y="383" class="tag">1 / EXECUTE &amp; GENERATE LOCALLY</text>
+  <text x="64" y="420" class="heading">pytest + report / analysis pipeline</text>
+  <rect x="54" y="432" width="522" height="36" class="path-bg"/>
+  <text x="64" y="456" class="mono">&lt;output-root&gt;/&lt;machine&gt;/&lt;YYYY.MM&gt;/</text>
+  <text x="64" y="487" class="small">One run shares the daily.&lt;stamp&gt; prefix.</text>
+  <path d="M64 511 H566" stroke="#d5dfe3"/>
+  <rect x="54" y="526" width="522" height="36" class="path-bg"/>
+  <text x="64" y="550" class="mono">daily.&lt;stamp&gt;.pytest.json</text>
+  <text x="64" y="576" class="small">pytest outcomes and captured test results</text>
+  <rect x="54" y="591" width="522" height="36" class="path-bg"/>
+  <text x="64" y="615" class="mono">daily.&lt;stamp&gt;.summary.json</text>
+  <text x="64" y="641" class="small">Normalized results + analysis metadata</text>
+  <rect x="54" y="656" width="522" height="36" class="path-bg"/>
+  <text x="64" y="680" class="mono">daily.&lt;stamp&gt;.raw</text>
+  <text x="64" y="706" class="small">Session subprocess log, when available</text>
+  <rect x="54" y="721" width="522" height="36" class="path-bg"/>
+  <text x="64" y="745" class="mono">daily.&lt;stamp&gt;.html</text>
+  <text x="64" y="771" class="small">Analysis report, when generation succeeds</text>
+  <rect x="54" y="786" width="522" height="36" class="path-bg"/>
+  <text x="64" y="810" class="mono">daily.&lt;stamp&gt;.requirements.txt</text>
+  <text x="64" y="836" class="small">pip freeze; enabled by --backup / --mail</text>
+  <rect x="54" y="851" width="522" height="36" class="path-bg"/>
+  <text x="64" y="875" class="mono">daily.&lt;stamp&gt;.monitor.parquet</text>
+  <text x="64" y="901" class="small">Converted monitor data, when available</text>
+  <rect x="54" y="916" width="522" height="36" class="path-bg"/>
+  <text x="64" y="940" class="mono">daily.&lt;stamp&gt;.image.&lt;slot&gt;</text>
+  <text x="64" y="966" class="small">Staged image-generation outputs, if present</text>
+  <path d="M64 990 H566" stroke="#d5dfe3"/>
+  <text x="64" y="1024" class="small">Local analysis also ingests local run history.</text>
+  <text x="64" y="1055" class="small">--mail: send HTML report + published links.</text>
+  <text x="64" y="1083" class="small">No --backup: no central artifact upload.</text>
+
+  <path d="M590 535 H700" class="data"/>
+  <text x="605" y="489" class="tag">SFTP</text>
+  <text x="598" y="513" class="tag">--backup</text>
+
+  <rect x="700" y="345" width="530" height="300" class="box"/>
+  <text x="724" y="383" class="tag">2 / CENTRAL ARTIFACT COPY</text>
+  <text x="724" y="420" class="heading">Result storage</text>
+  <rect x="714" y="446" width="502" height="42" class="path-bg"/>
+  <text x="724" y="473" class="mono">/mnt/hdd/daily/data/&lt;machine&gt;/&lt;YYYY.MM&gt;/</text>
+  <text x="724" y="531" class="small">Same run filenames as the local output</text>
+  <text x="724" y="566" class="small">Paramiko SFTP from each test machine</text>
+  <text x="724" y="596" class="small">Default relay: dg2fizz.ikor.intel.com</text>
+  <text x="724" y="622" class="small">MAIL_RELAY_SERVER can override the host.</text>
+
+  <path d="M1230 440 H1310" class="data"/>
+  <rect x="1310" y="345" width="410" height="245" class="box web"/>
+  <text x="1334" y="383" class="tag">3A / FILE BROWSER</text>
+  <text x="1658" y="383" class="web-label">WEB</text>
+  <text x="1334" y="420" class="heading web-title">Caddy :8081</text>
+  <text x="1334" y="457" class="endpoint">/daily/</text>
+  <text x="1334" y="488" class="small">HTML, raw logs, JSON, images</text>
+  <text x="1334" y="518" class="small">Parquet downloaded as binary</text>
+  <text x="1334" y="558" class="small">Browser access; read-only files</text>
+
+  <path d="M965 645 V730" class="data"/>
+  <text x="985" y="682" class="small">Separate refresh operation</text>
+  <text x="985" y="707" class="small">Not implied by SFTP upload</text>
+  <rect x="700" y="730" width="530" height="130" class="box"/>
+  <text x="724" y="766" class="tag">3B / INGEST RESULT ARTIFACTS</text>
+  <rect x="714" y="778" width="502" height="36" class="path-bg"/>
+  <text x="724" y="802" class="mono">scripts/ingest_db.sh</text>
+  <text x="724" y="834" class="small">flock + temporary DB + atomic replacement</text>
+  <path d="M965 860 V910" class="data"/>
+  <rect x="700" y="910" width="530" height="150" class="box"/>
+  <text x="724" y="947" class="heading">Central DuckDB</text>
+  <rect x="714" y="966" width="502" height="42" class="path-bg"/>
+  <text x="724" y="993" class="mono">/mnt/hdd/daily/db/daily_llm_benchmark.duckdb</text>
+  <text x="724" y="1042" class="small">Separate from publicly browsable artifacts</text>
+
+  <path d="M1230 985 H1268 V711 H1310" class="data"/>
+  <path d="M1268 920 H1310" class="data"/>
+  <rect x="1310" y="640" width="410" height="150" class="box web"/>
+  <text x="1334" y="676" class="tag">4 / DASHBOARD</text>
+  <text x="1658" y="676" class="web-label">WEB</text>
+  <text x="1334" y="712" class="heading web-title">Caddy :8091</text>
+  <text x="1334" y="745" class="endpoint">Streamlit 127.0.0.1:8501</text>
+  <text x="1334" y="774" class="small">Browser: runs, metrics and trends</text>
+  <rect x="1310" y="850" width="410" height="145" class="box api"/>
+  <text x="1334" y="886" class="tag">4 / AI &amp; AUTOMATION</text>
+  <text x="1658" y="886" class="api-label">API</text>
+  <text x="1334" y="922" class="heading">Daily Results MCP :8090</text>
+  <text x="1334" y="957" class="endpoint">/mcp</text>
+  <text x="1334" y="982" class="small">Read-only queries to the same DB</text>
+
+  <rect x="700" y="1080" width="1020" height="42" class="box web"/>
+  <text x="724" y="1108" class="web-label">WEB</text>
+  <text x="789" y="1108" class="heading web-title">Wiki / Caddy :8080</text>
+  <text x="1060" y="1108" class="small">MkDocs static site</text>
+  <text x="700" y="1150" class="small">File browser also exposes datasets and model cache; these are test inputs, not result backups.</text>
+
+  <rect x="40" y="1189" width="1720" height="79" rx="6" fill="#fff8e8" stroke="#cead60" stroke-dasharray="6 4"/>
+  <text x="62" y="1219" class="body">Backup boundary: --backup copies run artifacts to dg2fizz; it does not back up the central database.</text>
+  <text x="62" y="1248" class="small">DB backups are documented under /mnt/hdd/daily/db/. Retention, scheduling and off-host copies are unverified; ingest_db.sh only replaces the live DB.</text>
+  <path d="M40 1296 H91" class="control"/>
+  <text x="105" y="1302" class="small">Job control</text>
+  <path d="M265 1296 H316" class="data"/>
+  <text x="330" y="1302" class="small">Artifact / data flow</text>
+  <text x="700" y="1302" class="small">Source: daily/run.py, common/paths.py, common/delivery.py, scripts/ingest_db.sh, web_server/</text>
+</svg>

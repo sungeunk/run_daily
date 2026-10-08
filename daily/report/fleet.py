@@ -67,7 +67,7 @@ def _fallback_html_report_url(base_url: str, row: Mapping[str, Any]) -> str:
         return ""
     stamp = match.group(1)
     return (
-        f"{base_url.rstrip('/')}/daily2/{quote(machine, safe='')}/"
+        f"{base_url.rstrip('/')}/daily/{quote(machine, safe='')}/"
         f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
     )
 
@@ -97,8 +97,8 @@ def _artifact_links(viewer_base_url: str, row: Mapping[str, Any],
 def _raw_log_link(base_url: str, row: Mapping[str, Any]) -> str:
     rawlog_path = str(row.get("rawlog_path") or "")
     prefixes = {
-        "/mnt/hdd/daily/data/": "daily2/",
-        "/var/www/html/daily2/": "daily2/",
+        "/mnt/hdd/daily/data/": "daily/",
+        "/var/www/html/daily2/": "daily/",
     }
     matched = next(
         ((prefix, url_prefix) for prefix, url_prefix in prefixes.items()

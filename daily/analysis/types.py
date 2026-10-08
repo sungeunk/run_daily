@@ -295,6 +295,9 @@ class OutputQualityRow:
     release_comparison: Literal["verified", "unverified", "different", "unavailable"] = "unavailable"
     baseline_warning: bool = False
     release_warning: bool = False
+    current_url: str = ""
+    baseline_url: str = ""
+    release_url: str = ""
 
 
 @dataclass

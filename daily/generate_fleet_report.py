@@ -260,7 +260,7 @@ def _effective_report_url(row: dict[str, Any], base_url: str) -> str:
         return ""
     stamp = match.group(1)
     return (
-        f"{base_url.rstrip('/')}/daily2/{quote(machine, safe='')}/"
+        f"{base_url.rstrip('/')}/daily/{quote(machine, safe='')}/"
         f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
     )
 

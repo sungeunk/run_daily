@@ -65,6 +65,34 @@ def test_pairwise_text_scores_and_advisory_status() -> None:
     assert any("release: IoU" in reason for reason in row.reasons)
 
 
+def test_output_links_preserve_each_run_and_original_image_slot() -> None:
+    summary = {"tests": [
+        {"outcome": "passed", "metrics": {
+            "test_type": "llm_benchmark", "model": "model", "precision": "FP16",
+            "generated_outputs": [{"prompt_idx": 0, "iteration": 1, "generated_text": "normal answer"}],
+        }},
+        {"outcome": "passed", "metrics": {
+            "test_type": "image_generation", "model": "image-model", "precision": "FP16",
+            "data": [{"image_path": "model_p0_iter1_pid42_output.png"}],
+        }},
+    ]}
+    stamps = ["20261008_1310", "20260930_2342", "20260901_2103"]
+    samples = [
+        samples_from_summary(
+            summary, "", lambda _: None, stamp,
+            artifact_base_url=f"https://reports.example/daily2/RAPTOR-ELLY/{stamp[:4]}.{stamp[4:6]}",
+        )
+        for stamp in stamps
+    ]
+
+    rows = inspect_outputs(*samples, AnalysisConfig()).rows
+
+    for label, stamp in zip(("current", "baseline", "release"), stamps):
+        base = f"https://reports.example/daily2/RAPTOR-ELLY/{stamp[:4]}.{stamp[4:6]}/daily.{stamp}"
+        assert getattr(rows[0], f"{label}_url") == f"{base}.raw"
+        assert getattr(rows[1], f"{label}_url") == f"{base}.image.image-model_FP16_0.png"
+
+
 def test_truncated_generated_text_is_not_compared_as_complete() -> None:
     current = OutputSample("model", "FP16", "0 / 1", "text", "same", text="partial", text_truncated=True)
     reference = _text("partial")
@@ -130,6 +158,8 @@ def test_ssim_import_error_degrades_only_the_comparison(monkeypatch: pytest.Monk
     assert row.status == "pass"
     assert row.baseline_score is None
     assert any("SSIM dependency unavailable" in reason for reason in row.reasons)
+    assert row.reasons.count("baseline: SSIM dependency unavailable") == 1
+    assert "baseline: SSIM comparison unavailable" not in row.reasons
 
 
 def test_ssim_value_error_does_not_discard_other_output_findings(monkeypatch: pytest.MonkeyPatch) -> None:

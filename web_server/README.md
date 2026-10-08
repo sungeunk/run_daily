@@ -2,6 +2,35 @@
 
 This directory contains the user-level web services for `sungeunk`.
 
+## LLM Daily Infrastructure
+
+![Jenkins, LLM daily machines, artifact backups, and dg2fizz web services](wiki/docs/assets/images/llm-daily-flow.svg)
+
+[Open the full-size SVG](wiki/docs/assets/images/llm-daily-flow.svg).
+The diagram reflects repository code and documented deployment as of
+2026-10-08, not a live health check or a verified Jenkins job configuration.
+
+- `dg2ubuntu:8080` dispatches the LLM pipeline to the documented daily agents.
+- `daily/run.py` writes run files under
+    `<output-root>/<machine>/<YYYY.MM>/`. With `--backup`, available artifacts
+    are copied by Paramiko SFTP to
+    `dg2fizz:/mnt/hdd/daily/data/<machine>/<YYYY.MM>/` by default.
+- `scripts/ingest_db.sh` separately refreshes the central database from
+    uploaded artifacts. Uploading files does not itself invoke this script.
+- Caddy serves artifacts on `:8081` and the Streamlit dashboard on `:8091`;
+    the read-only MCP endpoint uses `:8090/mcp`. The Wiki uses `:8080`.
+
+Artifact upload is not a database backup. Database backups are documented
+under `/mnt/hdd/daily/db/`, but their schedule, retention, and off-host
+destination have not been verified. The ingest script's temporary database
+is for atomic replacement, not a retained backup.
+
+Implementation references: [run artifacts and upload](../daily/run.py),
+[directory layout](../daily/common/paths.py),
+[SFTP delivery](../daily/common/delivery.py),
+[database refresh](../scripts/ingest_db.sh), and
+[documented Jenkins agents](wiki/docs/web_services/jenkins.md).
+
 ## Services
 
 ```text
@@ -53,7 +82,6 @@ are defined in `caddy/conf.d/files.caddy`.
 | URL | Directory |
 | --- | --- |
 | `/daily/` | `/mnt/hdd/daily/data/` |
-| `/daily2/` | `/mnt/hdd/daily/data/` |
 | `/benchmarking_datasets/` | `/mnt/hdd/jenkins/` |
 | `/model_cache_server/` | `/mnt/hdd/model/` |
 

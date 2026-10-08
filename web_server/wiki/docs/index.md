@@ -1,7 +1,6 @@
-# daily Wiki
-Welcome to the daily documentation.
+![LLM daily infrastructure and artifact flow](assets/images/llm-daily-flow.svg)
 
-Use the navigation to find operational notes and procedures.
+[Open the full-size diagram](assets/images/llm-daily-flow.svg).
 
 ## Web Service List (Team Server)
 | Web | URL |
@@ -10,7 +9,7 @@ Use the navigation to find operational notes and procedures.
 | Daily result viewer | [http://dg2fizz.ikor.intel.com:8091](http://dg2fizz.ikor.intel.com:8091) |
 | Daily results MCP | [http://dg2fizz.ikor.intel.com:8090/mcp](http://dg2fizz.ikor.intel.com:8090/mcp) |
 | Model cache server(mirror) | [http://dg2fizz.ikor.intel.com:8081/model_cache_server](http://dg2fizz.ikor.intel.com:8081/model_cache_server) |
-| Daily result backup | [http://dg2fizz.ikor.intel.com:8081/daily](http://dg2fizz.ikor.intel.com:8081/daily) |
+| Daily result files (logs & reports) | [http://dg2fizz.ikor.intel.com:8081/daily](http://dg2fizz.ikor.intel.com:8081/daily) |
 | Benchmarking datasets(static models) | [http://dg2fizz.ikor.intel.com:8081/benchmarking_datasets](http://dg2fizz.ikor.intel.com:8081/benchmarking_datasets) |
 
 ## Github projects

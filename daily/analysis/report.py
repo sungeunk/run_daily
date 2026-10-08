@@ -7,20 +7,13 @@ persistence layer stay format-agnostic.
 
 from __future__ import annotations
 
-import base64
 import html
-import io
 import math
 from pathlib import Path
 
 from data import expected_cases
 
 from .types import AnalysisResult
-
-
-# Longest edge of the inline preview. Outlook blocks remote images, so the
-# thumbnail must be embedded while the full-size file stays on the relay.
-THUMBNAIL_PX = 240
 
 
 def _gpu_memory_text(summary: dict | None) -> tuple[str | None, str]:
@@ -67,108 +60,6 @@ def _series_counts(summary: dict | None, result: AnalysisResult) -> tuple[int, i
     return (expected_cases(summary, {"skipped"}),
             expected_cases(summary, {"passed"}),
             expected_cases(summary, {"failed", "error"}))
-
-
-def _thumbnail_data_uri(path: Path) -> str | None:
-    """Return a downscaled JPEG data URI, or None when it can't be produced."""
-    try:
-        from PIL import Image  # noqa: PLC0415
-    except ImportError:
-        return None
-    try:
-        with Image.open(path) as image:
-            preview = image.convert("RGB")
-            preview.thumbnail((THUMBNAIL_PX, THUMBNAIL_PX))
-            buffer = io.BytesIO()
-            preview.save(buffer, format="JPEG", quality=80)
-    except (OSError, ValueError):
-        return None
-    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-
-
-def _image_cell(path: Path | None, url: str | None, caption: str) -> str:
-    """One thumbnail with its caption, or a placeholder when nothing is available."""
-    src = _thumbnail_data_uri(path) if path else None
-    src = src or url
-    if not src:
-        return (
-            "<div style='display:inline-block;text-align:center;margin:0 8px'>"
-            "<div style='width:150px;height:150px;line-height:150px;border:1px dashed #d9dee7;"
-            "border-radius:8px;color:#9ca3af;font-size:12px'>none</div>"
-            f"<div style='font-size:11px;color:#6b7280;margin-top:4px'>{html.escape(caption)}</div>"
-            "</div>"
-        )
-    img = (
-        f"<img src='{html.escape(src, quote=True)}' "
-        "style='max-width:150px;border:1px solid #d9dee7;border-radius:8px' />"
-    )
-    if url:
-        img = (f"<a href='{html.escape(url, quote=True)}' "
-               f"title='Open full-size image'>{img}</a>")
-    return (
-        "<div style='display:inline-block;text-align:center;margin:0 8px'>"
-        f"{img}"
-        f"<div style='font-size:11px;color:#6b7280;margin-top:4px'>{html.escape(caption)}</div>"
-        "</div>"
-    )
-
-
-def _render_image_gallery(summary: dict | None,
-                          image_assets: dict[str, dict] | None = None,
-                          baseline_stamp: str | None = None) -> str:
-    """Render each generated image next to the baseline run's image for the
-    same slot, as inline thumbnails linked to their full-size copies.
-
-    ``image_assets`` maps a test's ``image_path`` to ``url`` (published
-    full-size copy), ``baseline_path`` (local baseline image) and
-    ``baseline_url``.
-    """
-    if not summary:
-        return ""
-
-    image_assets = image_assets or {}
-    published = any(a.get("url") for a in image_assets.values())
-    cards: list[str] = []
-    for test in summary.get("tests", []):
-        m = test.get("metrics", {})
-        if m.get("test_type") != "image_generation" or test.get("outcome") != "passed":
-            continue
-        for d in m.get("data", []):
-            image_path = d.get("image_path")
-            if not image_path:
-                continue
-            asset = image_assets.get(image_path) or {}
-            current = _image_cell(Path(image_path), asset.get("url"), "Current")
-            baseline = _image_cell(asset.get("baseline_path"),
-                                   asset.get("baseline_url"),
-                                   f"Baseline {baseline_stamp}" if baseline_stamp else "Baseline")
-            label = f"{m.get('model', '')} / {m.get('precision', '')}"
-            if d.get("input_token_size") is not None:
-                label += f" (in={d['input_token_size']})"
-            cards.append(
-                "<div style='display:inline-block;vertical-align:top;text-align:center;"
-                "border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin:0 14px 14px 0'>"
-                f"<div style='font-size:12px;font-weight:700;margin-bottom:6px'>{html.escape(label)}</div>"
-                f"{current}{baseline}"
-                "</div>"
-            )
-
-    if not cards:
-        return ""
-
-    hint = ("Each pair shows this run's image next to the baseline run's image for the "
-            "same model/precision slot.")
-    if published:
-        hint += " Click a thumbnail to open the full-size file."
-    return f"""
-    <div class="card" style="margin-bottom:14px">
-        <h2>Generated Images</h2>
-        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
-            {hint}
-        </div>
-        <div>{"".join(cards)}</div>
-    </div>
-    """
 
 
 def _render_run_summary(result: AnalysisResult, summary: dict | None,
@@ -263,28 +154,46 @@ def _mcp_banner(result: AnalysisResult) -> str:
     )
 
 
-def _render_output_quality(result: AnalysisResult) -> str:
+def _render_output_quality(result: AnalysisResult, *, include_image_sample: bool = False) -> str:
     quality = result.output_quality
     rows = quality.rows if quality else []
     counts = {status: sum(row.status == status for row in rows) for status in ("pass", "warning", "unavailable")}
     detail = quality.detail if quality else "Output quality checks were not run."
     table_rows: list[str] = []
     comparison_warnings = sum(row.baseline_warning + row.release_warning for row in rows)
-    for row in rows:
-        if row.status == "pass" and not row.reasons and not row.baseline_warning and not row.release_warning:
-            continue
+    comparisons = ("baseline",) if result.release and result.release.status == "disabled" else ("baseline", "release")
+    column_count = 5 + len(comparisons)
+    visible_rows = [row for row in rows if row.status != "pass"]
+    image_sample = next(
+        (row for row in rows if row.kind == "image" and row.status == "pass" and row.current_preview), None,
+    ) if include_image_sample else None
+    if image_sample is not None:
+        visible_rows.append(image_sample)
+    for index, row in enumerate(visible_rows):
+        background = "#f3f6fa" if index % 2 == 0 else "#ffffff"
+        separator = "3px solid #a8b5c5"
         previews: list[str] = []
         for label, preview in (("Current", row.current_preview), ("Baseline", row.baseline_preview), ("Release", row.release_preview)):
+            if label == "Release" and "release" not in comparisons:
+                continue
             if not preview:
                 continue
             if row.kind == "image" and preview.startswith("data:image/jpeg;base64,"):
-                content = f'<img alt="{label} output" src="{html.escape(preview, quote=True)}" width="128" style="max-width:100%;height:auto" />'
+                content = f'<img alt="{label} output" src="{html.escape(preview, quote=True)}" width="128" style="display:block;max-width:128px;max-height:128px;height:auto" />'
             else:
-                content = f'<pre style="white-space:pre-wrap;overflow-wrap:anywhere;max-width:420px;margin:4px 0">{html.escape(preview)}</pre>'
-            previews.append(f'<details><summary>{label}</summary>{content}</details>')
+                excerpt = preview[:200] + ("..." if len(preview) > 200 else "")
+                content = f'<pre style="white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:4px 0;font-size:12px">{html.escape(excerpt)}</pre>'
+            previews.append(
+                f'<div class="quality-preview">'
+                f'<div style="font-size:11px;font-weight:700;margin-bottom:4px">{label}</div>{content}</div>'
+            )
         metric = "IoU" if row.kind == "text" else "SSIM"
+        cell_style = (
+            f"background:{background};vertical-align:top;padding:10px 8px;"
+            f"border-bottom:{'0' if previews else separator}"
+        )
         score_cells: list[str] = []
-        for label in ("baseline", "release"):
+        for label in comparisons:
             score = getattr(row, f"{label}_score")
             condition = getattr(row, f"{label}_comparison")
             low_similarity = getattr(row, f"{label}_warning")
@@ -294,49 +203,77 @@ def _render_output_quality(result: AnalysisResult) -> str:
                 "different": "Different conditions; reference only",
                 "unavailable": "Comparison unavailable",
             }.get(condition, "Comparison unavailable")
-            measurement = f"{score:.3f}" if score is not None else "N/A"
+            measurement = f"{metric} {score:.3f}" if score is not None else "Not evaluated"
+            if score is None:
+                explanations = [item.split(": ", 1)[1] for item in row.reasons if item.startswith(f"{label}: ")]
+                condition_text = "; ".join(explanations) or "No comparable output"
             warning_text = '<div style="color:#a05a00">Low similarity</div>' if low_similarity else ""
             score_cells.append(
-                f'<td data-comparison-condition="{condition}">{metric} {measurement}'
-                f'<div class="muted" style="font-size:11px">{condition_text}</div>{warning_text}</td>'
+                f'<td data-comparison-condition="{condition}" style="{cell_style}">{measurement}'
+                f'<div class="muted" style="font-size:11px">{html.escape(condition_text)}</div>{warning_text}</td>'
             )
-        reason = "<br>".join(html.escape(item) for item in row.reasons)
-        table_rows.append(
-            f'<tr data-quality-status="{row.status}"><td>{html.escape(row.model)}<br>{html.escape(row.precision)}</td>'
-            f'<td>{html.escape(row.prompt)}</td><td>{html.escape(row.kind)}</td><td>{row.status.upper()}</td>'
-            f'{"".join(score_cells)}'
-            f'<td style="overflow-wrap:anywhere">{reason}</td><td>{"".join(previews)}</td></tr>'
+        reason = "<br>".join(
+            html.escape(item) for item in row.reasons
+            if not (item.startswith("baseline: ") and row.baseline_score is None)
+            and not (item.startswith("release: ") and row.release_score is None)
         )
+        sample_attribute = ' data-quality-sample="true"' if row is image_sample else ""
+        status_text = row.status.upper()
+        if row is image_sample:
+            status_text += " (sample)"
+            reason = "Image preview sample; no quality issue."
+        table_rows.append(
+            f'<tr data-quality-status="{row.status}"{sample_attribute}><td style="{cell_style}"><strong>{html.escape(row.model)}</strong><br>{html.escape(row.precision)}</td>'
+            f'<td style="{cell_style}">{html.escape(row.prompt)}</td><td style="{cell_style}">{html.escape(row.kind)}</td>'
+            f'<td style="{cell_style}">{status_text}</td>'
+            f'{"".join(score_cells)}'
+            f'<td style="{cell_style};overflow-wrap:anywhere">{reason}</td></tr>'
+        )
+        if previews:
+            preview_width = 100 / len(previews)
+            preview_cells = "".join(
+                f'<td class="quality-preview-cell" width="{preview_width:.2f}%" '
+                f'style="width:{preview_width:.2f}%;vertical-align:top;border:0;padding:8px 12px;box-sizing:border-box;background:{background}">{preview}</td>'
+                for preview in previews
+            )
+            table_rows.append(
+                f'<tr class="quality-preview-row"><td colspan="{column_count}" style="padding:0 0 12px;background:{background};border-bottom:{separator}">'
+                '<table class="quality-preview-table" role="presentation" '
+                'style="width:100%;table-layout:fixed;border-collapse:collapse"><tbody><tr>'
+                f'{preview_cells}</tr></tbody></table></td></tr>'
+            )
     if not table_rows:
-        message = detail or ("No output quality warnings in inspected outputs." if rows else "No outputs available; quality not verified.")
-        table_rows.append(f'<tr><td colspan="8">{html.escape(message)}</td></tr>')
+        if rows:
+            return ""
+        message = detail or "No outputs available; quality not verified."
+        table_rows.append(f'<tr><td colspan="{column_count}">{html.escape(message)}</td></tr>')
+    comparison_headers = "".join(f'<th>vs {label.title()}</th>' for label in comparisons)
     return (
         '<section style="margin:18px 0" id="output-quality-checks"><h2>Output Quality Checks</h2>'
         f'<div class="muted" style="margin-bottom:8px">Output checks: {len(rows)} | PASS: {counts["pass"]} | '
         f'WARNING: {counts["warning"]} | UNAVAILABLE: {counts["unavailable"]} | Low similarity: {comparison_warnings}</div>'
-        '<div style="overflow-x:auto"><table><thead><tr><th>Model / Precision</th><th>Prompt / Iteration</th>'
-        '<th>Output</th><th>Output Status</th><th>vs Baseline</th><th>vs Release</th><th>Findings</th><th>Preview</th>'
+        '<div style="overflow-x:auto"><table class="quality-results"><thead><tr><th>Model / Precision</th><th>Prompt / Iteration</th>'
+        f'<th>Output</th><th>Output Status</th>{comparison_headers}<th>Findings</th>'
         f'</tr></thead><tbody>{"".join(table_rows)}</tbody></table></div></section>'
     )
 
 
 def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
                          image_assets: dict[str, dict] | None = None,
-                         baseline_meta: dict | None = None) -> str:
+                         baseline_meta: dict | None = None, *, include_image_sample: bool = False) -> str:
     """Return a standalone HTML report for analysis-focused review.
 
     ``summary`` is the normalised daily summary dict (same shape as
-    ``daily.*.summary.json``); when given, generated images from
-    image_generation tests are shown as thumbnails. ``image_assets`` carries
-    the published URL and the matching baseline image for each of them.
+    ``daily.*.summary.json``). Image previews are included with output-quality
+    findings. ``image_assets`` is retained for compatibility with existing callers.
     ``baseline_meta`` is the baseline run's ``meta`` block, used to flag
     environment differences in the Run Summary card.
+    ``include_image_sample`` adds one labeled PASS image for layout review only;
+    normal reports keep PASS outputs hidden.
     """
     from datetime import datetime as _dt  # noqa: PLC0415
 
-    image_gallery = _render_image_gallery(summary, image_assets,
-                                          result.baseline.stamp)
-    output_quality_table = _render_output_quality(result)
+    output_quality_table = _render_output_quality(result, include_image_sample=include_image_sample)
 
     improved_rows = sorted(
         [r for r in result.rows if r.verdict == "improved" and r.improvement_pct is not None],
@@ -411,11 +348,11 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     }
     badge = badges.get(result.overall_status, (result.overall_status.upper(), "#475467"))
     release_status_html = "".join(
-        '<div class="comparison-status">'
+        '<td class="comparison-status" style="border:0;padding:0 0 0 20px;vertical-align:top">'
         f'<div class="muted" style="font-size:12px;margin-bottom:4px">{label}</div>'
         f'<span class="badge" data-comparison="{comparison}" data-status="{status}" '
         f'style="background:{badges.get(status, (str(status).upper(), "#475467"))[1]};font-size:16px;padding:6px 18px">'
-        f'{badges.get(status, (str(status).upper(), "#475467"))[0]}</span></div>'
+        f'{badges.get(status, (str(status).upper(), "#475467"))[0]}</span></td>'
         for label, comparison, status in (
             ("Current vs Release", "release", result.release_status or "gray"),
             ("Baseline vs Release", "baseline-release", result.baseline_release_status or "gray"),
@@ -597,6 +534,12 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         tr:hover td {{ background: #f8faff; }}
         .legend-table {{ font-size: 13px; width: 100%; border-collapse: collapse; }}
         .legend-table tr:nth-child(even) td {{ background: #f8fafc; }}
+        @media (max-width: 640px) {{
+            .quality-results {{ table-layout: fixed; width: 100%; }}
+            .quality-results > thead > tr > th, .quality-results > tbody > tr > td {{ overflow-wrap: anywhere; word-break: break-word; }}
+            .quality-preview-table, .quality-preview-table tbody, .quality-preview-table tr {{ display: block; width: 100%; }}
+            .quality-preview-cell {{ display: block; width: 100% !important; }}
+        }}
         @media (max-width: 980px) {{
             .wrap {{ padding: 14px; }}
         }}
@@ -611,13 +554,13 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             <h1>Daily Analysis Report</h1>
             <div class="muted" style="font-size:12px">Generated {generated_at}</div>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:16px">
-            <div class="comparison-status">
+        <table role="presentation" style="width:auto;border-collapse:collapse"><tr>
+            <td class="comparison-status" style="border:0;padding:0;vertical-align:top">
                 <div class="muted" style="font-size:12px;margin-bottom:4px">Current vs Baseline</div>
                 <span class="badge" data-comparison="baseline" data-status="{result.overall_status}" style="background:{badge[1]};font-size:16px;padding:6px 18px">{badge[0]}</span>
-            </div>
+            </td>
             {release_status_html}
-        </div>
+        </tr></table>
     </div>
 
     {mcp_banner}
@@ -672,8 +615,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         </div>
     </div>
 
-    {output_quality_table}
-
     <!-- Top Regressions -->
     <div class="card" style="margin-bottom:14px">
         <h2>Top Regressions</h2>
@@ -696,6 +637,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         </div>
     </div>
 
+    {output_quality_table}
+
     <!-- All rows -->
     <div class="card" style="margin-bottom:14px">
         <h2>All Performance Results ({len(all_rows)} series)</h2>
@@ -706,8 +649,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             </table>
         </div>
     </div>
-
-    {image_gallery}
 
     <!-- Reference material: kept last, it is only needed while learning the report -->
     <div class="card" style="margin-bottom:14px">

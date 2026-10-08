@@ -54,6 +54,7 @@ class OutputSample:
     image: bytes | None = None
     image_error: str = ""
     text_truncated: bool = False
+    source_url: str = ""
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -136,6 +137,7 @@ def _inspect_sample(
     config: AnalysisConfig,
 ) -> OutputQualityRow:
     row = OutputQualityRow(sample.model, sample.precision, sample.prompt, sample.kind, "pass")
+    row.current_url = sample.source_url
     failures: list[str] = []
     unavailable: list[str] = []
     array, image_size = None, None
@@ -164,6 +166,7 @@ def _inspect_sample(
         if reference is None:
             comparison_notes.append(f"{label}: matching output unavailable")
             continue
+        setattr(row, f"{label}_url", reference.source_url)
         reference_array, reference_size = None, None
         if sample.kind == "text":
             setattr(row, f"{label}_preview", (reference.text or "")[:400])
@@ -175,10 +178,8 @@ def _inspect_sample(
         condition = "verified"
         if not sample.fingerprint or not reference.fingerprint:
             condition = "unverified"
-            comparison_notes.append(f"{label}: conditions unverified; similarity is reference only")
         elif sample.fingerprint != reference.fingerprint:
             condition = "different"
-            comparison_notes.append(f"{label}: prompt/generation settings differ; similarity is reference only")
         score = None
         if sample.kind == "text":
             if sample.text_truncated or reference.text_truncated:
@@ -204,13 +205,15 @@ def _inspect_sample(
             elif image_size is not None and reference_size is not None and image_size != reference_size:
                 comparison_notes.append(f"{label}: image dimensions differ")
         if score is None or not math.isfinite(score):
-            comparison_notes.append(f"{label}: {metric} comparison unavailable")
+            if not any(note.startswith(f"{label}:") for note in comparison_notes):
+                comparison_notes.append(f"{label}: {metric} comparison unavailable")
         else:
             setattr(row, f"{label}_score", score)
             setattr(row, f"{label}_comparison", condition)
             if score < threshold:
                 setattr(row, f"{label}_warning", True)
-                comparison_notes.append(f"{label}: {metric} {score:.3f} < {threshold:.3f}; review required")
+                qualifier = "; reference only" if condition != "verified" else ""
+                comparison_notes.append(f"{label}: {metric} {score:.3f} < {threshold:.3f}; review required{qualifier}")
     row.reasons = list(dict.fromkeys(failures + unavailable + comparison_notes))
     return row
 
@@ -260,6 +263,7 @@ def _raw_sections(raw: str) -> dict[str, str]:
 
 def samples_from_summary(
     summary: dict, raw: str, image_reader: Callable[[str], bytes | None], stamp: str,
+    *, artifact_base_url: str = "",
 ) -> list[OutputSample]:
     from common.delivery import staged_image_slot
 
@@ -306,6 +310,7 @@ def samples_from_summary(
                     "text", fingerprint,
                     text=record.get("generated_text") if isinstance(record.get("generated_text"), str) else None,
                     text_truncated=bool(record.get("truncated", False)),
+                    source_url=f"{artifact_base_url}/daily.{stamp}.raw" if artifact_base_url else "",
                 ))
         else:
             data = metrics.get("data")
@@ -326,7 +331,10 @@ def samples_from_summary(
                 image = image_reader(f"daily.{stamp}.image.{slot}") if original else None
                 settings = [record.get(key) for key in ("width", "height", "steps", "batch_size")]
                 identity = fingerprint + json.dumps(settings) if fingerprint and all(value is not None for value in settings) else None
-                samples.append(OutputSample(model, precision, prompt, "image", identity, image=image))
+                samples.append(OutputSample(
+                    model, precision, prompt, "image", identity, image=image,
+                    source_url=f"{artifact_base_url}/daily.{stamp}.image.{quote(slot)}" if artifact_base_url else "",
+                ))
     return samples
 
 
@@ -439,6 +447,11 @@ def quality_for_runs(
             for test in payload["tests"]
         )
         raw = read(f"daily.{stamp}.raw") if needs_raw else None
-        return samples_from_summary(payload, raw.decode("utf-8", errors="replace") if raw else "", read, stamp)
+        base_url = config.output_artifact_base_url.rstrip("/")
+        artifact_base_url = f"{base_url}/{quote(machine)}/{stamp[:4]}.{stamp[4:6]}" if base_url else ""
+        return samples_from_summary(
+            payload, raw.decode("utf-8", errors="replace") if raw else "", read, stamp,
+            artifact_base_url=artifact_base_url,
+        )
 
     return inspect_outputs(load(current_stamp, True), load(baseline_stamp), load(release_stamp), config)

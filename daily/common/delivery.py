@@ -13,6 +13,8 @@ Two upstream bugs are corrected during the port:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import json
 import logging
@@ -23,7 +25,8 @@ import shlex
 import shutil
 import subprocess
 from email.message import EmailMessage
-from email.utils import formatdate
+from email.utils import formatdate, make_msgid
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -152,6 +155,26 @@ def staged_images_for(root: Path, stamp: str) -> dict[str, Path]:
     }
 
 
+class _EmailInlineImages(HTMLParser):
+    """Collect embedded JPEG thumbnails for related MIME attachments."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.images: dict[str, bytes] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != 'img':
+            return
+        source = dict(attrs).get('src') or ''
+        prefix = 'data:image/jpeg;base64,'
+        if not source.startswith(prefix) or source in self.images:
+            return
+        try:
+            self.images[source] = base64.b64decode(source[len(prefix):], validate=True)
+        except (ValueError, binascii.Error):
+            log.warning('Ignoring malformed inline image in report')
+
+
 def _html_report_body(report_path: Path) -> str:
     """Return an HTML body for either a raw HTML report or plain text report."""
     report_text = report_path.read_text(encoding='utf-8')
@@ -276,6 +299,18 @@ def _resolve_host(relay_server: str | None) -> str:
 
 def _build_html_email_message(recipients: str, subject: str, html_body: str) -> bytes:
     """Build a UTF-8 multipart email (plain + html) as RFC-compliant bytes."""
+    images = _EmailInlineImages()
+    images.feed(html_body)
+    images.close()
+    attachments: list[tuple[str, bytes]] = []
+    for source, content in images.images.items():
+        content_id = make_msgid(domain='daily-report')
+        for quote_char in ('"', "'"):
+            html_body = html_body.replace(
+                f'src={quote_char}{source}{quote_char}',
+                f'src={quote_char}cid:{content_id[1:-1]}{quote_char}',
+            )
+        attachments.append((content_id, content))
     msg = EmailMessage()
     msg['To'] = recipients
     msg['Subject'] = subject
@@ -292,6 +327,9 @@ def _build_html_email_message(recipients: str, subject: str, html_body: str) -> 
         charset='utf-8',
     )
     msg.add_alternative(html_body, subtype='html', charset='utf-8')
+    html_part = msg.get_payload()[-1]
+    for content_id, content in attachments:
+        html_part.add_related(content, maintype='image', subtype='jpeg', cid=content_id, disposition='inline')
     return msg.as_bytes()
 
 
@@ -299,7 +337,7 @@ def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     """Return the public URL for a backed-up artefact.
 
     The scp target is ``<host>:/mnt/hdd/daily/data/<node>/<YYYY.MM>/`` and the
-    relay exposes it at ``http://<host>:8081/daily2/<node>/<YYYY.MM>/<file>``.
+    relay exposes it at ``http://<host>:8081/daily/<node>/<YYYY.MM>/<file>``.
     """
     if base_url is None:
         base_url = os.environ.get('DAILY_REPORT_BASE_URL') or DEFAULT_DAILY_REPORT_BASE_URL
@@ -550,6 +588,10 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
         except (OSError, subprocess.TimeoutExpired) as exc:
             log.warning('send_mail: sendmail path failed on %s: %s', relay, exc)
 
+        if 'data:image/jpeg;base64,' in body:
+            log.error('send_mail: inline thumbnails require MIME sendmail delivery')
+            return False
+
         # Fallback: legacy remote mail command. List-based (no shell=True) so
         # the title/recipients never pass through a second, local shell's
         # metacharacter parsing on top of the remote shlex.quote()-ing below.
@@ -575,6 +617,17 @@ def send_mail(report_path: Path, recipients: str, title: str, *,
             log.error('send_mail: fallback mail(1) path failed on %s: %s', relay, exc)
             return False
     else:
+        if 'data:image/jpeg;base64,' in body:
+            sendmail = shutil.which('sendmail') or '/usr/sbin/sendmail'
+            try:
+                result = subprocess.run(
+                    [sendmail, '-t', '-oi'],
+                    input=_build_html_email_message(recipients, full_title, body), timeout=60,
+                )
+                return result.returncode == 0
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                log.error('send_mail: inline thumbnails require MIME sendmail delivery: %s', exc)
+                return False
         cmd = [
             'mail',
             '--content-type=text/html; charset=UTF-8',

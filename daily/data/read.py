@@ -1375,7 +1375,7 @@ def _html_report_url(base_url: str | None, row: dict) -> str | None:
         return None
     stamp = match.group(1)
     return (
-        f"{base_url.rstrip('/')}/daily2/{quote(machine, safe='')}/"
+        f"{base_url.rstrip('/')}/daily/{quote(machine, safe='')}/"
         f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
     )
 

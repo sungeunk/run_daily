@@ -492,7 +492,7 @@ _STATE_ICON = {"stable": "🟢", "fluctuating": "🟡",
                "throttled": "🔴", "unknown": "⚪"}
 
 # Artefacts are published at
-# http://<relay>:8081/daily2/<MACHINE>/<YYYY.MM>/daily.<stamp>.*
+# http://<relay>:8081/daily/<MACHINE>/<YYYY.MM>/daily.<stamp>.*
 REPORT_BASE_URL = os.environ.get(
     "DAILY_REPORT_BASE_URL", DEFAULT_DAILY_REPORT_BASE_URL
 ).rstrip("/")
