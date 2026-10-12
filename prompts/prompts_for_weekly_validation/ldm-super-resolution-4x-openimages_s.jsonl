@@ -1,0 +1,3 @@
+{"type": "image","iamge_size": "256x256","prompt": "./image_256x256_size/1.png","source": "openvino_team"}
+{"type": "image","iamge_size": "256x256","prompt": "./image_256x256_size/2.png","source": "openvino_team"}
+{"type": "image","iamge_size": "256x256","prompt": "./image_256x256_size/3.png","source": "openvino_team"}
