@@ -382,10 +382,13 @@ def _scope_controls(cfg: dict, key_prefix: str,
     history_runs = cols[0].slider(
         "History (runs)", 3, 20, 10, 1, key=f"{key_prefix}_history",
         help="How many past runs each view covers.")
+    default_purpose = "daily_pipeline timer" if key_prefix == "dashboard" else "daily"
     purpose = cols[1].text_input(
-        "Purpose", value="daily", key=f"{key_prefix}_purpose",
+        "Purpose", value=default_purpose,
+        key=f"{key_prefix}_purpose",
         help="Matched as a case-insensitive substring of a run's "
              "purpose/description, so a PR number or username works too. "
+             "For daily_pipeline timer, only master OpenVINO builds match. "
              "The canonical kinds (daily, pr, test, manual) match the run "
              "kind instead. Empty means every run.")
     min_series = cols[2].slider(

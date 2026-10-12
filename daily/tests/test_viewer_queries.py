@@ -702,6 +702,30 @@ class TestCurrentBuildAnchor:
         rec.expected_cases = 2
         return rec
 
+    def test_master_pipeline_only_in_dashboard_scope(self, db: Path):
+        versions = [
+            "2026.5.0-23408-8fb83963347",
+            "2026.5.0-23448-852353a50b7-pull/38441/head",
+            "2026.5.0-23449-852353a50b7-release",
+            "2026.5.0-23450-852353a50b7",
+            "2026.5.0-23451-852353a50b7",
+        ]
+        records = [self._full(idx, purpose="daily_pipeline timer")
+                   for idx in range(len(versions))]
+        for record, version in zip(records, versions):
+            record.ov_version = version
+        records[-2].purpose = "daily timer"
+        _write(db, records)
+
+        scope = ("daily_pipeline timer",)
+        expected = [versions[-1], versions[0]]
+        points = q.build_points(db, [MACHINE], run_kinds=scope)
+        overview = q.machines_overview(db, [MACHINE], run_kinds=scope)
+        matrix = q.geomean_matrix(db, [MACHINE], run_kinds=scope)
+        assert list(points["ov_version"]) == expected
+        assert overview.iloc[0]["ov_version"] == versions[-1]
+        assert set(matrix["ov_version"]) == set(expected)
+
     def test_anchor_moves_the_current_run(self, db: Path):
         _write(db, [self._full(i) for i in range(3)])
         anchor = BASE_TS + timedelta(days=1)

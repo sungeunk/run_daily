@@ -147,7 +147,9 @@ def _run_kind_predicate(run_kinds: Sequence[str] | None,
     ``RUN_KINDS`` is treated as a keyword and matched as a case-insensitive
     substring of ``purpose``/``description`` — the same free text the
     canonical kinds were classified from — so a user can narrow to e.g. a PR
-    number or username the fixed categories don't capture.
+    number or username the fixed categories don't capture. The dashboard's
+    ``daily_pipeline timer`` scope matches the exact purpose and master
+    OpenVINO version only.
 
     ``alias=None`` emits unqualified column names, for a single-table select
     straight from ``perf_flat`` where there is nothing to qualify against.
@@ -165,6 +167,16 @@ def _run_kind_predicate(run_kinds: Sequence[str] | None,
         parts.append(f"COALESCE({col}run_kind, 'daily') IN ({placeholders})")
         params.extend(kinds)
     for kw in keywords:
+        if kw.lower() == "daily_pipeline timer":
+            parts.append(
+                f"(LOWER(COALESCE({col}purpose, '')) = ? AND "
+                f"regexp_full_match(COALESCE({col}ov_version, ''), ?))"
+            )
+            params.extend([
+                kw.lower(),
+                r"[0-9]{4}\.[0-9]+\.[0-9]+-[0-9]+-[0-9a-fA-F]+",
+            ])
+            continue
         parts.append(
             f"(LOWER(COALESCE({col}purpose, '')) LIKE ? "
             f"OR LOWER(COALESCE({col}description, '')) LIKE ?)"

@@ -70,7 +70,7 @@ install_services() {
         fi
         ln -sfn "$source" "$target"
         mkdir -p "${target}.d"
-        printf '[Service]\nWorkingDirectory="%s"\n' "$escaped_root" \
+        printf '[Service]\nWorkingDirectory=%s\n' "$escaped_root" \
             > "${target}.d/10-run-daily-root.conf"
         printf 'Registered %s\n' "$service"
     done
