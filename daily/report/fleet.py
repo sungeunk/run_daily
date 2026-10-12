@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
+from common.urls import daily_artifact_base_url, normalize_daily_report_url
+
 
 _TABLE_STYLE = "border-collapse:collapse;width:100%;font-size:13px"
 _CELL_STYLE = "border:1px solid #d1d5db;padding:7px;text-align:left;vertical-align:top"
@@ -55,7 +57,7 @@ def _viewer_url(base_url: str, run_id: object) -> str:
 def _html_report_url(row: Mapping[str, Any]) -> str:
     value = str(row.get("html_report_url") or "")
     parsed = urlparse(value)
-    return value if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+    return normalize_daily_report_url(value) if parsed.scheme in {"http", "https"} and parsed.netloc else ""
 
 
 def _fallback_html_report_url(base_url: str, row: Mapping[str, Any]) -> str:
@@ -67,7 +69,7 @@ def _fallback_html_report_url(base_url: str, row: Mapping[str, Any]) -> str:
         return ""
     stamp = match.group(1)
     return (
-        f"{base_url.rstrip('/')}/daily/{quote(machine, safe='')}/"
+        f"{daily_artifact_base_url(base_url)}/{quote(machine, safe='')}/"
         f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
     )
 
@@ -96,20 +98,15 @@ def _artifact_links(viewer_base_url: str, row: Mapping[str, Any],
 
 def _raw_log_link(base_url: str, row: Mapping[str, Any]) -> str:
     rawlog_path = str(row.get("rawlog_path") or "")
-    prefixes = {
-        "/mnt/hdd/daily/data/": "daily/",
-        "/var/www/html/daily/": "daily/",
-    }
+    prefixes = ("/mnt/hdd/daily/data/", "/var/www/html/daily/")
     matched = next(
-        ((prefix, url_prefix) for prefix, url_prefix in prefixes.items()
-         if rawlog_path.startswith(prefix)),
+        (prefix for prefix in prefixes if rawlog_path.startswith(prefix)),
         None,
     )
     if not base_url or matched is None:
         return ""
-    prefix, url_prefix = matched
-    relative = quote(url_prefix + rawlog_path.removeprefix(prefix), safe="/")
-    url = html.escape(f"{base_url.rstrip('/')}/{relative}", quote=True)
+    relative = quote(rawlog_path.removeprefix(matched), safe="/")
+    url = html.escape(f"{daily_artifact_base_url(base_url)}/{relative}", quote=True)
     return f'<a href="{url}" style="color:#075985">Raw log</a>'
 
 
@@ -274,6 +271,7 @@ def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
                       html_report_base_url: str = "", *,
                       title: str = "Daily GPU Fleet Summary") -> str:
     """Return a compact HTML email for one fleet digest."""
+    html_report_base_url = normalize_daily_report_url(html_report_base_url)
     summary = digest.get("summary") if isinstance(digest.get("summary"), Mapping) else {}
     selection = digest.get("selection") if isinstance(digest.get("selection"), Mapping) else {}
     machines = digest.get("machines") if isinstance(digest.get("machines"), list) else []

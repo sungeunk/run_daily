@@ -74,6 +74,14 @@ def test_backup_url_honors_public_base_override(monkeypatch) -> None:
     )
 
 
+def test_backup_url_normalizes_retired_route(monkeypatch) -> None:
+    monkeypatch.setenv("DAILY_REPORT_BASE_URL", "https://reports.example.com/results/daily2")
+
+    assert backup_server_url(filename="daily.20260901_1143.raw").startswith(
+        "https://reports.example.com/results/daily/"
+    )
+
+
 def test_relay_rejects_ssh_destination(monkeypatch) -> None:
     from common.delivery import _resolve_host
 

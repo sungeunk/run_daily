@@ -93,6 +93,12 @@ def test_output_links_preserve_each_run_and_original_image_slot() -> None:
         assert getattr(rows[1], f"{label}_url") == f"{base}.image.image-model_FP16_0.png"
 
 
+def test_report_artifact_base_normalizes_retired_route() -> None:
+    config = AnalysisConfig(output_artifact_base_url="https://reports.example/results/daily2")
+
+    assert config.output_artifact_base_url == "https://reports.example/results/daily"
+
+
 def test_truncated_generated_text_is_not_compared_as_complete() -> None:
     current = OutputSample("model", "FP16", "0 / 1", "text", "same", text="partial", text_truncated=True)
     reference = _text("partial")

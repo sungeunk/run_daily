@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from common.delivery import send_mail
 from common.mcp_client import McpError, McpHttpClient, call_json_tool
+from common.urls import daily_artifact_base_url, normalize_daily_report_url
 from report.fleet import render_fleet_html
 
 
@@ -251,7 +252,8 @@ def _effective_report_url(row: dict[str, Any], base_url: str) -> str:
     direct = str(row.get("html_report_url") or "")
     parsed = urlparse(direct)
     if parsed.scheme in {"http", "https"} and parsed.netloc:
-        return direct
+        return normalize_daily_report_url(direct)
+    base_url = daily_artifact_base_url(base_url)
     base = urlparse(base_url)
     report_file = str(row.get("report_file") or "")
     machine = str(row.get("machine") or "")
@@ -260,7 +262,7 @@ def _effective_report_url(row: dict[str, Any], base_url: str) -> str:
         return ""
     stamp = match.group(1)
     return (
-        f"{base_url.rstrip('/')}/daily/{quote(machine, safe='')}/"
+        f"{base_url.rstrip('/')}/{quote(machine, safe='')}/"
         f"{stamp[:4]}.{stamp[4:6]}/daily.{stamp}.html"
     )
 
@@ -298,12 +300,9 @@ def _rendered_digest(digest: dict[str, Any], html_report_base_url: str) -> dict[
         rendered_issues.append({
             field: issue.get(field) for field in issue_fields
         } | {
-            "last_good_html_report_url": (
-                issue.get("last_good_html_report_url")
-                if issue.get("last_good_run_id") and _effective_report_url(
-                    {"html_report_url": issue.get("last_good_html_report_url")}, ""
-                ) else ""
-            ),
+            "last_good_html_report_url": _effective_report_url(
+                {"html_report_url": issue.get("last_good_html_report_url")}, ""
+            ) if issue.get("last_good_run_id") else "",
         })
     rendered_regressions = []
     for regression in digest.get("top_regressions", []):

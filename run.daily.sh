@@ -1,8 +1,8 @@
 #!/bin/bash
 # Usage:
-#   run.daily2.sh                      download latest nightly OpenVINO and run
-#   run.daily2.sh <COMMIT_SHA>         download that build and run
-#   run.daily2.sh <path/setupvars.sh>  use an already installed package
+#   run.daily.sh                      download latest nightly OpenVINO and run
+#   run.daily.sh <COMMIT_SHA>         download that build and run
+#   run.daily.sh <path/setupvars.sh>  use an already installed package
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -32,7 +32,7 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from common.paths import machine_name, relative_dir
-from common.urls import DEFAULT_BACKUP_HOST, DEFAULT_DAILY_REPORT_BASE_URL
+from common.urls import DEFAULT_BACKUP_HOST, DEFAULT_DAILY_REPORT_BASE_URL, normalize_daily_report_url
 
 
 log = logging.getLogger(__name__)
@@ -342,7 +342,7 @@ def backup_server_url(base_url: str | None = None, filename: str = '') -> str:
     """
     if base_url is None:
         base_url = os.environ.get('DAILY_REPORT_BASE_URL') or DEFAULT_DAILY_REPORT_BASE_URL
-    return f'{base_url.rstrip("/")}/{backup_relative_dir(filename)}/{filename}'
+    return f'{normalize_daily_report_url(base_url).rstrip("/")}/{backup_relative_dir(filename)}/{filename}'
 
 
 def jenkins_console_url() -> str:

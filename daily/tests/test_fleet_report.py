@@ -16,9 +16,65 @@ from generate_fleet_report import (
     load_config,
     _parse_ov_version,
 )
+from common.urls import normalize_daily_report_url
 from report.fleet import render_fleet_html
 
 pytestmark = pytest.mark.dev_only
+
+
+def test_normalize_daily_report_url_only_changes_path_segments() -> None:
+    url = "https://daily2.example/results/daily2/report.html?source=daily2#daily2"
+
+    assert normalize_daily_report_url(url) == (
+        "https://daily2.example/results/daily/report.html?source=daily2#daily2"
+    )
+
+
+def test_fleet_links_normalize_retired_daily_route() -> None:
+    base = "https://reports.example/results/daily2"
+    digest = {
+        "summary": {}, "selection": {},
+        "machines": [{
+            "machine": "PTLH-01", "status": "failed", "run_id": "current",
+            "html_report_url": f"{base}/PTLH-01/current.html",
+            "rawlog_path": "/mnt/hdd/daily/data/PTLH-01/2026.10/daily.20261012_1629.raw",
+        }],
+        "functional_issues": [{
+            "machine": "PTLH-01", "outcome": "failed", "model": "llama",
+            "last_good_run_id": "previous",
+            "last_good_html_report_url": f"{base}/PTLH-01/last-good.html",
+        }],
+        "top_regressions": [{
+            "machine": "PTLH-01", "model": "llama", "precision": "INT4",
+            "html_report_url": f"{base}/PTLH-01/current.html",
+        }],
+    }
+
+    rendered = render_fleet_html(digest, "http://viewer.local", base)
+
+    assert "/daily2/" not in rendered
+    assert 'href="https://reports.example/results/daily/PTLH-01/current.html"' in rendered
+    assert 'href="https://reports.example/results/daily/PTLH-01/last-good.html"' in rendered
+    assert 'href="https://reports.example/results/daily/PTLH-01/2026.10/daily.20261012_1629.raw"' in rendered
+
+    stable = generate_fleet_report._rendered_digest(digest, base)
+    assert stable["machines"][0]["html_report_url"].endswith("/daily/PTLH-01/current.html")
+    assert stable["functional_issues"][0]["last_good_html_report_url"].endswith(
+        "/daily/PTLH-01/last-good.html"
+    )
+    assert stable["top_regressions"][0]["html_report_url"].endswith(
+        "/daily/PTLH-01/current.html"
+    )
+
+    fallback = generate_fleet_report._effective_report_url({
+        "machine": "PTLH-01", "report_file": "daily.20261012_1629.summary.json",
+    }, base)
+    assert fallback == "https://reports.example/results/daily/PTLH-01/2026.10/daily.20261012_1629.html"
+
+    digest["machines"][0].pop("html_report_url")
+    digest["machines"][0]["report_file"] = "daily.20261012_1629.summary.json"
+    fallback_html = render_fleet_html(digest, "http://viewer.local", base)
+    assert f'href="{fallback}"' in fallback_html
 
 
 def test_render_fleet_html_is_compact_and_links_failed_run() -> None:

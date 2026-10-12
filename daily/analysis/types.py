@@ -11,7 +11,7 @@ import math
 from typing import Literal
 from urllib.parse import urlparse
 
-from common.urls import DEFAULT_DAILY_REPORT_BASE_URL
+from common.urls import DEFAULT_DAILY_REPORT_BASE_URL, normalize_daily_report_url
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +77,7 @@ class AnalysisConfig:
             parsed = urlparse(self.output_artifact_base_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ValueError("output_artifact_base_url must be an HTTP(S) URL or empty")
+            self.output_artifact_base_url = normalize_daily_report_url(self.output_artifact_base_url)
 
 
 # ---------------------------------------------------------------------------

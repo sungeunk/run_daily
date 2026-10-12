@@ -8,9 +8,9 @@ REM Runs every BACKENDS x MODEL_DATES combination and prints a per-case summary:
 REM   PA + {WW24, WW34, WW35}, then SDPA + {WW24, WW34, WW35}
 REM
 REM Usage:
-REM   run.daily2.bat                       download latest nightly OpenVINO and run
-REM   run.daily2.bat <COMMIT_SHA>          download that build and run
-REM   run.daily2.bat <path\setupvars.bat>  use an already installed package
+REM   run.daily.bat                       download latest nightly OpenVINO and run
+REM   run.daily.bat <COMMIT_SHA>          download that build and run
+REM   run.daily.bat <path\setupvars.bat>  use an already installed package
 REM
 REM Optional env:
 REM   set DAILY_DEVICE=GPU.1               target device (default GPU.1)
