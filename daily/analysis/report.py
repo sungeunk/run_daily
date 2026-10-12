@@ -347,6 +347,36 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         "gray":   ("GRAY",   "#475467"),
     }
     badge = badges.get(result.overall_status, (result.overall_status.upper(), "#475467"))
+
+    def _status_reason(comparison: str, status: str) -> str:
+        if status == "red":
+            count = result.functional.issue_count
+            return f"{count} functional issue{'s' if count != 1 else ''} in the current run."
+        if status == "gray":
+            if comparison != "release" and result.baseline.status != "found":
+                return ("Baseline data unavailable." if result.baseline.status == "unavailable"
+                        else "No baseline run found.")
+            if comparison != "baseline" and (rel is None or rel.status != "found"):
+                return ("Release data unavailable." if rel is not None and rel.status == "unavailable"
+                        else "No release run found.")
+            return "No comparable performance series."
+        if status == "yellow":
+            return "Performance regression in comparable series."
+        if status == "green":
+            return "No performance regression in comparable series."
+        return "Comparison status unavailable."
+
+    reason_items = [("Current vs Baseline", "baseline", result.overall_status)]
+    if rel is None or rel.status != "disabled":
+        reason_items.extend([
+            ("Current vs Release", "release", result.release_status or "gray"),
+            ("Baseline vs Release", "baseline-release", result.baseline_release_status or "gray"),
+        ])
+    status_reasons_html = "".join(
+        f'<div class="status-reason"><strong>{label}</strong>'
+        f'<span>{html.escape(_status_reason(comparison, status))}</span></div>'
+        for label, comparison, status in reason_items
+    )
     release_status_html = "".join(
         '<td class="comparison-status" style="border:0;padding:0 0 0 20px;vertical-align:top">'
         f'<div class="muted" style="font-size:12px;margin-bottom:4px">{label}</div>'
@@ -521,6 +551,9 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         .kvs-table .k {{ color: var(--muted); white-space: nowrap; width: 170px; padding-right: 12px; }}
         .muted {{ color: var(--muted); }}
         .badge {{ display: inline-block; padding: 4px 12px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; }}
+        .status-reasons {{ display: grid; grid-template-columns: repeat(var(--status-columns), minmax(0, 1fr)); gap: 16px; padding: 12px 0; margin-bottom: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }}
+        .status-reason {{ display: grid; gap: 4px; min-width: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }}
+        .status-reason strong {{ font-size: 12px; color: var(--muted); }}
         .stat-block {{ text-align: center; padding: 10px 6px; }}
         .stat-block .val {{ font-size: 28px; font-weight: 700; }}
         .stat-block .lbl {{ font-size: 11px; color: var(--muted); margin-top: 2px; }}
@@ -535,6 +568,9 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         .legend-table {{ font-size: 13px; width: 100%; border-collapse: collapse; }}
         .legend-table tr:nth-child(even) td {{ background: #f8fafc; }}
         @media (max-width: 640px) {{
+            .report-header table, .report-header tr, .report-header td {{ display: block; width: auto; }}
+            .report-header td {{ padding: 4px 0 !important; }}
+            .status-reasons {{ grid-template-columns: minmax(0, 1fr); gap: 10px; }}
             .quality-results {{ table-layout: fixed; width: 100%; }}
             .quality-results > thead > tr > th, .quality-results > tbody > tr > td {{ overflow-wrap: anywhere; word-break: break-word; }}
             .quality-preview-table, .quality-preview-table tbody, .quality-preview-table tr {{ display: block; width: 100%; }}
@@ -549,7 +585,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
 <div class="wrap">
 
     <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+    <div class="report-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <div>
             <h1>Daily Analysis Report</h1>
             <div class="muted" style="font-size:12px">Generated {generated_at}</div>
@@ -561,6 +597,10 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             </td>
             {release_status_html}
         </tr></table>
+    </div>
+
+    <div class="status-reasons" style="--status-columns:{len(reason_items)}" aria-label="Comparison status reasons">
+        {status_reasons_html}
     </div>
 
     {mcp_banner}

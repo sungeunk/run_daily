@@ -122,6 +122,43 @@ def test_baseline_and_release_status_badges_are_separate(
     assert rendered.count('padding:0 0 0 20px;vertical-align:top') == 2
 
 
+@pytest.mark.parametrize("status, failed, reason", [
+    ("red", 1, "1 functional issue in the current run."),
+    ("gray", 0, "No comparable performance series."),
+    ("yellow", 0, "Performance regression in comparable series."),
+    ("green", 0, "No performance regression in comparable series."),
+])
+def test_status_reasons_explain_the_badges(
+    status: OverallStatus, failed: int, reason: str,
+) -> None:
+    result = AnalysisResult(
+        overall_status=status, baseline=BaselineInfo(status="found"),
+        functional=FunctionalResult(total=1, passed=1 - failed, failed=failed, error=0, skipped=0),
+        performance=PerformanceResult(compared=0, improved=0, same=0, regressed=0, unavailable=0),
+        models=[], top_regressions=[], rows=[],
+        release=ReleaseInfo(status="found"), release_status=status,
+        baseline_release_status="gray",
+    )
+    rendered = render_analysis_html(result)
+    assert f"<span>{reason}</span>" in rendered
+    assert rendered.count('class="status-reason"') == 3
+    assert '--status-columns:3' in rendered
+
+
+def test_missing_references_explain_gray_badges() -> None:
+    result = AnalysisResult(
+        overall_status="gray", baseline=BaselineInfo(status="not_found"),
+        functional=FunctionalResult(total=0, passed=0, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=0, improved=0, same=0, regressed=0, unavailable=0),
+        models=[], top_regressions=[], rows=[],
+        release=ReleaseInfo(status="not_found"), release_status="gray",
+        baseline_release_status="gray",
+    )
+    rendered = render_analysis_html(result)
+    assert "No baseline run found." in rendered
+    assert "No release run found." in rendered
+
+
 @pytest.mark.parametrize("disabled", [False, True])
 def test_unavailable_or_disabled_release_status(disabled: bool) -> None:
     result = AnalysisResult(
@@ -138,6 +175,9 @@ def test_unavailable_or_disabled_release_status(disabled: bool) -> None:
     if not disabled:
         assert 'data-comparison="release" data-status="gray"' in rendered
         assert 'data-comparison="baseline-release" data-status="gray"' in rendered
+    else:
+        assert rendered.count('class="status-reason"') == 1
+        assert '--status-columns:1' in rendered
 
 
 def test_unexpected_release_status_renders_fallback_badge() -> None:
