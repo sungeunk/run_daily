@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import subprocess
 import time
 
 import pytest
@@ -100,11 +101,31 @@ def _build_cmd(cfg: DailyConfig, case: BenchmarkCase, json_report_path: Path) ->
     if case.task:
         parts.append(f'-t {case.task}')
     parts.append('--disable_prompt_permutation')
-    parts.append(f'--load_config {convert_path(str(cfg.wa_config_path))}')
+    cb_config = json.dumps({
+        'enable_prefix_caching': False,
+        'max_num_batched_tokens': 99999999,
+    })
+    parts.append(f'--cb_config {subprocess.list2cmdline([cb_config])}')
+    wa_config = json.dumps(json.loads(cfg.wa_config_path.read_text(encoding='utf-8')))
+    parts.append(f'--load_config {subprocess.list2cmdline([wa_config])}')
     parts.append(f'-pf {prompt_path}')
     parts.append(f'-rj {convert_path(str(json_report_path))}')
 
     return ' '.join(parts)
+
+
+def test_build_cmd_embeds_prefix_caching_config(daily_config: DailyConfig) -> None:
+    command = _build_cmd(daily_config, CASES[0], Path('report.json'))
+    cb_config = json.dumps({
+        'enable_prefix_caching': False,
+        'max_num_batched_tokens': 99999999,
+    })
+    wa_config = json.dumps(json.loads(daily_config.wa_config_path.read_text(encoding='utf-8')))
+
+    assert f'--cb_config {subprocess.list2cmdline([cb_config])}' in command
+    assert f'--load_config {subprocess.list2cmdline([wa_config])}' in command
+    assert daily_config.wa_config_path.name not in command
+    assert '--disable_prompt_permutation' in command
 
 
 def _machine_phases(data: list, machine: dict | None,
