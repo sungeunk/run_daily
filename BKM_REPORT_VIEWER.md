@@ -10,6 +10,9 @@
 All listed user services are enabled and start automatically through user
 lingering. Service names match their tracked unit filenames.
 
+Run command examples from within the `run_daily` checkout. Paths below are
+relative to its root; the checkout does not need to live under `~/repo`.
+
 ---
 
 # Bootstrap (rebuilding this machine from scratch)
@@ -29,7 +32,7 @@ Install Caddy at `/home/sungeunk/.local/bin/caddy` as documented in
 
 2. Verify the tracked requirements through `uv`:
 ```bash
-cd /home/sungeunk/repo/run_daily
+cd "$(git rev-parse --show-toplevel)"
 uv run --with-requirements daily/requirements.txt python -c "import duckdb, streamlit"
 ```
 
@@ -52,7 +55,7 @@ internal client CIDR only; do not open it to all sources with
 
 5. Register, enable, and start the tracked user services:
 ```bash
-cd /home/sungeunk/repo/run_daily/web_server
+cd "$(git rev-parse --show-toplevel)/web_server"
 ./manage-web-services.sh all
 ./manage-web-services.sh status
 ```
@@ -158,14 +161,14 @@ to fail on partially written JSON; retry after their upload completes.
 
 ### Service configuration
 dg2fizz
-src: /home/sungeunk/repo/run_daily/daily/viewer/app.py
-service file: /home/sungeunk/repo/run_daily/web_server/caddy/systemd/daily-viewer.service
+src: daily/viewer/app.py
+service file: web_server/caddy/systemd/daily-viewer.service
 The tracked user unit is authoritative. Register and update it through
 `manage-web-services.sh`; do not create a separate system-level unit.
 
 ## Start service
 ```bash
-cd /home/sungeunk/repo/run_daily/web_server
+cd "$(git rev-parse --show-toplevel)/web_server"
 ./manage-web-services.sh install
 systemctl --user restart daily-viewer.service
 systemctl --user status daily-viewer.service
@@ -178,7 +181,7 @@ systemctl --user status daily-viewer.service
 http://dg2fizz.ikor.intel.com:8090/mcp
 
 Remote query surface for Copilot/Claude.
-Server source: `/home/sungeunk/repo/run_daily/daily/mcp_server/server.py` —
+Server source: `daily/mcp_server/server.py` —
 a standalone Python MCP server (official `mcp` SDK, `MCPServer`) exposing 7
 `daily_results_*` tools over the `daily_llm_benchmark.duckdb` central DB.
 It reuses `daily/data/read.py`, the same query layer the Streamlit viewer uses.
@@ -213,7 +216,7 @@ The tracked user service is
 through the shared service manager:
 
 ```bash
-cd /home/sungeunk/repo/run_daily/web_server
+cd "$(git rev-parse --show-toplevel)/web_server"
 ./manage-web-services.sh install
 ./manage-web-services.sh start
 ```

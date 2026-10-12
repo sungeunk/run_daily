@@ -5,6 +5,7 @@ set -Eeuo pipefail
 trap 'printf "Error at line %d\n" "$LINENO" >&2' ERR
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 readonly WIKI_DIR="${SCRIPT_DIR}/wiki"
 readonly WIKI_REQUIREMENTS="${WIKI_DIR}/requirements.txt"
 readonly USER_UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
@@ -55,7 +56,10 @@ unit_source() {
 }
 
 install_services() {
-    local service source target
+    local service source target escaped_root
+    escaped_root="${REPO_ROOT//\\/\\\\}"
+    escaped_root="${escaped_root//\"/\\\"}"
+    escaped_root="${escaped_root//%/%%}"
     mkdir -p "$USER_UNIT_DIR"
     for service in "${SERVICES[@]}"; do
         source="$(unit_source "$service")"
@@ -65,6 +69,9 @@ install_services() {
             continue
         fi
         ln -sfn "$source" "$target"
+        mkdir -p "${target}.d"
+        printf '[Service]\nWorkingDirectory="%s"\n' "$escaped_root" \
+            > "${target}.d/10-run-daily-root.conf"
         printf 'Registered %s\n' "$service"
     done
     systemctl --user daemon-reload

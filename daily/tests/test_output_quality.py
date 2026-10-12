@@ -80,7 +80,7 @@ def test_output_links_preserve_each_run_and_original_image_slot() -> None:
     samples = [
         samples_from_summary(
             summary, "", lambda _: None, stamp,
-            artifact_base_url=f"https://reports.example/daily2/RAPTOR-ELLY/{stamp[:4]}.{stamp[4:6]}",
+            artifact_base_url=f"https://reports.example/daily/RAPTOR-ELLY/{stamp[:4]}.{stamp[4:6]}",
         )
         for stamp in stamps
     ]
@@ -88,7 +88,7 @@ def test_output_links_preserve_each_run_and_original_image_slot() -> None:
     rows = inspect_outputs(*samples, AnalysisConfig()).rows
 
     for label, stamp in zip(("current", "baseline", "release"), stamps):
-        base = f"https://reports.example/daily2/RAPTOR-ELLY/{stamp[:4]}.{stamp[4:6]}/daily.{stamp}"
+        base = f"https://reports.example/daily/RAPTOR-ELLY/{stamp[:4]}.{stamp[4:6]}/daily.{stamp}"
         assert getattr(rows[0], f"{label}_url") == f"{base}.raw"
         assert getattr(rows[1], f"{label}_url") == f"{base}.image.image-model_FP16_0.png"
 
@@ -376,7 +376,7 @@ def test_read_artifact_handles_truncated_http_response(
 
     monkeypatch.setattr("common.delivery.REMOTE_BASE_DIR", str(tmp_path))
     monkeypatch.setattr("urllib.request.build_opener", lambda *_args, **_kwargs: Opener())
-    config = AnalysisConfig(output_artifact_base_url="http://reports.example.com/daily2")
+    config = AnalysisConfig(output_artifact_base_url="http://reports.example.com/daily")
 
     assert _read_artifact(
         config, "LNL-03", "20261005_2349", "daily.20261005_2349.raw", None,

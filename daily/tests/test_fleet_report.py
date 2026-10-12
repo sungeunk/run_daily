@@ -158,15 +158,6 @@ def test_render_fleet_html_links_raw_log_from_dg2fizz_storage() -> None:
     )
 
 
-def test_raw_log_link_rejects_legacy_daily_root() -> None:
-    from report.fleet import _raw_log_link
-
-    assert _raw_log_link(
-        "http://dg2fizz:8081",
-        {"rawlog_path": "/var/www/html/daily/LNL-03/daily.20260901_1143.raw"},
-    ) == ""
-
-
 def test_render_fleet_html_keeps_mail_lines_below_limit() -> None:
     machine = {
         "machine": "ARLH-01", "status": "success",
@@ -242,14 +233,14 @@ def test_render_fleet_html_supports_pr_title_and_raw_logs() -> None:
             "machine": "PTLH-02",
             "run_id": "run-pr",
             "status": "success",
-            "rawlog_path": "/var/www/html/daily2/PTLH-02/2026.09/daily.20260922_1540.raw",
+            "rawlog_path": "/var/www/html/daily/PTLH-02/2026.09/daily.20260922_1540.raw",
             "report_file": "daily.20260922_1540.summary.json",
         }],
         "functional_issues": [{
             "machine": "PTLH-02",
             "run_id": "run-pr",
             "outcome": "failed",
-            "rawlog_path": "/var/www/html/daily2/PTLH-02/2026.09/daily.20260922_1540.raw",
+            "rawlog_path": "/var/www/html/daily/PTLH-02/2026.09/daily.20260922_1540.raw",
         }],
         "top_regressions": [{
             "machine": "PTLH-02",
@@ -278,7 +269,8 @@ def test_render_fleet_html_supports_pr_title_and_raw_logs() -> None:
     assert "PR#38312 onednn 3.14 sungeunk" in rendered
     assert "Artifacts</th>" in rendered
     assert "Raw log</a>" in rendered
-    assert "http://reports.local/daily/PTLH-02/2026.09/daily.20260922_1540.raw" in rendered
+    assert rendered.count("http://reports.local/daily/PTLH-02/2026.09/daily.20260922_1540.raw") == 3
+    assert "http://reports.local/daily/PTLH-02/2026.09/daily.20260922_1540.html" in rendered
 
 
 def test_render_fleet_html_appends_to_existing_viewer_query() -> None:

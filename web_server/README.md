@@ -250,10 +250,10 @@ Jenkins controller and verify it before starting the service.
 
 ## Update the Wiki
 
-Run the service management script from this directory:
+Run the service management script from within the `run_daily` checkout:
 
 ```bash
-cd /home/sungeunk/repo/run_daily/web_server
+cd "$(git rev-parse --show-toplevel)/web_server"
 ./manage-web-services.sh build-wiki
 ```
 
@@ -268,6 +268,9 @@ The script also manages the user-level service units:
 
 `install` registers and enables available Caddy, Daily viewer, and Daily
 Results MCP units so they start with the user systemd manager after reboot.
+It writes a `10-run-daily-root.conf` drop-in for each unit, setting
+`WorkingDirectory` to the detected checkout root. Re-run `install` after moving
+the checkout, then restart the services to apply the new paths.
 The `all` command installs services, restarts them so updated unit settings take
 effect, builds the Wiki, and reloads Caddy:
 

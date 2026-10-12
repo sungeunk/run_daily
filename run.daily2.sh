@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONDA_ENV="${CONDA_ENV:-daily.py312}"
-SKILL_ROOT="${SKILL_ROOT:-/home/sungeunk/repo/openvino-gpu-plugin-skills}"
+SKILL_ROOT="${SKILL_ROOT:-${SCRIPT_DIR}/../openvino-gpu-plugin-skills}"
 DOWNLOAD_OV="${SKILL_ROOT}/.github/skills/download-openvino/scripts/download-openvino.py"
 DOWNLOAD_OUTPUT="${SCRIPT_DIR}/openvino_nightly"
 LATEST_SETUP_FILE="${DOWNLOAD_OUTPUT}/latest_ov_setup_file.txt"

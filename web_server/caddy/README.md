@@ -79,7 +79,7 @@ Current site configurations:
 
 | File | Purpose | Local URL |
 | --- | --- | --- |
-| `conf.d/wiki.caddy` | Serves the MkDocs Wiki static site from `../wiki/site/`. | `http://127.0.0.1:8080/` |
+| `conf.d/wiki.caddy` | Serves the MkDocs Wiki static site from `web_server/wiki/site/` relative to the checkout root. | `http://127.0.0.1:8080/` |
 | `conf.d/files.caddy` | Provides read-only directory browsing for selected `/mnt/hdd` folders. | `http://127.0.0.1:8081/` |
 | `conf.d/daily-viewer.caddy` | Proxies the public Daily viewer endpoint to local Streamlit. | `http://127.0.0.1:8091/` |
 
@@ -94,18 +94,19 @@ ingestion hook or database files before the deny matcher runs.
 
 ### `systemd/caddy.service`
 
-The unit currently assumes:
-
-- User: `sungeunk`.
-- Repository: `/home/sungeunk/repo/run_daily/web_server/caddy`.
-- Binary: `/home/sungeunk/.local/bin/caddy`.
-
-If the user, repository location, or binary location changes, update `ExecStart` and `ExecReload` before installing the unit.
+The service manager detects the `run_daily` checkout root and records it as
+`WorkingDirectory` in a `10-run-daily-root.conf` drop-in. Configuration and site
+paths are relative to that root; no particular parent directory is required.
+The binary is `%h/.local/bin/caddy`, resolved under the service user's home.
+Re-run `manage-web-services.sh install` after moving the checkout and restart
+the services. Only a custom binary location requires changing `ExecStart` and
+`ExecReload`.
 
 ## Enable and start the user service
 
 From `web_server/`, register the tracked units as user services. The manager
-creates symlinks to the repository units, reloads systemd, and enables them:
+creates symlinks to the repository units and checkout-root drop-ins, reloads
+systemd, and enables them:
 
 ```bash
 ./manage-web-services.sh install
@@ -123,11 +124,12 @@ Without lingering, the service runs while the user session is active.
 
 ## Validate, reload, and troubleshoot
 
-Validate before applying a configuration change:
+Validate before applying a configuration change, from within the checkout:
 
 ```bash
+cd "$(git rev-parse --show-toplevel)"
 ~/.local/bin/caddy validate \
-	 --config "$HOME/repo/run_daily/web_server/caddy/Caddyfile" \
+	 --config web_server/caddy/Caddyfile \
 	 --adapter caddyfile
 ```
 

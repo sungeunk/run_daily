@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=%h/.local/bin/caddy run --environ --config %h/repo/run_daily/web_server/caddy/Caddyfile --adapter caddyfile
-ExecReload=%h/.local/bin/caddy reload --config %h/repo/run_daily/web_server/caddy/Caddyfile --adapter caddyfile
+ExecStart=%h/.local/bin/caddy run --environ --config web_server/caddy/Caddyfile --adapter caddyfile
+ExecReload=%h/.local/bin/caddy reload --config web_server/caddy/Caddyfile --adapter caddyfile
 ExecStop=/bin/kill -QUIT $MAINPID
 Restart=on-failure
 RestartSec=5s

@@ -67,10 +67,10 @@ def test_mail_relay_override_does_not_change_public_url(monkeypatch) -> None:
 
 
 def test_backup_url_honors_public_base_override(monkeypatch) -> None:
-    monkeypatch.setenv("DAILY_REPORT_BASE_URL", "https://reports.example.com/results/daily2")
+    monkeypatch.setenv("DAILY_REPORT_BASE_URL", "https://reports.example.com/results/daily")
 
     assert backup_server_url(filename="daily.20260901_1143.raw").startswith(
-        "https://reports.example.com/results/daily2/"
+        "https://reports.example.com/results/daily/"
     )
 
 

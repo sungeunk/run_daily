@@ -97,7 +97,7 @@ def _apply_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
                 WHERE triggered_by IS NULL
                     AND run_kind = 'daily'
                     AND lower(trim(purpose)) IN (
-                            'daily2 timer', 'daily_cb timer', 'daily_pipeline timer'
+                            'daily timer', 'daily_cb timer', 'daily_pipeline timer'
                     )
                 """,
         # Backfill only rows never classified: an ADD COLUMN default would

@@ -5,7 +5,7 @@
 >
 > **주의:** 이 문서는 한국어 번역본입니다. Source of truth는 [DESIGN.md](DESIGN.md)입니다.
 
-- **작업 디렉터리:** `/home/sungeunk/repo/run_daily2/daily`
+- **Working dir:** `daily/` within the `run_daily` checkout.
 - **결과 루트:** `/var/www/html/daily/<MACHINE>/`
 - **언어 정책:** 대화는 `ko-KR`, 코드 / 주석 / 문서는 영어.
 

@@ -240,7 +240,7 @@ _GENERIC_TRIGGERED_BY = {
 }
 
 _LEGACY_TIMER_PURPOSES = {
-    "daily2 timer",
+    "daily timer",
     "daily_cb timer",
     "daily_pipeline timer",
 }

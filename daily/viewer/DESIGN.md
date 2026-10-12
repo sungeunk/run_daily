@@ -3,7 +3,7 @@
 > Streamlit-based analysis tool for the LLM daily test results.
 > Supersedes `_old_viewer.py` + `_old_ingest.py` + `_old_schema.sql`.
 
-- **Working dir:** `/home/sungeunk/repo/run_daily2/daily`
+- **Working dir:** `daily/` within the `run_daily` checkout.
 - **Results root:** `/var/www/html/daily/<MACHINE>/`
 - **Language policy:** `ko-KR` for conversation; English for code / comments / docs.
 

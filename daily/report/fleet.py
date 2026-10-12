@@ -98,7 +98,7 @@ def _raw_log_link(base_url: str, row: Mapping[str, Any]) -> str:
     rawlog_path = str(row.get("rawlog_path") or "")
     prefixes = {
         "/mnt/hdd/daily/data/": "daily/",
-        "/var/www/html/daily2/": "daily/",
+        "/var/www/html/daily/": "daily/",
     }
     matched = next(
         ((prefix, url_prefix) for prefix, url_prefix in prefixes.items()

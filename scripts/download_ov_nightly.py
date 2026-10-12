@@ -1469,7 +1469,8 @@ def get_latest_master_urls(
     after a newer one, and date ordering would then pick the stale build.
     ``args.skip_latest`` drops that many of the newest valid builds.
 
-    Returns ``(list_of_valid_urls, had_existing_version)``.
+    Only compare against a cached version whose commit is confirmed on master.
+    Returns ``(list_of_valid_urls, had_existing_master_version)``.
     """
     master_roots = [_MASTER_COMMIT_ROOT]
     commit_entries: list[tuple[str, datetime.datetime, str]] = []
@@ -1492,6 +1493,17 @@ def get_latest_master_urls(
 
     root_by_commit = {commit_id: root for commit_id, _, root in commit_entries}
     github_commits = get_latest_commit_list_from_github(per_page=100)
+    if existing_version is not None:
+        master_commits = set(github_commits) | set(root_by_commit)
+        if not any(
+            commit_id.startswith(existing_version.commit_id) for commit_id in master_commits
+        ):
+            log.info(
+                "Cached version %s is not confirmed on master; "
+                "ignoring it when selecting the latest master build.",
+                existing_version,
+            )
+            existing_version = None
     if github_commits:
         ordered = [(c, root_by_commit[c]) for c in github_commits if c in root_by_commit]
         log.info(

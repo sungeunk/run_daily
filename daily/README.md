@@ -173,11 +173,14 @@ ssh 사용자에게 권한이 없으면 `<hostname>` 디렉토리 자동 생성�
 야간 잡이 실제로 하는 일 전부 — OpenVINO 소싱, 머신별 디바이스 설정,
 전체 수트 실행, share / mail 로 결과 전달.
 
+This example is a `daily/cron.sh` script; it resolves the checkout root from
+its own location, independently of the caller's working directory.
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/sungeunk/repo/run_daily2
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # 1. OpenVINO 환경 — download-openvino 가 기록한 최신 포인터 사용.
 source "$(cat ov_pkg/latest_ov_setup_file.txt)"
@@ -196,9 +199,12 @@ python daily/run.py \
 
 crontab 엔트리 (매일 01:00 실행):
 
+Set `RUN_DAILY_ROOT` to the actual checkout location and ensure its `output/`
+directory exists. A crontab command must be on one line.
+
 ```cron
-0 1 * * * /home/sungeunk/repo/run_daily2/daily/cron.sh \
-    >> /home/sungeunk/repo/run_daily2/output/cron.log 2>&1
+RUN_DAILY_ROOT=/path/to/run_daily
+0 1 * * * "$RUN_DAILY_ROOT/daily/cron.sh" >> "$RUN_DAILY_ROOT/output/cron.log" 2>&1
 ```
 
 ## Windows (PowerShell)
@@ -208,7 +214,7 @@ Linux 스크립트와 동일한 흐름 — PowerShell + `setupvars.bat` 로 변�
 ```powershell
 # daily\run-daily.ps1
 $ErrorActionPreference = 'Stop'
-Set-Location C:\dev\run_daily2
+Set-Location (Split-Path -Parent $PSScriptRoot)
 
 # 1. OpenVINO 환경 — setupvars.bat 을 현재 PowerShell 프로세스에 흡수.
 #    setupvars.bat 은 `set` 으로 env 를 내보내므로 그 출력을 파싱해
@@ -232,8 +238,10 @@ python daily\run.py `
 
 수동 실행:
 
+Run from the `run_daily` checkout root:
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\dev\run_daily2\daily\run-daily.ps1
+powershell -ExecutionPolicy Bypass -File .\daily\run-daily.ps1
 ```
 
 메모:

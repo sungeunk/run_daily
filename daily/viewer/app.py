@@ -860,7 +860,7 @@ def _tab_excel(cfg: dict) -> None:
 
     filt = st.text_input("Filter by purpose/description",
                          value=DEFAULT_RUN_FILTER, key="excel_filter",
-                         help="Use a shared term such as 'daily' to include both the legacy daily2 runs and the newer daily pipeline runs.")
+                         help="Use a shared term such as 'daily' to include all daily pipeline runs.")
     view = runs
     if filt:
         mask = (view["purpose"].fillna("").str.contains(filt, case=False) |

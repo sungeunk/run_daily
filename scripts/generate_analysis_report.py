@@ -27,7 +27,7 @@ Usage::
         --history-window 15 --fluctuation-scale 2.0
 
     # override baseline purpose used for baseline selection
-    python scripts/generate_analysis_report.py --baseline-purpose "daily2 timer"
+    python scripts/generate_analysis_report.py --baseline-purpose "daily timer"
 
     # also overwrite daily.<stamp>.html in out-dir for stable filename access
     python scripts/generate_analysis_report.py --write-daily-html
