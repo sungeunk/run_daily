@@ -59,6 +59,7 @@ DEV_ONLY_TEST_FILES = frozenset({
     'test_run_meta.py',
     'test_viewer_charts.py',
     'test_viewer_queries.py',
+    'test_web_services.py',
 })
 
 

@@ -8,6 +8,9 @@ import subprocess
 import pytest
 
 
+pytestmark = pytest.mark.dev_only
+
+
 @pytest.mark.parametrize("checkout_name", ["run_daily", 'relocated repo%"name'])
 def test_service_install_uses_checkout_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkout_name: str
