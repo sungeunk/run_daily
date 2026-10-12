@@ -56,7 +56,8 @@ _RE_WARMUP = re.compile(r'\[warm-up\]')
 
 
 def parse_output(output: str) -> list[SdGenaiItem]:
-    ret: list[SdGenaiItem] = []
+    # One item per prompt; generation time is averaged over iterations (-n).
+    by_prompt: dict[int, list[SdGenaiItem]] = {}
     current: SdGenaiItem = {}
 
     for line in output.splitlines():
@@ -68,9 +69,17 @@ def parse_output(output: str) -> list[SdGenaiItem]:
             if m:
                 current[key] = caster(m.group(1))
 
-        if _RE_START.search(line):
+        m_start = _RE_START.search(line)
+        if m_start:
             if current:
-                ret.append(current)
+                by_prompt.setdefault(int(m_start.group(2)), []).append(current)
                 current = {}
 
+    ret: list[SdGenaiItem] = []
+    for samples in by_prompt.values():
+        item = dict(samples[0])
+        times = [s['generation_time_sec'] for s in samples if 'generation_time_sec' in s]
+        if times:
+            item['generation_time_sec'] = sum(times) / len(times)
+        ret.append(item)
     return ret

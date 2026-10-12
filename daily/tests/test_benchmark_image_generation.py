@@ -16,7 +16,6 @@ from parsers.stable_diffusion_genai import parse_output
 OV_FP16_4BIT_DEFAULT = 'OV_FP16-4BIT_DEFAULT'
 OV_FP16_INT4_SYM_CW = 'OV_FP16-INT4_SYM_CW'
 FP16 = 'FP16'
-PROMPT_TYPE_MULTIMODAL = 'multimodal'
 PROMPT_TYPE_32_1K = '32_1024'
 
 
@@ -35,8 +34,8 @@ class ImageGenCase:
 CASES: list[ImageGenCase] = [
     # flux is insensitive to input token size, so only the first prompt is run.
     ImageGenCase('flux.1-schnell',        OV_FP16_INT4_SYM_CW, prompt_index=0),
-    ImageGenCase('stable-diffusion-v1-5', FP16, PROMPT_TYPE_MULTIMODAL),
-    ImageGenCase('stable-diffusion-3.5-large-turbo', OV_FP16_4BIT_DEFAULT, PROMPT_TYPE_MULTIMODAL),
+    ImageGenCase('stable-diffusion-v1-5', FP16),
+    ImageGenCase('stable-diffusion-3.5-large-turbo', OV_FP16_4BIT_DEFAULT),
 ]
 
 
@@ -60,7 +59,7 @@ def _build_cmd(cfg: DailyConfig, case: ImageGenCase) -> str:
         f'python {cfg.llm_bench_script}'
         f' -m {model_path}'
         f' -d {cfg.device}'
-        f' -mc 1 -n 1 --genai'
+        f' -mc 1 -n {cfg.benchmark_iter_num} --genai --static_reshape'
         f' --output_dir {cfg.output_dir}'
         f' -pf {prompt_path}'
         f'{prompt_index}'
@@ -75,7 +74,8 @@ def test_benchmark_image_generation(case: ImageGenCase, daily_config: DailyConfi
     cmd = _build_cmd(daily_config, case)
     output_fingerprint = generation_fingerprint(
         _prompt_path(daily_config, case), str(daily_config.llm_bench_script),
-        {"prompt_index": case.prompt_index, "iterations": 1, "genai": True},
+        {"prompt_index": case.prompt_index, "iterations": daily_config.benchmark_iter_num,
+         "genai": True, "static_reshape": True},
     )
     record_metrics({
         'test_type': 'image_generation',
