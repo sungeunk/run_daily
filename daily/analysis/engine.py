@@ -66,6 +66,7 @@ def _build_current_run_info(rec) -> CurrentRunInfo:
         host_info=getattr(rec, "host_info", None),
         memory_size=memory_size,
         memory_speed=memory_speed,
+        model_cache=getattr(rec, "model_cache", None),
     )
 
 

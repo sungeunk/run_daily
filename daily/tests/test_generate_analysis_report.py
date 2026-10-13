@@ -66,6 +66,9 @@ def test_main_generates_html_from_mcp_only(report_generator, monkeypatch, tmp_pa
         def __exit__(self, *_args) -> None:
             return None
 
+        def run_sql(self, _sql: str) -> list[dict]:
+            return []
+
     monkeypatch.setattr("common.mcp_client.McpHttpClient", Client)
     assert report_generator.main([
         "--mcp-url", "http://daily.example/mcp",
@@ -81,6 +84,50 @@ def test_main_generates_html_from_mcp_only(report_generator, monkeypatch, tmp_pa
     assert "<th>Fail</th>" in html
     assert ">1<" in html
     assert calls == [("MTL-01", None, None)]
+
+
+def test_main_renders_baseline_environment_from_mcp(report_generator, monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        report_generator, "_pick_run_from_mcp",
+        lambda *_args, **_kwargs: {"run_id": "cur", "ts": "2026-10-13T08:47:00", "machine": "PTLH-01"},
+    )
+    result = AnalysisResult(
+        overall_status="green",
+        baseline=BaselineInfo(status="found", run_id="base", stamp="20261012_2350"),
+        functional=FunctionalResult(total=1, passed=1, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=0, improved=0, same=0, regressed=0, unavailable=0),
+        models=[], top_regressions=[], rows=[],
+        release=ReleaseInfo(status="found", run_id="rel", stamp="20261005_1032"),
+    )
+    monkeypatch.setattr(report_generator, "_analyze_run_from_mcp", lambda *_args, **_kwargs: result)
+    queries: list[str] = []
+
+    class Client:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def run_sql(self, sql: str) -> list[dict]:
+            queries.append(sql)
+            if "run_id = 'base'" in sql:
+                return [{"ov_version": "2026.5.0-1", "gpu_shared_memory_mb": 48648.0}]
+            return [{"ov_version": "2026.5.0-2", "gpu_shared_memory_mb": 48648.0}]
+
+    monkeypatch.setattr("common.mcp_client.McpHttpClient", Client)
+    assert report_generator.main(["--machine", "PTLH-01", "--out-dir", str(tmp_path)]) == 0
+
+    html = next(tmp_path.glob("analysis.current_*.html")).read_text(encoding="utf-8")
+    assert "Baseline 20261012_2350" in html
+    assert "GPU shared memory" in html
+    assert any("run_id = 'base'" in q for q in queries)
+    assert any("run_id = 'cur'" in q for q in queries)
+    assert "Release 20261005_1032" in html
+    assert any("run_id = 'rel'" in q for q in queries)
 
 
 def test_pick_run_queries_daily_results_mcp(report_generator, monkeypatch) -> None:

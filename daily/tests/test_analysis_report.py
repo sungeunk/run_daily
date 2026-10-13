@@ -77,7 +77,7 @@ def test_release_columns_require_actual_data(
     parser = TableRows()
     parser.feed(rendered)
     visible = visible and with_rows
-    width = 13 if visible else 11
+    width = 10 if visible else 8
     headers = [row for row in parser.rows if row and row[0] == "Model (?)"]
     assert len(headers) == 3
     for header in headers:
@@ -90,7 +90,9 @@ def test_release_columns_require_actual_data(
             if visible and row[0] == "model-missing":
                 assert row[7:9] == ["n/a", "n/a"]
     assert f"colspan='{width}'" in rendered
-    assert f"colspan='{11 if visible else 13}'" not in rendered
+    assert f"colspan='{8 if visible else 10}'" not in rendered
+    for removed in ("Sigma (σ) (?)", "CV (?)", "Ref Source (?)"):
+        assert all(removed not in header for header in headers)
     assert ("Relative change vs the release build" in rendered) == visible
 
 
@@ -142,7 +144,6 @@ def test_status_reasons_explain_the_badges(
     rendered = render_analysis_html(result)
     assert f"<span>{reason}</span>" in rendered
     assert rendered.count('class="status-reason"') == 3
-    assert '--status-columns:3' in rendered
 
 
 def test_missing_references_explain_gray_badges() -> None:
@@ -177,7 +178,6 @@ def test_unavailable_or_disabled_release_status(disabled: bool) -> None:
         assert 'data-comparison="baseline-release" data-status="gray"' in rendered
     else:
         assert rendered.count('class="status-reason"') == 1
-        assert '--status-columns:1' in rendered
 
 
 def test_unexpected_release_status_renders_fallback_badge() -> None:
@@ -401,3 +401,46 @@ def test_measurement_unit_is_html_escaped() -> None:
 
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
     assert "<img src=x onerror=alert(1)>" not in rendered
+
+def test_run_summary_compares_current_with_baseline_and_release() -> None:
+    from analysis.types import CurrentRunInfo
+
+    result = AnalysisResult(
+        overall_status="green", baseline=BaselineInfo(status="found", stamp="20261011_2350"),
+        functional=FunctionalResult(total=0, passed=0, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=0, improved=0, same=0, regressed=0, unavailable=0),
+        models=[], top_regressions=[], rows=[],
+        current_run=CurrentRunInfo(ov_version="2026.5.0-2", machine_name="PTLH-01", model_cache="WW24"),
+        release=ReleaseInfo(status="found", stamp="20261005_1032", matched_count=165),
+    )
+    rendered = render_analysis_html(
+        result,
+        baseline_meta={"ov_version": "2026.5.0-1", "machine": "PTLH-01", "model_cache": "WW24"},
+        release_meta={"ov_version": "2026.4.1", "machine": "PTLH-01", "model_cache": "WW20"},
+    )
+    parser = TableRows()
+    parser.feed(rendered)
+    rows = {row[0]: row[1:] for row in parser.rows if row}
+
+    assert rows["Field"] == ["Current", "Baseline 20261011_2350", "Release 20261005_1032 (165 series)"]
+    assert rows["Current OV"] == ["2026.5.0-2", "2026.5.0-1", "2026.4.1"]
+    assert rows["Machine"] == ["PTLH-01", "same", "same"]
+    assert rows["Model cache"] == ["WW24", "same", "WW20"]
+    assert "Environment matches the baseline run." in rendered
+    assert "Baseline" not in rows and "Release" not in rows
+
+
+def test_run_summary_counts_only_environment_differences() -> None:
+    from analysis.types import CurrentRunInfo
+
+    result = AnalysisResult(
+        overall_status="green", baseline=BaselineInfo(status="found", stamp="20261011_2350"),
+        functional=FunctionalResult(total=0, passed=0, failed=0, error=0, skipped=0),
+        performance=PerformanceResult(compared=0, improved=0, same=0, regressed=0, unavailable=0),
+        models=[], top_regressions=[], rows=[],
+        current_run=CurrentRunInfo(ov_version="2026.5.0-2", purpose="timer", gpu_driver_version="32.0.2"),
+    )
+    rendered = render_analysis_html(result, baseline_meta={
+        "ov_version": "2026.5.0-1", "purpose": "manual", "gpu_driver_version": "32.0.1",
+    })
+    assert "1 environment field(s) differ from the baseline run." in rendered

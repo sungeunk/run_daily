@@ -385,30 +385,6 @@ def perf_for_runs(db_path: Path, run_ids: Sequence[str], *,
 #: Rig details a report quotes when describing the baseline it compared
 #: against. Not the code under test -- a change here explains a difference
 #: without being a regression.
-RIG_META_COLUMNS = ("machine", "purpose", "ov_version", "host_info",
-                    "host_memory_size_gb", "host_memory_speed_mhz",
-                    "gpu_info", "gpu_driver_version",
-                    "gpu_dedicated_memory_mb", "gpu_shared_memory_mb")
-
-
-def rig_meta_for_stamp(db_path: Path, stamp: str) -> dict:
-    """Rig details of the newest run with ``stamp``, or ``{}`` if unavailable.
-
-    Swallows every failure on purpose: this decorates a report header, and a
-    missing or half-migrated DB must not take the report down with it.
-    """
-    try:
-        with _read_only(db_path) as con:
-            row = con.execute(
-                f"SELECT {', '.join(RIG_META_COLUMNS)} FROM runs "
-                "WHERE strftime(ts, '%Y%m%d_%H%M') = ? "
-                "ORDER BY ts DESC LIMIT 1", [stamp],
-            ).fetchone()
-    except Exception:  # noqa: BLE001 -- see docstring
-        return {}
-    return {k: v for k, v in zip(RIG_META_COLUMNS, row or ()) if v is not None}
-
-
 def list_runs(db_path: Path, machine: str | None = None) -> pd.DataFrame:
     """Return runs metadata with one row per run, newest first."""
     where = "" if machine is None else "WHERE machine = ?"

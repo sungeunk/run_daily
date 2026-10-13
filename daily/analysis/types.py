@@ -227,6 +227,7 @@ class CurrentRunInfo:
     host_info: str | None = None
     memory_size: str | None = None
     memory_speed: str | None = None
+    model_cache: str | None = None
 
 
 @dataclass

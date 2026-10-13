@@ -617,27 +617,13 @@ def _viewer_db(root: Path) -> Path:
     return db
 
 
-def _baseline_meta(root: Path, stamp: str | None, db_path: Path) -> dict:
-    """``meta``-shaped view of the baseline run.
-
-    Prefers the baseline's own summary.json anywhere in the output tree;
-    falls back to the viewer DB so a rotated-away artefact still yields an
-    environment comparison.
-    """
-    if not stamp:
+def _reference_meta(info, analysis_config) -> dict:
+    """``meta``-shaped view of a reference run, read from the daily_results server."""
+    if info is None or info.status != 'found':
         return {}
-    for path in sorted(Path(root).rglob(f'daily.{stamp}.summary.json')):
-        try:
-            payload = json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            break
-        return payload.get('meta') or {}
-    return _baseline_meta_from_db(db_path, stamp)
-
-
-def _baseline_meta_from_db(db_path: Path, stamp: str) -> dict:
-    from data.read import rig_meta_for_stamp  # noqa: PLC0415
-    return rig_meta_for_stamp(db_path, stamp)
+    from analysis.remote import fetch_run_meta  # noqa: PLC0415
+    from analysis.types import AnalysisConfig  # noqa: PLC0415
+    return fetch_run_meta(analysis_config or AnalysisConfig(), info.run_id)
 
 
 def _analysis_config(args: argparse.Namespace):
@@ -709,7 +695,8 @@ def _run_analysis(html_report: Path, summary_json: Path, root: Path,
         image_assets = _image_assets(staged_images or {}, root,
                                      result.baseline.stamp, publish=publish)
         write_analysis_html(html_report, result, summary_data, image_assets,
-                            _baseline_meta(root, result.baseline.stamp, db_path))
+                            _reference_meta(result.baseline, analysis_config),
+                            _reference_meta(result.release, analysis_config))
         print(f'[run.py] analysis html report: {html_report}')
         return html_report
     except Exception as exc:  # noqa: BLE001 — analysis must not fail the run

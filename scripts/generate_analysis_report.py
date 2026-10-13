@@ -135,7 +135,8 @@ def _pick_run_from_mcp(config, *, machine: str | None, run_id: str | None,
 
     sql = (
         "SELECT run_id, ts, machine, ov_version, purpose, device, description, "
-        "host_info, host_memory_size_gb, host_memory_speed_mhz, total_tests, "
+        "host_info, host_memory_size_gb, host_memory_speed_mhz, gpu_info, gpu_driver_version, "
+        "gpu_dedicated_memory_mb, gpu_shared_memory_mb, model_cache, total_tests, "
         "passed_tests, failed_tests, error_tests, skipped_tests "
         f"FROM runs WHERE {' AND '.join(filters)} ORDER BY ts DESC, run_id DESC LIMIT 1"
     )
@@ -221,11 +222,12 @@ def _build_current_run_info(config, run_id: str, run: dict, *, client=None):
         ov_version=str(run['ov_version']) if run.get('ov_version') else None,
         purpose=str(purpose) if purpose else None,
         machine_name=str(run['machine']) if run.get('machine') else None,
-        gpu_driver_version=primary_driver,
-        gpu_info=gpu_info,
+        gpu_driver_version=str(run['gpu_driver_version']) if run.get('gpu_driver_version') else primary_driver,
+        gpu_info=str(run['gpu_info']) if run.get('gpu_info') else gpu_info,
         host_info=host_info,
         memory_size=memory_size,
         memory_speed=memory_speed,
+        model_cache=str(run['model_cache']) if run.get('model_cache') else None,
     )
 
 
@@ -376,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         if parsed_artifact_url.scheme not in {"http", "https"} or not parsed_artifact_url.netloc:
             ap.error('--output-artifact-base-url must be an HTTP(S) URL or empty')
 
+    from analysis.remote import fetch_run_meta
     from analysis.report import render_analysis_html
 
     cfg = AnalysisConfig(
@@ -399,6 +402,11 @@ def main(argv: list[str] | None = None) -> int:
                 cfg, machine=args.machine, run_id=args.run_id, stamp=args.stamp, client=client
             )
             result = _analyze_run_from_mcp(cfg, run, client=client)
+            current_meta = fetch_run_meta(cfg, str(run['run_id']), client=client)
+            baseline_meta = (fetch_run_meta(cfg, result.baseline.run_id, client=client)
+                             if result.baseline.status == 'found' else {})
+            release_meta = (fetch_run_meta(cfg, result.release.run_id, client=client)
+                            if result.release is not None and result.release.status == 'found' else {})
     except (RuntimeError, ValueError) as exc:
         print(f'[report] MCP query failed: {exc}', file=sys.stderr)
         return 1
@@ -409,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
     current_stamp = _stamp_from_run(run)
     print(f"[report] current  : run_id={run['run_id']} machine={run['machine']}")
 
-    html = render_analysis_html(result)
+    html = render_analysis_html(result, {'meta': current_meta} if current_meta else None,
+                                baseline_meta=baseline_meta, release_meta=release_meta)
     out_path = _unique_out_path(out_dir, current_stamp, now_tag)
     out_path.write_text(html, encoding='utf-8')
 

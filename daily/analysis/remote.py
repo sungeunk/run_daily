@@ -26,6 +26,10 @@ SeriesValues = dict[SeriesKeyTuple, tuple[float, str | None]]
 SeriesHistory = dict[SeriesKeyTuple, list[float]]
 _PERF_PAGE_SIZE = 200
 _PERF_KEY_COLUMNS = ("run_id", "model", "precision", "in_token", "out_token", "exec_mode")
+RUN_META_COLUMNS = ("machine", "purpose", "ov_version", "host_info",
+                    "host_memory_size_gb", "host_memory_speed_mhz",
+                    "gpu_info", "gpu_driver_version",
+                    "gpu_dedicated_memory_mb", "gpu_shared_memory_mb", "model_cache")
 RELEASE_PURPOSE = "release 2026.4.1 sungeunk"
 RELEASE_RUN_IDS: dict[str, str] = {
     "ARLH-01": "30279de834dff769b37d",
@@ -179,6 +183,24 @@ def fetch_release(config: AnalysisConfig, machine: str | None, *, client=None) -
         ),
         values,
     )
+
+
+def fetch_run_meta(config: AnalysisConfig, run_id: str | None, *, client=None) -> dict:
+    """Rig details of *run_id* shaped like a summary ``meta`` block, or ``{}`` if unavailable."""
+    if not run_id:
+        return {}
+    from common.mcp_client import McpError
+
+    sql = (f"SELECT {', '.join(RUN_META_COLUMNS)} FROM runs "
+           f"WHERE run_id = {_quote(run_id)} LIMIT 1")
+    try:
+        rows = _run_sql(config, sql, client)
+    except McpError as exc:
+        log.warning("Run metadata lookup failed for %s: %s", run_id, exc)
+        return {}
+    if not rows:
+        return {}
+    return {k: v for k, v in rows[0].items() if k in RUN_META_COLUMNS and v not in (None, "")}
 
 
 def fetch_series_values(config: AnalysisConfig, run_id: str, *, client=None) -> SeriesValues:

@@ -54,7 +54,7 @@ def _series_counts(summary: dict | None, result: AnalysisResult) -> tuple[int, i
     ``common.delivery.mail_title_suffix``: one test function can stand for
     several benchmark series.
     """
-    if summary is None:
+    if summary is None or "tests" not in summary:
         functional = result.functional
         return functional.skipped, functional.passed, functional.failed + functional.error
     return (expected_cases(summary, {"skipped"}),
@@ -62,65 +62,78 @@ def _series_counts(summary: dict | None, result: AnalysisResult) -> tuple[int, i
             expected_cases(summary, {"failed", "error"}))
 
 
+# Expected to change on every daily run, so they never count as an environment change.
+_NON_ENV_FIELDS = frozenset({"Current OV", "Current purpose"})
+
+
 def _render_run_summary(result: AnalysisResult, summary: dict | None,
-                        baseline_meta: dict | None) -> tuple[str, int, bool]:
-    """Return ``(rows_html, changed_count, has_baseline)`` for the Run Summary
-    card, flagging every value that differs from the baseline run."""
+                        baseline_meta: dict | None,
+                        release_meta: dict | None = None) -> tuple[str, int, list[str]]:
+    """Return ``(rows_html, baseline_changed_count, reference_columns)`` for the
+    Run Summary card, flagging every value that differs from each reference run."""
     current = result.current_run
     cur_dedicated, cur_shared = _gpu_memory_text(summary)
-    base_dedicated, base_shared = _gpu_memory_text(
-        {"meta": baseline_meta} if baseline_meta else None)
+    refs = [(name, meta) for name, meta in (("baseline", baseline_meta), ("release", release_meta)) if meta]
 
-    def _base(key: str, fmt=None) -> str | None:
-        value = (baseline_meta or {}).get(key)
-        if value in (None, ""):
-            return None
-        return fmt(value) if fmt else str(value)
+    def _meta(key: str, fmt=None):
+        def get(meta: dict) -> str | None:
+            value = meta.get(key)
+            if value in (None, ""):
+                return None
+            return fmt(value) if fmt else str(value)
+        return get
 
-    fields: list[tuple[str, str | None, str | None]] = [
-        ("Current OV", current.ov_version if current else None, _base("ov_version")),
-        ("Current purpose", current.purpose if current else None, _base("purpose")),
-        ("Machine", current.machine_name if current else None, _base("machine")),
+    fields: list[tuple[str, str | None, object]] = [
+        ("Current OV", current.ov_version if current else None, _meta("ov_version")),
+        ("Current purpose", current.purpose if current else None, _meta("purpose")),
+        ("Machine", current.machine_name if current else None, _meta("machine")),
+        ("Model cache", current.model_cache if current else None, _meta("model_cache")),
         ("GPU driver", current.gpu_driver_version if current else None,
-         _base("gpu_driver_version")),
-        ("GPU info", current.gpu_info if current else None, _base("gpu_info")),
+         _meta("gpu_driver_version")),
+        ("GPU info", current.gpu_info if current else None, _meta("gpu_info")),
     ]
     if cur_dedicated is not None:
-        fields.append(("GPU dedicated memory", cur_dedicated, base_dedicated))
+        fields.append(("GPU dedicated memory", cur_dedicated,
+                       lambda meta: _gpu_memory_text({"meta": meta})[0]))
     fields += [
-        ("GPU shared memory", cur_shared, base_shared),
-        ("Host info", current.host_info if current else None, _base("host_info")),
+        ("GPU shared memory", cur_shared, lambda meta: _gpu_memory_text({"meta": meta})[1]),
+        ("Host info", current.host_info if current else None, _meta("host_info")),
         ("Memory size", current.memory_size if current else None,
-         _base("host_memory_size_gb", lambda v: f"{float(v):.1f} GB")),
+         _meta("host_memory_size_gb", lambda v: f"{float(v):.1f} GB")),
         ("Memory speed", current.memory_speed if current else None,
-         _base("host_memory_speed_mhz", lambda v: f"{float(v):.0f} MHz")),
+         _meta("host_memory_speed_mhz", lambda v: f"{float(v):.0f} MHz")),
     ]
 
-    has_baseline = bool(baseline_meta)
     rows: list[str] = []
     changed = 0
-    for label, cur, base in fields:
-        if cur is None and base is None:
+    for label, cur, getter in fields:
+        ref_values = [(name, getter(meta)) for name, meta in refs]
+        if cur is None and all(value is None for _, value in ref_values):
             continue
         cur_text = html.escape(cur or "n/a")
-        if not has_baseline:
+        if not refs:
             rows.append(f'<tr><td class="k">{label}</td><td>{cur_text}</td></tr>')
             continue
-        differs = base is not None and base != cur
-        changed += differs
-        if base is None:
-            base_cell = "<span class='muted'>n/a</span>"
-        elif differs:
-            base_cell = f"<span style='color:#a05a00'>{html.escape(base)}</span>"
-        else:
-            base_cell = "<span class='muted'>same</span>"
-        cur_style = " style='color:#a05a00;font-weight:700'" if differs else ""
+        ref_cells: list[str] = []
+        any_differs = False
+        for name, value in ref_values:
+            differs = value is not None and value != cur
+            any_differs |= differs
+            if name == "baseline" and label not in _NON_ENV_FIELDS:
+                changed += differs
+            if value is None:
+                ref_cells.append("<td><span class='muted'>n/a</span></td>")
+            elif differs:
+                ref_cells.append(f"<td><span style='color:#a05a00'>{html.escape(value)}</span></td>")
+            else:
+                ref_cells.append("<td><span class='muted'>same</span></td>")
+        cur_style = " style='color:#a05a00;font-weight:700'" if any_differs else ""
         rows.append(
             f'<tr><td class="k">{label}</td>'
             f'<td{cur_style}>{cur_text}</td>'
-            f'<td>{base_cell}</td></tr>'
+            f'{"".join(ref_cells)}</tr>'
         )
-    return "\n".join(rows), changed, has_baseline
+    return "\n".join(rows), changed, [name for name, _ in refs]
 
 
 def _mcp_banner(result: AnalysisResult) -> str:
@@ -260,7 +273,8 @@ def _render_output_quality(result: AnalysisResult, *, include_image_sample: bool
 
 def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
                          image_assets: dict[str, dict] | None = None,
-                         baseline_meta: dict | None = None, *, include_image_sample: bool = False) -> str:
+                         baseline_meta: dict | None = None, *, include_image_sample: bool = False,
+                         release_meta: dict | None = None) -> str:
     """Return a standalone HTML report for analysis-focused review.
 
     ``summary`` is the normalised daily summary dict (same shape as
@@ -290,7 +304,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         row.release_value is not None and math.isfinite(row.release_value)
         for row in all_rows
     )
-    column_count = 13 if show_release else 11
+    column_count = 10 if show_release else 8
     fluctuation_same = sum(1 for r in result.rows if r.within_fluctuation)
     # Top table counts one benchmark series as one unit, including the series
     # skipped tests would have produced.
@@ -303,8 +317,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
     elif result.baseline.status == "unavailable":
         baseline_text = f"UNAVAILABLE — {result.baseline.detail or 'daily_results query failed'}"
 
-    summary_rows, changed_fields, has_baseline_meta = _render_run_summary(
-        result, summary, baseline_meta)
+    summary_rows, changed_fields, ref_columns = _render_run_summary(
+        result, summary, baseline_meta, release_meta)
     # Without the baseline column there is nowhere else the baseline is named.
     summary_head = ""
     summary_note = ""
@@ -322,22 +336,25 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         release_row = f'<tr><td class="k">Release</td><td>{html.escape(release_text)}</td></tr>'
 
     mcp_banner = _mcp_banner(result)
-    if has_baseline_meta:
-        baseline_row = ""
+    if ref_columns:
+        head_style = "background:transparent;font-size:11px;color:#6b7280;padding:0 12px 6px 0"
+        ref_heads = ""
+        if "baseline" in ref_columns:
+            baseline_row = ""
+            ref_heads += f"<th style='{head_style}'>Baseline {html.escape(result.baseline.stamp or '')}</th>"
+            summary_note = (
+                "<div style='font-size:12px;color:#a05a00;margin-bottom:8px'>"
+                f"{changed_fields} environment field(s) differ from the baseline run.</div>"
+                if changed_fields else
+                "<div style='font-size:12px;color:#18794e;margin-bottom:8px'>"
+                "Environment matches the baseline run.</div>"
+            )
+        if "release" in ref_columns:
+            release_row = ""
+            ref_heads += (f"<th style='{head_style}'>Release {html.escape(rel.stamp or '')}"
+                          f" ({rel.matched_count} series)</th>")
         summary_head = (
-            "<tr>"
-            "<th style='background:transparent;font-size:11px;color:#6b7280;padding:0 12px 6px 0'>Field</th>"
-            "<th style='background:transparent;font-size:11px;color:#6b7280;padding:0 0 6px'>Current</th>"
-            "<th style='background:transparent;font-size:11px;color:#6b7280;padding:0 0 6px'>"
-            f"Baseline {html.escape(result.baseline.stamp or '')}</th>"
-            "</tr>"
-        )
-        summary_note = (
-            "<div style='font-size:12px;color:#a05a00;margin-bottom:8px'>"
-            f"{changed_fields} field(s) differ from the baseline run.</div>"
-            if changed_fields else
-            "<div style='font-size:12px;color:#18794e;margin-bottom:8px'>"
-            "Environment matches the baseline run.</div>"
+            f"<tr><th style='{head_style}'>Field</th><th style='{head_style}'>Current</th>{ref_heads}</tr>"
         )
 
     badges = {
@@ -346,7 +363,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         "red":    ("RED",    "#b42318"),
         "gray":   ("GRAY",   "#475467"),
     }
-    badge = badges.get(result.overall_status, (result.overall_status.upper(), "#475467"))
 
     def _status_reason(comparison: str, status: str) -> str:
         if status == "red":
@@ -372,22 +388,17 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             ("Current vs Release", "release", result.release_status or "gray"),
             ("Baseline vs Release", "baseline-release", result.baseline_release_status or "gray"),
         ])
-    status_reasons_html = "".join(
-        f'<div class="status-reason"><strong>{label}</strong>'
-        f'<span>{html.escape(_status_reason(comparison, status))}</span></div>'
-        for label, comparison, status in reason_items
-    )
-    release_status_html = "".join(
-        '<td class="comparison-status" style="border:0;padding:0 0 0 20px;vertical-align:top">'
+    status_cells_html = "".join(
+        f'<td class="comparison-status" style="border:0;padding:0 0 0 {0 if idx == 0 else 20}px;vertical-align:top">'
         f'<div class="muted" style="font-size:12px;margin-bottom:4px">{label}</div>'
         f'<span class="badge" data-comparison="{comparison}" data-status="{status}" '
         f'style="background:{badges.get(status, (str(status).upper(), "#475467"))[1]};font-size:16px;padding:6px 18px">'
-        f'{badges.get(status, (str(status).upper(), "#475467"))[0]}</span></td>'
-        for label, comparison, status in (
-            ("Current vs Release", "release", result.release_status or "gray"),
-            ("Baseline vs Release", "baseline-release", result.baseline_release_status or "gray"),
-        )
-    ) if rel is None or rel.status != "disabled" else ""
+        f'{badges.get(status, (str(status).upper(), "#475467"))[0]}</span>'
+        '<div class="status-reason" style="font-size:12px;line-height:1.4;color:#344054;'
+        'max-width:220px;margin-top:6px">'
+        f'<span>{html.escape(_status_reason(comparison, status))}</span></div></td>'
+        for idx, (label, comparison, status) in enumerate(reason_items)
+    )
 
     generated_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -400,9 +411,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         s = f"{v:.3f}"
         return f"{s} {html.escape(unit)}".strip() if unit else s
 
-    def _fmt_cv(v: float | None) -> str:
-        return "n/a" if v is None else f"{v * 100:.2f}%"
-
     def _delta_style(verdict: str, within_fluct: bool) -> str:
         if within_fluct:
             return "color:#6b7280"          # muted gray — same by fluctuation
@@ -411,15 +419,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         if verdict == "improved":
             return "color:#18794e;font-weight:700"
         return ""
-
-    def _cv_style(v: float | None) -> str:
-        if v is None:
-            return ""
-        if v > 0.10:
-            return "color:#b42318"          # >10% CV → noisy
-        if v > 0.05:
-            return "color:#a05a00"          # 5–10% → moderate
-        return "color:#18794e"              # ≤5% → stable
 
     def _fluct_badge(within: bool) -> str:
         if within:
@@ -439,10 +438,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         k = row.key
         unit = row.unit or ""
         delta_s = _delta_style(row.verdict, row.within_fluctuation)
-        cv_s = _cv_style(row.history_cv)
         fluct = _fluct_badge(row.within_fluctuation) if show_fluct else ""
         delta_style = f"text-align:right;{delta_s};white-space:nowrap" if delta_s else "text-align:right;white-space:nowrap"
-        cv_style = f"text-align:right;{cv_s};white-space:nowrap" if cv_s else "text-align:right;white-space:nowrap"
         rel_s = _release_delta_style(row.release_improvement_pct)
         rel_style = f"text-align:right;{rel_s};white-space:nowrap" if rel_s else "text-align:right;white-space:nowrap"
         release_cells = (
@@ -460,9 +457,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             f"<td class='num' style='{delta_style}'>{_fmt_pct(row.improvement_pct)}{fluct}</td>\n"
             f"{release_cells}"
             f"<td class='num' style='text-align:right'>{row.history_count}</td>\n"
-            f"<td class='num' style='text-align:right;white-space:nowrap'>{_fmt_num(row.history_sigma, unit)}</td>\n"
-            f"<td class='num' style='{cv_style}'>{_fmt_cv(row.history_cv)}</td>\n"
-            f"<td style='font-size:11px;color:#6b7280'>{html.escape(row.reference_source)}</td>\n"
             "</tr>"
         )
 
@@ -499,19 +493,12 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
                        "Informational only — it never changes the verdict"),
         ("N",          "Number of historical comparable runs (same machine / model / precision / mode) "
                        "used to build the reference distribution"),
-        ("Sigma (σ)",  "Standard deviation of historical values — larger σ means the machine is noisier "
-                       "for this series; a 1 ms delta on a series with σ=2 ms is not meaningful"),
-        ("CV",         "Coefficient of Variation = σ / mean.  ≤5% (green) = stable, "
-                       "5–10% (orange) = moderate noise, >10% (red) = high noise — be cautious with verdicts"),
-        ("Ref Source", "How the reference value was chosen: "
-                       "'baseline' = latest successful timer-scheduled run with performance data, "
-                       "'no_baseline' / 'unit_mismatch' = nothing comparable was found"),
     ]
     if not show_release:
         COL_DEFS = [(label, tip) for label, tip in COL_DEFS if label not in {"Release", "Δ Release"}]
 
     def _th(label: str, tip: str) -> str:
-        numeric_headers = {"Current", "Reference", "Delta", "Release", "Δ Release", "N", "Sigma (σ)", "CV"}
+        numeric_headers = {"Current", "Reference", "Delta", "Release", "Δ Release", "N"}
         th_class = "num-h" if label in numeric_headers else ""
         return (f"<th title='{html.escape(tip)}' "
             f"class='{th_class}' style='cursor:help;border-bottom:2px solid #bcd0f0'>{label} "
@@ -551,9 +538,6 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         .kvs-table .k {{ color: var(--muted); white-space: nowrap; width: 170px; padding-right: 12px; }}
         .muted {{ color: var(--muted); }}
         .badge {{ display: inline-block; padding: 4px 12px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; }}
-        .status-reasons {{ display: grid; grid-template-columns: repeat(var(--status-columns), minmax(0, 1fr)); gap: 16px; padding: 12px 0; margin-bottom: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }}
-        .status-reason {{ display: grid; gap: 4px; min-width: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }}
-        .status-reason strong {{ font-size: 12px; color: var(--muted); }}
         .stat-block {{ text-align: center; padding: 10px 6px; }}
         .stat-block .val {{ font-size: 28px; font-weight: 700; }}
         .stat-block .lbl {{ font-size: 11px; color: var(--muted); margin-top: 2px; }}
@@ -570,7 +554,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         @media (max-width: 640px) {{
             .report-header table, .report-header tr, .report-header td {{ display: block; width: auto; }}
             .report-header td {{ padding: 4px 0 !important; }}
-            .status-reasons {{ grid-template-columns: minmax(0, 1fr); gap: 10px; }}
+            .status-reason {{ max-width: none !important; }}
             .quality-results {{ table-layout: fixed; width: 100%; }}
             .quality-results > thead > tr > th, .quality-results > tbody > tr > td {{ overflow-wrap: anywhere; word-break: break-word; }}
             .quality-preview-table, .quality-preview-table tbody, .quality-preview-table tr {{ display: block; width: 100%; }}
@@ -591,16 +575,8 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
             <div class="muted" style="font-size:12px">Generated {generated_at}</div>
         </div>
         <table role="presentation" style="width:auto;border-collapse:collapse"><tr>
-            <td class="comparison-status" style="border:0;padding:0;vertical-align:top">
-                <div class="muted" style="font-size:12px;margin-bottom:4px">Current vs Baseline</div>
-                <span class="badge" data-comparison="baseline" data-status="{result.overall_status}" style="background:{badge[1]};font-size:16px;padding:6px 18px">{badge[0]}</span>
-            </td>
-            {release_status_html}
+            {status_cells_html}
         </tr></table>
-    </div>
-
-    <div class="status-reasons" style="--status-columns:{len(reason_items)}" aria-label="Comparison status reasons">
-        {status_reasons_html}
     </div>
 
     {mcp_banner}
@@ -695,8 +671,7 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
         <h2>Analysis Methodology</h2>
         <div style="font-size:13px;line-height:1.65;color:#374151">
             <b>Reference</b> = the latest earlier successful timer-scheduled run with performance data on the same machine, matched by model, precision, input/output tokens, and mode. Historical runs provide noise statistics; they do not replace a missing reference.<br>
-            <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.<br>
-            <b>CV</b> (Coefficient of Variation) shows how noisy each individual series is — high CV means even large deltas may not be reliable.
+            <b>Fluctuation guard</b>: if |delta| ≤ 1.5&nbsp;×&nbsp;σ the series is treated as <em>same</em> regardless of sign, because the change is within normal machine noise.
         </div>
     </div>
 
@@ -725,9 +700,11 @@ def render_analysis_html(result: AnalysisResult, summary: dict | None = None,
 def write_analysis_html(html_path: Path, result: AnalysisResult,
                         summary: dict | None = None,
                         image_assets: dict[str, dict] | None = None,
-                        baseline_meta: dict | None = None) -> Path:
+                        baseline_meta: dict | None = None,
+                        release_meta: dict | None = None) -> Path:
         """Write the analysis-focused HTML report."""
         html_path.write_text(
-            render_analysis_html(result, summary, image_assets, baseline_meta),
+            render_analysis_html(result, summary, image_assets, baseline_meta,
+                                 release_meta=release_meta),
             encoding="utf-8")
         return html_path

@@ -21,6 +21,7 @@ from analysis.remote import (
     _reference_runs_sql,
     fetch_reference,
     fetch_release,
+    fetch_run_meta,
 )
 from analysis.types import AnalysisConfig, BaselineInfo, ComparisonRow, FunctionalResult, ReleaseInfo, SeriesKey
 from common.mcp_client import McpError
@@ -317,3 +318,23 @@ def test_missing_reference_is_unavailable(
     assert performance.unavailable == 1
     assert performance.same == 0
     assert performance.compared == 0
+
+def test_fetch_run_meta_returns_rig_columns_for_run_id() -> None:
+    queries: list[str] = []
+
+    def run_sql(sql: str) -> list[dict]:
+        queries.append(sql)
+        return [{"machine": "PTLH-01", "gpu_info": "B390", "host_info": None, "unexpected": 1}]
+
+    meta = fetch_run_meta(AnalysisConfig(), "run-1", client=SimpleNamespace(run_sql=run_sql))
+
+    assert meta == {"machine": "PTLH-01", "gpu_info": "B390"}
+    assert "FROM runs WHERE run_id = 'run-1'" in queries[0]
+
+
+def test_fetch_run_meta_degrades_to_empty_on_mcp_failure() -> None:
+    def run_sql(_sql: str) -> list[dict]:
+        raise McpError("down")
+
+    assert fetch_run_meta(AnalysisConfig(), "run-1", client=SimpleNamespace(run_sql=run_sql)) == {}
+    assert fetch_run_meta(AnalysisConfig(), None) == {}
