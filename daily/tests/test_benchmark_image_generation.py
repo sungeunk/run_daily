@@ -32,10 +32,10 @@ class ImageGenCase:
 
 
 CASES: list[ImageGenCase] = [
-    # flux is insensitive to input token size, so only the first prompt is run.
+    # Models are insensitive to input token size, so only the first (32-token) prompt is run.
     ImageGenCase('flux.1-schnell',        OV_FP16_INT4_SYM_CW, prompt_index=0),
-    ImageGenCase('stable-diffusion-v1-5', FP16),
-    ImageGenCase('stable-diffusion-3.5-large-turbo', OV_FP16_4BIT_DEFAULT),
+    ImageGenCase('stable-diffusion-v1-5', FP16,                prompt_index=0),
+    ImageGenCase('stable-diffusion-3.5-large-turbo', OV_FP16_4BIT_DEFAULT, prompt_index=0),
 ]
 
 
