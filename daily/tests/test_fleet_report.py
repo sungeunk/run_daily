@@ -77,6 +77,30 @@ def test_fleet_links_normalize_retired_daily_route() -> None:
     assert f'href="{fallback}"' in fallback_html
 
 
+@pytest.mark.parametrize(
+    ("status", "description"),
+    [
+        ("yellow", "Performance regressions detected."),
+        ("green", "All expected machines completed; no failures or performance regressions."),
+        ("red", "One or more machines failed."),
+        ("incomplete", "Results are missing for some machines."),
+    ],
+)
+def test_render_fleet_html_explains_status(status: str, description: str) -> None:
+    rendered = render_fleet_html({"summary": {"status": status}}, "http://viewer.local")
+
+    assert f'</h1>\n<div style="font-size:13px;color:#4b5563;margin:0 0 8px">{description}</div>' in rendered
+
+
+def test_render_fleet_html_explains_missing_machine_count() -> None:
+    rendered = render_fleet_html(
+        {"summary": {"status": "incomplete", "expected_machines": 9, "completed_machines": 8}},
+        "http://viewer.local",
+    )
+
+    assert "Results are missing for 1 of 9 machines." in rendered
+
+
 def test_render_fleet_html_is_compact_and_links_failed_run() -> None:
     digest = {
         "selection": {

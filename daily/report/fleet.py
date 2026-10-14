@@ -293,6 +293,17 @@ def render_fleet_html(digest: Mapping[str, Any], viewer_base_url: str,
         for row in regressions if isinstance(row, Mapping)
     ]
     status = str(summary.get("status") or "unknown")
+    status_description = {
+        "yellow": "Performance regressions detected.",
+        "green": "All expected machines completed; no failures or performance regressions.",
+        "red": "One or more machines failed.",
+        "incomplete": "Results are missing for some machines.",
+    }.get(status.lower(), "Fleet status is unavailable.")
+    if status.lower() == "incomplete":
+        expected = summary.get("expected_machines")
+        completed = summary.get("completed_machines")
+        if isinstance(expected, int) and isinstance(completed, int) and 0 <= completed < expected:
+            status_description = f"Results are missing for {expected - completed} of {expected} machines."
     warning_html = "".join(f"<li>{_text(item)}</li>" for item in warnings)
     issue_section = ""
     if issues:
@@ -320,6 +331,7 @@ th{{background:#f3f4f6}}th[data-sort-type]{{cursor:pointer;text-decoration:under
 .summary{{margin:10px 0 18px;color:#4b5563}}
 </style></head><body>
 <h1>{_text(title)} {_status_dot(status)}</h1>
+<div style="font-size:13px;color:#4b5563;margin:0 0 8px">{_text(status_description)}</div>
 <div class="summary"><a href="{_text(viewer_base_url)}" style="color:#075985">Daily Viewer</a></div>
 <div class="summary">Build: <strong>{_text(selection.get("ov_build"))}</strong> ·
 Completed: <strong>{_text(summary.get("completed_machines"))}/{_text(summary.get("expected_machines"))}</strong> ·
