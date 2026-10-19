@@ -16,8 +16,12 @@ theme:
   features:
     - navigation.sections
     - navigation.top
+    - toc.integrate
     - search.highlight
     - search.share
+
+extra_css:
+  - stylesheets/extra.css
 
 plugins:
   - search
