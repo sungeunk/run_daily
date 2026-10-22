@@ -70,6 +70,7 @@ try:
     from bs4 import BeautifulSoup
     from functools import total_ordering
     from pathlib import Path
+    from urllib.parse import urlparse
     from tabulate import tabulate
     from tqdm import tqdm
 
@@ -126,8 +127,11 @@ _ROOT_HTML_CACHE_FILENAME = "ROOT_HTML_CACHE.json"
 _CACHE_VERSION = "2"
 _DEFAULT_NO_PROXY_LIST = (
     "localhost,intel.com,192.168.0.0/16,"
-    "172.16.0.0/12,127.0.0.0/8,10.0.0.0/8"
+    "172.16.0.0/12,127.0.0.0/8,10.0.0.0/8,"
+    "ov-share-01.iotg.sclab.intel.com,ov-share-03.iotg.sclab.intel.com"
 )
+_DOWNLOAD_ATTEMPTS = 3
+_DOWNLOAD_STALL_TIMEOUT_SEC = 30
 _COMMIT_URL_POSITIVE_TTL = datetime.timedelta(days=30)
 _COMMIT_URL_NEGATIVE_TTL = datetime.timedelta(hours=6)
 _PACKAGE_CHECK_POSITIVE_TTL = datetime.timedelta(days=7)
@@ -169,6 +173,7 @@ def required_openvino_packages_list() -> list[str]:
         "core_dev.zip",
         "cpp_samples.zip",
         "cpu.zip",
+        "gguf.zip",
         "gpu.zip",
         "ir.zip",
         "onnx.zip",
@@ -184,6 +189,15 @@ def required_openvino_packages_list() -> list[str]:
         "tensorflow.zip",
         "tensorflow_lite.zip",
     ]
+
+
+# GenAI links openvino_gguf_frontend.dll from late 2026.5 builds, but older builds do not publish gguf.zip.
+_OPTIONAL_OPENVINO_PACKAGES = frozenset({"gguf.zip"})
+
+
+def is_optional_openvino_package(package_name: str) -> bool:
+    """Return True for packages fetched only when the build publishes them."""
+    return package_name.startswith("pyopenvino_python3.") or package_name in _OPTIONAL_OPENVINO_PACKAGES
 
 
 def required_genai_packages_list() -> list[str]:
@@ -209,10 +223,44 @@ def required_genai_packages_list() -> list[str]:
 # enable certificate validation for environments with a trusted CA.
 _VERIFY_SSL: bool = False
 
-# Each file is tried once plus two retries on size mismatch or transfer error.
-_DOWNLOAD_ATTEMPTS = 3
-# A transfer is aborted only when no data arrives for this long (no total limit).
-_DOWNLOAD_STALL_TIMEOUT_SEC = 30
+# Download backend controlled by the --downloader CLI argument.
+# "auto" uses aria2c when it is on PATH and falls back to aiohttp otherwise.
+_DOWNLOADER: str = "auto"
+_NO_PROXY: bool = False
+
+
+def _proxy_bypass_list(url_list: list[str] | None = None) -> str:
+    """Preserve user exclusions and add exact internal hosts for aria2c."""
+    entries = ",".join(
+        (os.environ.get("no_proxy", ""), os.environ.get("NO_PROXY", ""), _DEFAULT_NO_PROXY_LIST)
+    ).split(",")
+    entries = [entry.strip() for entry in entries if entry.strip()]
+    if "*" in entries:
+        return "*"
+    for url in url_list or []:
+        host = urlparse(url).hostname
+        if host and (host == "intel.com" or host.endswith(".intel.com")):
+            entries.append(host)
+    unique: dict[str, str] = {}
+    for entry in entries:
+        entry = entry.strip()
+        if entry:
+            unique.setdefault(entry.lower(), entry)
+    return ",".join(unique.values())
+
+
+def _configure_proxy(no_proxy: bool) -> None:
+    """Configure process-local bypass rules before making network requests."""
+    global _NO_PROXY
+    _NO_PROXY = no_proxy
+    bypass = "*" if no_proxy else _proxy_bypass_list()
+    os.environ["no_proxy"] = bypass
+    os.environ["NO_PROXY"] = bypass
+
+
+def _request_proxies() -> dict[str, str]:
+    """Disable proxy discovery explicitly without disabling CA or netrc settings."""
+    return {"http": "", "https": "", "all": ""} if _NO_PROXY else {}
 
 
 def get_text_from_web(url: str) -> str:
@@ -245,7 +293,7 @@ def get_text_from_web(url: str) -> str:
 
     # Fetch from network
     try:
-        res = requests.get(url, verify=_VERIFY_SSL, timeout=30)
+        res = requests.get(url, verify=_VERIFY_SSL, timeout=30, proxies=_request_proxies())
         if res.ok:
             text = res.text
             _TEXT_CACHE[url] = text
@@ -278,6 +326,7 @@ def download_file(url: str, out_path: Path) -> Path | None:
             res = requests.get(
                 url, stream=True, verify=_VERIFY_SSL,
                 timeout=(30, _DOWNLOAD_STALL_TIMEOUT_SEC),
+                proxies=_request_proxies(),
             )
             if not res.ok:
                 log.error("HTTP %s %s — %s", res.status_code, res.reason, url)
@@ -345,13 +394,91 @@ async def _async_download_one(
         return None
 
 
+def _aria2c_download_files(
+    aria2c: str, url_list: list[str], out_path: Path
+) -> list[Path]:
+    """
+    Download *url_list* with aria2c (5 files in parallel, up to 8 connections
+    per file). Returns a list of successfully downloaded file Paths.
+    """
+    out_path.mkdir(parents=True, exist_ok=True)
+    targets = {url: out_path / Path(url).name for url in url_list}
+    for filepath in targets.values():
+        # Stale partial files would make aria2c resume or rename; start clean.
+        filepath.unlink(missing_ok=True)
+        Path(f"{filepath}.aria2").unlink(missing_ok=True)
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".txt", delete=False, encoding="utf-8"
+    ) as fh:
+        for url, filepath in targets.items():
+            fh.write(f"{url}\n  out={filepath.name}\n")
+        input_file = fh.name
+
+    cmd = [
+        aria2c,
+        f"--input-file={input_file}",
+        f"--dir={out_path}",
+        "--max-concurrent-downloads=5",
+        "--split=8",
+        "--max-connection-per-server=8",
+        "--min-split-size=1M",
+        "--file-allocation=none",
+        "--auto-file-renaming=false",
+        "--allow-overwrite=true",
+        "--continue=false",
+        "--max-tries=3",
+        "--retry-wait=2",
+        "--connect-timeout=30",
+        "--summary-interval=0",
+        "--console-log-level=error",
+        "--download-result=hide",
+    ]
+    if not _VERIFY_SSL:
+        cmd.append("--check-certificate=false")
+
+    cmd.append(f"--no-proxy={'*' if _NO_PROXY else _proxy_bypass_list(url_list)}")
+    env = os.environ.copy()
+    if _NO_PROXY:
+        for name in list(env):
+            if name.lower() in ("http_proxy", "https_proxy", "ftp_proxy", "all_proxy"):
+                del env[name]
+        cmd.extend(f"--{scheme}-proxy=" for scheme in ("all", "http", "https", "ftp"))
+
+    try:
+        # Non-zero exit just means some URLs failed; check files individually.
+        subprocess.run(cmd, check=False, env=env)
+    finally:
+        Path(input_file).unlink(missing_ok=True)
+
+    downloaded: list[Path] = []
+    for url, filepath in targets.items():
+        if filepath.is_file() and not Path(f"{filepath}.aria2").exists():
+            downloaded.append(filepath.resolve())
+        else:
+            log.error("aria2c download failed for %s", url)
+    return downloaded
+
+
 async def async_download_files(url_list: list[str], out_path: Path) -> list[Path]:
     """
     Download *url_list* concurrently (max 5 at once) into *out_path*.
 
-    Returns the downloaded file Paths. Raises RuntimeError when any file fails,
-    so a partially downloaded package is never treated as complete.
+    Uses aria2c when selected/available (see --downloader), otherwise aiohttp.
+    Returns a list of successfully downloaded file Paths.
     """
+    if _DOWNLOADER in ("auto", "aria2c"):
+        aria2c = shutil.which("aria2c")
+        if aria2c:
+            log.info("Downloading %d file(s) with aria2c …", len(url_list))
+            return await asyncio.to_thread(
+                _aria2c_download_files, aria2c, url_list, out_path
+            )
+        if _DOWNLOADER == "aria2c":
+            log.error("--downloader aria2c requested but aria2c is not on PATH.")
+            return []
+        log.info("aria2c not found on PATH; falling back to aiohttp.")
+
     semaphore = asyncio.Semaphore(5)
     # No total limit (large archives on slow links); abort only on a stalled transfer.
     timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=_DOWNLOAD_STALL_TIMEOUT_SEC)
@@ -622,7 +749,7 @@ def check_required_packages(url: str, strict: bool = False) -> bool:
     required_ov_packages = [
         package_name
         for package_name in required_openvino_packages_list()
-        if not package_name.startswith("pyopenvino_python3.")
+        if not is_optional_openvino_package(package_name)
     ]
     missing_ov_packages = [
         package_name
@@ -904,6 +1031,7 @@ def get_pr_head_commit(pr_number: int) -> str | None:
             api_url,
             headers=_github_api_headers(),
             timeout=15,
+            proxies=_request_proxies(),
         )
         res.raise_for_status()
         data = res.json()
@@ -954,6 +1082,7 @@ def get_latest_commit_list_from_github(per_page: int = 40) -> list[str]:
             headers=_github_api_headers(),
             params={"sha": "master", "per_page": per_page},
             timeout=15,
+            proxies=_request_proxies(),
         )
         res.raise_for_status()
         return [c["sha"] for c in res.json()]
@@ -1825,8 +1954,8 @@ def download_openvino_packages(url: str, out_path: Path) -> tuple[list[Path], Pa
     urls = [
         f"{url}/{prefix}-{pkg}"
         for pkg in required_openvino_packages_list()
-        # Python-version archives vary per build; fetch only the published ones.
-        if not pkg.startswith("pyopenvino_python3.") or f"{prefix}-{pkg}" in text
+        # Optional archives vary per build; fetch only the published ones.
+        if not is_optional_openvino_package(pkg) or f"{prefix}-{pkg}" in text
     ]
 
     downloaded = asyncio.run(async_download_files(urls, versioned_dir))
@@ -1859,7 +1988,13 @@ def missing_device_plugins(versioned_dir: Path) -> list[str]:
     else:
         lib_dir = versioned_dir / "runtime" / "lib" / "intel64"
         names = [f"libopenvino_intel_{dev}_plugin.so" for dev in ("cpu", "gpu")]
-    return [name for name in names if not (lib_dir / name).is_file()]
+    missing = [name for name in names if not (lib_dir / name).is_file()]
+    # core_dev ships the gguf headers; without gguf.zip the runtime library that GenAI links is absent.
+    if (versioned_dir / "runtime" / "include" / "openvino" / "frontend" / "gguf").is_dir():
+        gguf_pattern = "openvino_gguf_frontend.dll" if IS_WINDOWS else "libopenvino_gguf_frontend.so.*"
+        if not any(path.is_file() for path in lib_dir.glob(gguf_pattern)):
+            missing.append(gguf_pattern)
+    return missing
 
 
 def has_existing_prebuilt(versioned_dir: Path) -> bool:
@@ -2159,7 +2294,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-proxy", "--no_proxy",
         dest="no_proxy",
         action="store_true",
-        help="Accepted for compatibility; internal servers always bypass the proxy.",
+        help=(
+            "Connect directly for all requests and downloads, including external URLs. "
+            "By default, only internal servers and NO_PROXY exclusions bypass proxies."
+        ),
     )
     parser.add_argument(
         "--strict-branch",
@@ -2189,6 +2327,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Enable SSL certificate verification. Disabled by default "
             "because Intel's internal build servers use self-signed certs."
+        ),
+    )
+    parser.add_argument(
+        "--downloader",
+        choices=("auto", "aria2c", "aiohttp"),
+        default="auto",
+        help=(
+            "Package download backend. 'auto' (default) uses aria2c "
+            "(multi-connection) when on PATH, otherwise aiohttp."
         ),
     )
     parser.add_argument(
@@ -2284,15 +2431,14 @@ def main() -> None:
     args = parser.parse_args()
 
     # Apply SSL and proxy settings before any network operations.
-    global _VERIFY_SSL  # noqa: PLW0603
+    global _VERIFY_SSL, _DOWNLOADER  # noqa: PLW0603
     _VERIFY_SSL = args.verify_ssl
+    _DOWNLOADER = args.downloader
     if not _VERIFY_SSL:
         import urllib3  # suppress InsecureRequestWarning for internal servers
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    # Always bypass proxy for internal build servers.
-    os.environ["no_proxy"] = _DEFAULT_NO_PROXY_LIST
-    os.environ["NO_PROXY"] = _DEFAULT_NO_PROXY_LIST
+    _configure_proxy(args.no_proxy)
 
     # ------------------------------------------------------------------ #
     # Mode 0: Show manifest                                                #
